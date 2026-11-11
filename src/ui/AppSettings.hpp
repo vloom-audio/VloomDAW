@@ -3,6 +3,7 @@
 #pragma once
 
 #include "core/AudioFormat.hpp"
+#include "core/ThemePresets.hpp"
 
 #include <QString>
 #include <QStringList>
@@ -27,6 +28,9 @@ struct AppSettings {
     // General
     PositionMode startPositionMode = PositionMode::BarsBeats;
     bool metronomeOnStartup = true;
+
+    // Theme: preset ids, tuning knobs and per-role colours (core/ThemePresets)
+    ThemeChoice theme;
 
     /// Reads the saved values; anything missing or invalid gets its default.
     [[nodiscard]] static AppSettings load();

@@ -6,6 +6,7 @@
 #include <QWidget>
 
 class QAction;
+class QLabel;
 class QToolButton;
 class QVBoxLayout;
 
@@ -33,12 +34,19 @@ public slots:
     /// Opens page `index` (-1 closes). Does not emit currentChanged().
     void setCurrent(int index);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 signals:
     /// The user opened page `index`, or closed the panel (-1).
     void currentChanged(int index);
 
 private:
     void syncButtons();
+    void watchButton(QToolButton* button);
+    void showHoverLabel(QToolButton* button);
+
+    QLabel* hoverLabel_ = nullptr; ///< name of the hovered icon
 
     QVBoxLayout* top_ = nullptr;
     QVBoxLayout* bottom_ = nullptr;

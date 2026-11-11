@@ -23,8 +23,9 @@ public:
     /// The setters below never emit signals.
     void setDevices(const QStringList& names, int currentIndex);
     void setFormat(int sampleRate, int bufferFrames);
-    /// What the device is actually running at, e.g. "Running at 48000 Hz".
-    void setStatus(const QString& text);
+    /// What the device is actually doing, e.g. "Running at 48000 Hz", and
+    /// whether it runs (colours the status pill).
+    void setStatus(const QString& text, bool running);
 
 signals:
     void deviceSelected(int index);
