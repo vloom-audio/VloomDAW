@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # Must match required_version in scripts/format.sh.
+      - name: Install clang-format
+        run: |
+          python3 -m venv "$RUNNER_TEMP/clang-format"
+          "$RUNNER_TEMP/clang-format/bin/pip" install --disable-pip-version-check clang-format==23.1.3
+          echo "CLANG_FORMAT=$RUNNER_TEMP/clang-format/bin/clang-format" >> "$GITHUB_ENV"
+      - run: scripts/format.sh --check
+
+  commit-messages:
+    name: commit messages
+    # Every commit in a pull request must be "<gitmoji> <type>(<scope>): <subject>".
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: scripts/check_commit_messages.sh "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout VloomDAW
+        uses: actions/checkout@v4
+        with:
+          path: VloomDAW
+
+      # Same layout developers use: the engine sits next to the app.
+      - name: Checkout vloom-engine
+        uses: actions/checkout@v4
+        with:
+          repository: vloom-audio/vloom-engine
+          path: vloom-engine
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          # Pinned. Qt 6.8 links the AGL framework, which the macOS 26 SDK no
+          # longer has; aqt (used by this action) cannot install Qt >= 6.11 on
+          # Windows yet. 6.10.3 works on all three runners.
+          version: '6.10.3'
+          cache: true
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev
+
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('VloomDAW/cmake/Dependencies.cmake', 'VloomDAW/tests/CMakeLists.txt', 'vloom-engine/cmake/Dependencies.cmake') }}
+
+      - name: Configure
+        working-directory: VloomDAW
+        run: cmake --preset dev -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT_DIR }}"
+
+      - name: Build
+        working-directory: VloomDAW
+        run: cmake --build --preset dev --parallel
+
+      - name: Test
+        working-directory: VloomDAW
+        run: ctest --preset dev

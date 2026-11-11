@@ -1,0 +1,53 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_PREFIX_PATH": "$env{QT_DIR}"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Debug app + tests",
+      "description": "Set QT_DIR to your Qt install, e.g. ~/Qt/6.8.3/macos or $(brew --prefix qt)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VLOOM_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release app",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VLOOMDAW_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "core",
+      "displayName": "Core + tests only (no Qt needed)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VLOOMDAW_BUILD_APP": "OFF",
+        "VLOOM_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release", "configuration": "Release" },
+    { "name": "core", "configurePreset": "core" }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "core", "configurePreset": "core", "output": { "outputOnFailure": true } }
+  ]
+}
