@@ -12,9 +12,18 @@ target_sources(vloomdaw_core PRIVATE
     # core — pure logic: formatting, (later) project model, commands, undo
     core/AudioFormat.cpp
     core/BrowserFilter.cpp
+    core/Decibels.cpp
     core/DeviceRef.cpp
+    core/FrameStats.cpp
+    core/MixerModel.cpp
+    core/NoteNames.cpp
+    core/PluginScanner.cpp
     core/PositionFormat.cpp
+    core/ProcessMemory.cpp
+    core/Project.cpp
+    core/Scales.cpp
     core/TapTempo.cpp
+    core/ThemePresets.cpp
 
     # audio — owns the engine and the hardware device
     audio/AudioController.cpp)
