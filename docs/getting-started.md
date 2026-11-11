@@ -5,7 +5,7 @@
 | OS | Compiler & CMake | Qt 6.5+ |
 |---|---|---|
 | macOS | `xcode-select --install` · `brew install cmake ninja pipx` | `brew install qt` → `export QT_DIR=$(brew --prefix qt)` |
-| Windows | Visual Studio 2022 (*Desktop development with C++*) + CMake | [Qt online installer](https://www.qt.io/download-qt-installer-oss), component *MSVC 2022 64-bit* → `set QT_DIR=C:\Qt\6.8.3\msvc2022_64` |
+| Windows | Visual Studio 2022 (*Desktop development with C++*) + CMake | [Qt online installer](https://www.qt.io/download-qt-installer-oss), component *MSVC 2022 64-bit* → `set QT_DIR=C:\Qt\6.11.3\msvc2022_64` |
 | Ubuntu / Debian | `sudo apt install build-essential cmake ninja-build pipx libasound2-dev` | `sudo apt install qt6-base-dev qt6-svg-dev libgl1-mesa-dev` (QT_DIR not needed) |
 
 Put the `QT_DIR` line in your shell profile so every terminal has it.
