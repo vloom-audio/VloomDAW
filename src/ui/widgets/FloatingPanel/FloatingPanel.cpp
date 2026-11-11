@@ -51,20 +51,26 @@ void FloatingPanel::host(QWidget* content, const std::function<void(QWidget*)>& 
     content_ = content;
     layout()->addWidget(content_);
     content_->show();
+#if defined(Q_OS_WIN)
     if (windowButtons_ != nullptr && addToHeader) {
         addToHeader(windowButtons_);
         windowButtons_->show();
     }
+#else
+    Q_UNUSED(addToHeader) // the native title bar keeps its own buttons
+#endif
 }
 
 QWidget* FloatingPanel::release()
 {
     QWidget* content = content_;
+#if defined(Q_OS_WIN)
     if (windowButtons_ != nullptr) {
         // Out of the content's header before it goes back to the main window.
         windowButtons_->hide();
         windowButtons_->setParent(this);
     }
+#endif
     if (content != nullptr) {
         layout()->removeWidget(content);
         content->setParent(nullptr);
