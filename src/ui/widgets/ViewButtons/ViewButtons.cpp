@@ -19,13 +19,14 @@ ViewButtons::ViewButtons(QSize iconSize, QWidget* parent)
     setObjectName(QStringLiteral("viewButtons"));
 
     // FL Studio's keys for its windows.
-    QAction* playlist
-        = makeViewAction(QStringLiteral("playlist"), tr("Playlist"), QKeySequence(Qt::Key_F5), View::Playlist);
+    QAction* playlist = makeViewAction(
+        QStringLiteral("playlist"), tr("Playlist"), QKeySequence(Qt::Key_F5), View::Playlist);
     QAction* channelRack = makeViewAction(
         QStringLiteral("channel-rack"), tr("Channel rack"), QKeySequence(Qt::Key_F6), View::ChannelRack);
-    QAction* pianoRoll
-        = makeViewAction(QStringLiteral("piano-roll"), tr("Piano roll"), QKeySequence(Qt::Key_F7), View::PianoRoll);
-    QAction* mixer = makeViewAction(QStringLiteral("mixer"), tr("Mixer"), QKeySequence(Qt::Key_F9), View::Mixer);
+    QAction* pianoRoll = makeViewAction(
+        QStringLiteral("piano-roll"), tr("Piano roll"), QKeySequence(Qt::Key_F7), View::PianoRoll);
+    QAction* mixer
+        = makeViewAction(QStringLiteral("mixer"), tr("Mixer"), QKeySequence(Qt::Key_F9), View::Mixer);
     QAction* browser = makeViewAction(
         QStringLiteral("folder"), tr("Browser"), QKeySequence(Qt::ALT | Qt::Key_F8), View::Browser);
 

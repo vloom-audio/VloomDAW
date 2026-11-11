@@ -47,7 +47,8 @@ PatternSelector::PatternSelector(QSize iconSize, QWidget* parent)
     button_->setFocusPolicy(Qt::NoFocus);
     button_->setToolTip(tr("Current pattern"));
     // Wide enough for "Pattern 999", so the bar does not shift as numbers grow.
-    button_->setMinimumWidth(QFontMetrics(button_->font()).horizontalAdvance(tr("Pattern %1").arg(kMaxPatterns)) + 34);
+    button_->setMinimumWidth(
+        QFontMetrics(button_->font()).horizontalAdvance(tr("Pattern %1").arg(kMaxPatterns)) + 34);
     layout->addWidget(button_);
 
     const auto addIconButton = [&](const QString& icon, const QString& tip, auto slot) {
@@ -62,8 +63,8 @@ PatternSelector::PatternSelector(QSize iconSize, QWidget* parent)
         return b;
     };
     addIconButton(QStringLiteral("plus"), tr("Add a pattern"), &PatternSelector::addPattern);
-    deleteButton_ = addIconButton(QStringLiteral("minus"), tr("Delete the current pattern"),
-        &PatternSelector::deleteCurrentPattern);
+    deleteButton_ = addIconButton(
+        QStringLiteral("minus"), tr("Delete the current pattern"), &PatternSelector::deleteCurrentPattern);
 
     appendAction(1);
     sync();

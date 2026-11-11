@@ -64,8 +64,8 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(2);
     for (std::size_t i = 1; i <= insertCount; ++i) {
-        auto* strip = new MixerStrip(
-            MixerStrip::Kind::Insert, tr("Insert %1").arg(i), QString::number(i), inserts);
+        auto* strip
+            = new MixerStrip(MixerStrip::Kind::Insert, tr("Insert %1").arg(i), QString::number(i), inserts);
         connectStrip(strip, i);
         strips_.append(strip);
         row->addWidget(strip);

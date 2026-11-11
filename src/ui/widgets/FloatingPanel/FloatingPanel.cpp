@@ -133,7 +133,8 @@ void FloatingPanel::paintEvent(QPaintEvent* event)
 bool FloatingPanel::nativeEvent(const QByteArray& eventType, void* message, qintptr* result)
 {
     if (eventType == "windows_generic_MSG"
-        && handleWindowsTitleBarMessage(this, message, result, [this](QPoint pos) { return isCaptionAt(pos); }))
+        && handleWindowsTitleBarMessage(
+            this, message, result, [this](QPoint pos) { return isCaptionAt(pos); }))
         return true;
     return QWidget::nativeEvent(eventType, message, result);
 }

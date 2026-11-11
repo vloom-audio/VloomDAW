@@ -48,8 +48,8 @@ AudioSettingsPage::AudioSettingsPage(QWidget* parent)
     status_->setAlignment(Qt::AlignCenter);
 
     auto* output = new SettingsCard(tr("Output"), this);
-    output->addRow(tr("Device"), tr("Where VloomDAW plays. Also in the status bar: click the device name."),
-        devices_);
+    output->addRow(
+        tr("Device"), tr("Where VloomDAW plays. Also in the status bar: click the device name."), devices_);
     output->addRow(tr("Status"), QString(), status_);
 
     auto* format = new SettingsCard(tr("Format"), this);
@@ -91,7 +91,8 @@ void AudioSettingsPage::showLatency()
 {
     const double ms = bufferLatencyMs(bufferSize_->currentData().toInt(), sampleRate_->currentData().toInt());
     latency_->setText(
-        tr("%1 ms of delay per buffer: smaller reacts faster, larger is safer against crackles.").arg(ms, 0, 'f', 1));
+        tr("%1 ms of delay per buffer: smaller reacts faster, larger is safer against crackles.")
+            .arg(ms, 0, 'f', 1));
     latency_->show();
 }
 

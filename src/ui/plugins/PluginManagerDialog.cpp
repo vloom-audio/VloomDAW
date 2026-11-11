@@ -25,7 +25,10 @@ namespace {
 
 constexpr int kExtraRole = Qt::UserRole; ///< index into extraFolders, -1 for a default folder
 
-QString pathText(const std::filesystem::path& p) { return QDir::toNativeSeparators(QString::fromStdWString(p.wstring())); }
+QString pathText(const std::filesystem::path& p)
+{
+    return QDir::toNativeSeparators(QString::fromStdWString(p.wstring()));
+}
 
 } // namespace
 
@@ -57,8 +60,8 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
     folders_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     connect(folders_, &QTreeWidget::itemSelectionChanged, this, [this] {
         const auto selected = folders_->selectedItems();
-        removeButton_->setEnabled(!selected.isEmpty() && selected.constFirst()->data(0, kExtraRole).toInt() >= 0
-            && scanThread_ == nullptr);
+        removeButton_->setEnabled(!selected.isEmpty()
+            && selected.constFirst()->data(0, kExtraRole).toInt() >= 0 && scanThread_ == nullptr);
     });
 
     addButton_ = new QPushButton(tr("Add Folder"), this);
@@ -134,8 +137,9 @@ void PluginManagerDialog::listFolders()
         item->setToolTip(1, item->text(1));
         std::error_code ec;
         const bool exists = std::filesystem::is_directory(folder.path, ec);
-        item->setText(2, extraIndex < 0 ? (exists ? tr("Default") : tr("Default, missing"))
-                                        : (exists ? tr("Added") : tr("Missing")));
+        item->setText(2,
+            extraIndex < 0 ? (exists ? tr("Default") : tr("Default, missing"))
+                           : (exists ? tr("Added") : tr("Missing")));
         item->setData(0, kExtraRole, extraIndex);
         if (!exists)
             item->setForeground(1, palette().color(QPalette::PlaceholderText));
@@ -184,7 +188,8 @@ void PluginManagerDialog::startScan()
     // The worker gets its own copy of the folders and writes only `found`,
     // which the GUI thread reads after the thread has finished.
     auto found = std::make_shared<std::vector<PluginInfo>>();
-    scanThread_ = QThread::create([folders = store_.scanFolders(), found] { *found = scanPluginFolders(folders); });
+    scanThread_
+        = QThread::create([folders = store_.scanFolders(), found] { *found = scanPluginFolders(folders); });
     connect(scanThread_, &QThread::finished, this, [this, found] {
         scanThread_->deleteLater();
         scanThread_ = nullptr;
@@ -224,9 +229,9 @@ void PluginManagerDialog::showResult()
     const int clap = static_cast<int>(store_.plugins.size()) - vst3;
     result_->setText(tr("Last scan %1: %n plugin(s) found (%2 VST3, %3 CLAP).", nullptr,
         static_cast<int>(store_.plugins.size()))
-                         .arg(QLocale().toString(store_.lastScan.toLocalTime(), QLocale::ShortFormat))
-                         .arg(vst3)
-                         .arg(clap));
+            .arg(QLocale().toString(store_.lastScan.toLocalTime(), QLocale::ShortFormat))
+            .arg(vst3)
+            .arg(clap));
 }
 
 } // namespace vloomdaw

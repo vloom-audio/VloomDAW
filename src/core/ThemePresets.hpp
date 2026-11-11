@@ -105,8 +105,8 @@ struct ThemeChoice {
 
 /// Applies `adjustments` to `palette`'s surfaces and text, then the overrides.
 /// Values out of range are clamped; NaN counts as the default.
-[[nodiscard]] ResolvedTheme resolveTheme(
-    const PaletteSpec& palette, const AccentSpec& accent, ThemeAdjustments adjustments, const ThemeOverrides& overrides);
+[[nodiscard]] ResolvedTheme resolveTheme(const PaletteSpec& palette, const AccentSpec& accent,
+    ThemeAdjustments adjustments, const ThemeOverrides& overrides);
 
 /// True when body or secondary text, or the LCD digits, fall below WCAG AA
 /// (4.5 : 1) on their background: worth a warning in the theme editor.

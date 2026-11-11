@@ -126,7 +126,8 @@ TEST_CASE("Out-of-range and NaN tuning is clamped", "[theme]")
     wild.brightness = 99.0;
     ThemeAdjustments capped;
     capped.brightness = 0.3;
-    CHECK(resolveTheme(p, accents().front(), wild, {}).window == resolveTheme(p, accents().front(), capped, {}).window);
+    CHECK(resolveTheme(p, accents().front(), wild, {}).window
+        == resolveTheme(p, accents().front(), capped, {}).window);
     ThemeAdjustments nan;
     nan.contrast = std::numeric_limits<double>::quiet_NaN();
     CHECK(resolveTheme(p, accents().front(), nan, {}).window == p.window);

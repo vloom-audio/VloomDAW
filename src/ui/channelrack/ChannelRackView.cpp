@@ -75,7 +75,10 @@ void ChannelRackView::refresh()
     update();
 }
 
-std::size_t ChannelRackView::channelCount() const { return project_ != nullptr ? project_->channels().size() : 0; }
+std::size_t ChannelRackView::channelCount() const
+{
+    return project_ != nullptr ? project_->channels().size() : 0;
+}
 
 QSize ChannelRackView::sizeHint() const
 {
@@ -131,7 +134,8 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
         p.drawRoundedRect(QRectF(nameRect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
         p.setPen(channel.muted ? c.textDim : c.text);
         p.drawText(nameRect.adjusted(8, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft,
-            QFontMetrics(font()).elidedText(QString::fromStdString(channel.name), Qt::ElideRight, nameRect.width() - 14));
+            QFontMetrics(font()).elidedText(
+                QString::fromStdString(channel.name), Qt::ElideRight, nameRect.width() - 14));
 
         // Step pads: alternate groups of four are shaded differently.
         for (int s = 0; s < kStepsPerBar; ++s) {

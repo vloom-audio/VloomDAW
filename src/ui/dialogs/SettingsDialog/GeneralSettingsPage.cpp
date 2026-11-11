@@ -26,9 +26,10 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
 
     auto* startup = new SettingsCard(tr("When VloomDAW starts"), this);
     startup->addRow(tr("Position display"),
-        tr("What the song position LCD shows first. Click the display to switch while you work."), positionMode_);
-    startup->addRow(tr("Metronome"), tr("Start with the metronome clicking on every beat (Ctrl+M toggles it)."),
-        metronome_);
+        tr("What the song position LCD shows first. Click the display to switch while you work."),
+        positionMode_);
+    startup->addRow(tr("Metronome"),
+        tr("Start with the metronome clicking on every beat (Ctrl+M toggles it)."), metronome_);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);

@@ -37,6 +37,7 @@ struct PluginFolder {
 /// Unreadable folders are skipped, symbolic links are not followed, and the
 /// search stops `maxDepth` levels down. Sorted by name, then format; a path
 /// reachable from two folders is listed once.
-[[nodiscard]] std::vector<PluginInfo> scanPluginFolders(const std::vector<PluginFolder>& folders, int maxDepth = 8);
+[[nodiscard]] std::vector<PluginInfo> scanPluginFolders(
+    const std::vector<PluginFolder>& folders, int maxDepth = 8);
 
 } // namespace vloomdaw

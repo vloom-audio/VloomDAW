@@ -49,14 +49,16 @@ TEST_CASE("Plugin files and bundles are found, other files are not", "[plugins]"
 {
     TempFolder vst3;
     vst3.touch("Vital.vst3"); // single-file plugin
-    vst3.touch("Vendor/Surge XT.vst3/Contents/x86_64-win/Surge XT.vst3"); // bundle with a same-named file inside
+    vst3.touch(
+        "Vendor/Surge XT.vst3/Contents/x86_64-win/Surge XT.vst3"); // bundle with a same-named file inside
     vst3.touch("Readme.txt");
     vst3.touch("Other.clap"); // wrong format for this folder
     TempFolder clap;
     clap.touch("Vital.clap");
     clap.touch("Deep/Nested/Synth.CLAP"); // upper-case extension
 
-    const auto plugins = scanPluginFolders({{PluginFormat::Vst3, vst3.path}, {PluginFormat::Clap, clap.path}});
+    const auto plugins
+        = scanPluginFolders({{PluginFormat::Vst3, vst3.path}, {PluginFormat::Clap, clap.path}});
 
     CHECK(names(plugins) == std::vector<std::string>{"Surge XT", "Synth", "Vital", "Vital"});
     // Same name: VST3 sorts before CLAP.
@@ -79,14 +81,16 @@ TEST_CASE("Search depth is limited", "[plugins]")
     TempFolder folder;
     folder.touch("a/b/c/d/Deep.vst3");
     CHECK(scanPluginFolders({{PluginFormat::Vst3, folder.path}}, 2).empty());
-    CHECK(names(scanPluginFolders({{PluginFormat::Vst3, folder.path}}, 8)) == std::vector<std::string>{"Deep"});
+    CHECK(
+        names(scanPluginFolders({{PluginFormat::Vst3, folder.path}}, 8)) == std::vector<std::string>{"Deep"});
 }
 
 TEST_CASE("A folder listed twice yields each plugin once", "[plugins]")
 {
     TempFolder folder;
     folder.touch("One.vst3");
-    const auto plugins = scanPluginFolders({{PluginFormat::Vst3, folder.path}, {PluginFormat::Vst3, folder.path}});
+    const auto plugins
+        = scanPluginFolders({{PluginFormat::Vst3, folder.path}, {PluginFormat::Vst3, folder.path}});
     CHECK(plugins.size() == 1);
 }
 

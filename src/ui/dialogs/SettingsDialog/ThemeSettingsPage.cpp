@@ -35,20 +35,26 @@ Rgb rgb(const QColor& c)
     return {static_cast<std::uint8_t>(c.red()), static_cast<std::uint8_t>(c.green()),
         static_cast<std::uint8_t>(c.blue())};
 }
-QString qstring(std::string_view s) { return QString::fromLatin1(s.data(), static_cast<qsizetype>(s.size())); }
+QString qstring(std::string_view s)
+{
+    return QString::fromLatin1(s.data(), static_cast<qsizetype>(s.size()));
+}
 
 /// A colour role of the Colours card.
 struct Role {
     const char* label;
-    std::optional<Rgb> ThemeOverrides::*member;
-    Rgb ResolvedTheme::*resolved;
+    std::optional<Rgb> ThemeOverrides::* member;
+    Rgb ResolvedTheme::* resolved;
 };
 const std::array<Role, 5> kRoles{{
     {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "Selection"), &ThemeOverrides::selection,
         &ResolvedTheme::accent},
-    {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "Playing"), &ThemeOverrides::playing, &ResolvedTheme::playing},
-    {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "Record"), &ThemeOverrides::record, &ResolvedTheme::record},
-    {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "LCD"), &ThemeOverrides::lcd, &ResolvedTheme::displayText},
+    {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "Playing"), &ThemeOverrides::playing,
+        &ResolvedTheme::playing},
+    {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "Record"), &ThemeOverrides::record,
+        &ResolvedTheme::record},
+    {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "LCD"), &ThemeOverrides::lcd,
+        &ResolvedTheme::displayText},
     {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "Text"), &ThemeOverrides::text, &ResolvedTheme::text},
 }};
 
@@ -137,7 +143,8 @@ protected:
         p.fillRect(QRectF(rackX + w * 0.27, t + 16, 1.5, h * 0.5), ui.playing);
         p.restore();
 
-        p.setPen(QPen(isChecked() ? ui.accent : (underMouse() ? ui.textDim : ui.border), isChecked() ? 2.0 : 1.0));
+        p.setPen(
+            QPen(isChecked() ? ui.accent : (underMouse() ? ui.textDim : ui.border), isChecked() ? 2.0 : 1.0));
         p.setBrush(Qt::NoBrush);
         p.drawRoundedRect(frame, 6, 6);
 
@@ -253,29 +260,32 @@ ThemeSettingsPage::ThemeSettingsPage(QWidget* parent)
     knobRow->setSpacing(18);
     const auto percent = [](double v) { return QStringLiteral("%1%").arg(QString::number(v, 'f', 0)); };
     const auto signedValue = [](double v) {
-        return QStringLiteral("%1%2").arg(v > 0 ? QStringLiteral("+") : QString(), QString::number(v, 'f', 0));
+        return QStringLiteral("%1%2").arg(
+            v > 0 ? QStringLiteral("+") : QString(), QString::number(v, 'f', 0));
     };
-    const auto addKnob = [&](const QString& caption, const QString& description, double min, double max,
-                             double def, std::function<QString(double)> text, std::function<void(double)> apply) {
-        auto* knob = new Knob(caption, min, max, def, knobs);
-        knob->setDescription(description);
-        knob->setValueText(std::move(text));
-        connect(knob, &Knob::valueChanged, this, [this, apply = std::move(apply)](double v) {
-            apply(v);
-            edit();
-        });
-        knobRow->addWidget(knob);
-        return knob;
-    };
-    hue_ = addKnob(tr("HUE"), tr("Turn the colour of every surface"), -180, 180, 0,
+    const auto addKnob
+        = [&](const QString& caption, const QString& description, double min, double max, double def,
+              std::function<QString(double)> text, std::function<void(double)> apply) {
+              auto* knob = new Knob(caption, min, max, def, knobs);
+              knob->setDescription(description);
+              knob->setValueText(std::move(text));
+              connect(knob, &Knob::valueChanged, this, [this, apply = std::move(apply)](double v) {
+                  apply(v);
+                  edit();
+              });
+              knobRow->addWidget(knob);
+              return knob;
+          };
+    hue_ = addKnob(
+        tr("HUE"), tr("Turn the colour of every surface"), -180, 180, 0,
         [](double v) { return QStringLiteral("%1°").arg(QString::number(v, 'f', 0)); },
         [this](double v) { choice_.adjustments.hue = v; });
     saturation_ = addKnob(tr("SAT"), tr("Saturation: 0% is grey"), 0, 200, 100, percent,
         [this](double v) { choice_.adjustments.saturation = v / 100.0; });
     brightness_ = addKnob(tr("BRIGHT"), tr("Lighter or darker surfaces"), -30, 30, 0, signedValue,
         [this](double v) { choice_.adjustments.brightness = v / 100.0; });
-    contrast_ = addKnob(tr("CONTRAST"), tr("How far panels stand apart from each other"), 50, 200, 100, percent,
-        [this](double v) { choice_.adjustments.contrast = v / 100.0; });
+    contrast_ = addKnob(tr("CONTRAST"), tr("How far panels stand apart from each other"), 50, 200, 100,
+        percent, [this](double v) { choice_.adjustments.contrast = v / 100.0; });
     text_ = addKnob(tr("TEXT"), tr("Lighter or darker text"), -30, 30, 0, signedValue,
         [this](double v) { choice_.adjustments.text = v / 100.0; });
     knobRow->addStretch();
@@ -288,7 +298,8 @@ ThemeSettingsPage::ThemeSettingsPage(QWidget* parent)
     knobRow->addWidget(reset, 0, Qt::AlignVCenter);
     adjustCard->addWide(knobs);
 
-    warning_ = new QLabel(tr("Some text is now hard to read (below WCAG AA contrast). Raise TEXT or lower BRIGHT."));
+    warning_ = new QLabel(
+        tr("Some text is now hard to read (below WCAG AA contrast). Raise TEXT or lower BRIGHT."));
     warning_->setObjectName(QStringLiteral("themeWarning"));
     warning_->setWordWrap(true);
     warning_->hide();
@@ -391,7 +402,8 @@ void ThemeSettingsPage::refresh()
     const ResolvedTheme resolved = resolveTheme(choice_);
     for (std::size_t r = 0; r < kRoles.size(); ++r)
         static_cast<ColorSwatch*>(roleSwatches_[static_cast<qsizetype>(r)])
-            ->setColor(qcolor(resolved.*kRoles[r].resolved), (choice_.overrides.*kRoles[r].member).has_value());
+            ->setColor(
+                qcolor(resolved.*kRoles[r].resolved), (choice_.overrides.*kRoles[r].member).has_value());
     warning_->setVisible(hasLowContrast(resolved));
 
     for (QAbstractButton* tile : presetTiles_)

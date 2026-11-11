@@ -26,8 +26,8 @@ QString panText(double percent)
 {
     if (std::abs(percent) < 0.5)
         return MixerStrip::tr("Centre");
-    return MixerStrip::tr("%1% %2")
-        .arg(QString::number(std::abs(percent), 'f', 0), percent < 0 ? MixerStrip::tr("left") : MixerStrip::tr("right"));
+    return MixerStrip::tr("%1% %2").arg(QString::number(std::abs(percent), 'f', 0),
+        percent < 0 ? MixerStrip::tr("left") : MixerStrip::tr("right"));
 }
 
 } // namespace
@@ -102,7 +102,10 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     layout->addWidget(numberLabel);
 }
 
-void MixerStrip::showDb(double position) { db_->setText(QString::fromStdString(formatDb(faderToGain(position)))); }
+void MixerStrip::showDb(double position)
+{
+    db_->setText(QString::fromStdString(formatDb(faderToGain(position))));
+}
 
 void MixerStrip::setSilenced(bool silenced)
 {

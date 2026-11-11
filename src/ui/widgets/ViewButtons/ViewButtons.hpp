@@ -32,7 +32,8 @@ signals:
     void viewRequested(vloomdaw::ViewButtons::View view);
 
 private:
-    QAction* makeViewAction(const QString& iconName, const QString& text, const QKeySequence& shortcut, View view);
+    QAction* makeViewAction(
+        const QString& iconName, const QString& text, const QKeySequence& shortcut, View view);
 
     QMap<View, QAction*> actions_;
 };

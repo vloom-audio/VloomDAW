@@ -33,10 +33,7 @@ Fader::Fader(QWidget* parent)
 
 int Fader::travel() const { return std::max(1, height() - kCapHeight); }
 
-int Fader::capCentreY() const
-{
-    return kCapHeight / 2 + static_cast<int>((1.0 - value_) * travel());
-}
+int Fader::capCentreY() const { return kCapHeight / 2 + static_cast<int>((1.0 - value_) * travel()); }
 
 void Fader::setValue(double position)
 {
@@ -61,7 +58,7 @@ void Fader::changeByUser(double position)
 void Fader::updateToolTip()
 {
     setToolTip(tr("%1\nDrag or scroll (Shift: fine), double-click for 0 dB")
-                   .arg(QString::fromStdString(formatDb(faderToGain(value_)))));
+            .arg(QString::fromStdString(formatDb(faderToGain(value_)))));
 }
 
 void Fader::paintEvent(QPaintEvent* /*event*/)
@@ -79,7 +76,8 @@ void Fader::paintEvent(QPaintEvent* /*event*/)
     p.setBrush(c.display);
     p.drawRoundedRect(QRectF(cx - kTrackWidth / 2.0, trackTop, kTrackWidth, trackBottom - trackTop), 2, 2);
     p.setBrush(c.accent);
-    p.drawRoundedRect(QRectF(cx - kTrackWidth / 2.0, capCentreY(), kTrackWidth, trackBottom - capCentreY()), 2, 2);
+    p.drawRoundedRect(
+        QRectF(cx - kTrackWidth / 2.0, capCentreY(), kTrackWidth, trackBottom - capCentreY()), 2, 2);
     const int unityY = kCapHeight / 2 + static_cast<int>((1.0 - kUnityFaderPosition) * travel());
     p.fillRect(QRect(0, unityY, 4, 1), c.textDim);
     p.fillRect(QRect(width() - 4, unityY, 4, 1), c.textDim);

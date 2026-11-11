@@ -54,7 +54,8 @@ void PlaylistView::setPlayhead(double tick)
         return;
     // Repaint only the strips under the old and new line, and only when the
     // line moves (see PianoRollView::setPlayhead()).
-    const timeline::Scale scale{horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kHeaderWidth};
+    const timeline::Scale scale{
+        horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kHeaderWidth};
     const QRect area(0, 0, viewport()->width(), viewport()->height());
     if (!timeline::playheadMoved(area, scale, playhead_, tick)) {
         playhead_ = tick;
@@ -86,7 +87,8 @@ int PlaylistView::lengthTicks() const
 QRect PlaylistView::gridRect() const
 {
     const QRect v = viewport()->rect();
-    return {kHeaderWidth, timeline::kRulerHeight, v.width() - kHeaderWidth, v.height() - timeline::kRulerHeight};
+    return {
+        kHeaderWidth, timeline::kRulerHeight, v.width() - kHeaderWidth, v.height() - timeline::kRulerHeight};
 }
 
 double PlaylistView::tickAt(int x) const
@@ -126,7 +128,8 @@ void PlaylistView::updateScrollBars()
 {
     const QRect grid = gridRect();
     horizontalScrollBar()->setPageStep(grid.width());
-    horizontalScrollBar()->setRange(0, std::max(0, static_cast<int>(lengthTicks() * pixelsPerTick()) - grid.width()));
+    horizontalScrollBar()->setRange(
+        0, std::max(0, static_cast<int>(lengthTicks() * pixelsPerTick()) - grid.width()));
     verticalScrollBar()->setPageStep(grid.height());
     verticalScrollBar()->setRange(0, std::max(0, Project::kPlaylistTracks * kTrackHeight - grid.height()));
 }
@@ -144,7 +147,8 @@ void PlaylistView::paintEvent(QPaintEvent* event)
     const Theme::Colors& c = Theme::colors();
     QPainter p(viewport());
     const QRect grid = gridRect();
-    const timeline::Scale scale{horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kHeaderWidth};
+    const timeline::Scale scale{
+        horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kHeaderWidth};
 
     // Only what Qt asked for: a moving playhead repaints a thin strip.
     const QRect area = grid.intersected(event->rect());
@@ -191,7 +195,8 @@ void PlaylistView::paintEvent(QPaintEvent* event)
             f.setBold(true);
             p.setFont(f);
             const auto& name = project_->patterns()[clips[i].pattern].name;
-            p.drawText(title.adjusted(4, 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter, QString::fromStdString(name));
+            p.drawText(
+                title.adjusted(4, 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter, QString::fromStdString(name));
         }
         p.restore();
     }

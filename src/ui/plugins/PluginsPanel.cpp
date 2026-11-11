@@ -98,7 +98,8 @@ void PluginsPanel::setStore(const PluginStore& store)
             item->setToolTip(0, QString::fromStdWString(info.path.wstring()));
             ++count;
         }
-        group->setText(0, QStringLiteral("%1  (%2)").arg(QString::fromUtf8(formatName(format)), QString::number(count)));
+        group->setText(
+            0, QStringLiteral("%1  (%2)").arg(QString::fromUtf8(formatName(format)), QString::number(count)));
         group->setExpanded(true);
         group->setHidden(count == 0);
     }
@@ -108,14 +109,15 @@ void PluginsPanel::setStore(const PluginStore& store)
     tree_->setVisible(any);
     search_->setVisible(any);
     emptyHint_->setVisible(!any);
-    emptyHint_->setText(scanned ? tr("The last scan found no plugins. Add the folders your plugins are in, "
-                                     "then scan again.")
-                                : tr("No plugins yet. Plugins can be used after a scan of your plugin folders; "
-                                     "nothing is scanned automatically."));
+    emptyHint_->setText(scanned
+            ? tr("The last scan found no plugins. Add the folders your plugins are in, "
+                 "then scan again.")
+            : tr("No plugins yet. Plugins can be used after a scan of your plugin folders; "
+                 "nothing is scanned automatically."));
     scanButton_->setVisible(!any);
-    footer_->setText(scanned ? tr("Last scan: %1")
-                                   .arg(QLocale().toString(store.lastScan.toLocalTime(), QLocale::ShortFormat))
-                             : QString());
+    footer_->setText(scanned
+            ? tr("Last scan: %1").arg(QLocale().toString(store.lastScan.toLocalTime(), QLocale::ShortFormat))
+            : QString());
     footer_->setVisible(scanned);
     applySearch(search_->text());
     tree_->scrollToTop();

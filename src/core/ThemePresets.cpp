@@ -12,17 +12,21 @@ namespace {
 
 constexpr Rgb hex(std::uint32_t v)
 {
-    return {static_cast<std::uint8_t>(v >> 16), static_cast<std::uint8_t>(v >> 8), static_cast<std::uint8_t>(v)};
+    return {
+        static_cast<std::uint8_t>(v >> 16), static_cast<std::uint8_t>(v >> 8), static_cast<std::uint8_t>(v)};
 }
 
 // Each palette steps from the darkest surface (rail) to the lightest (raised).
 constexpr std::array kPalettes{
-    PaletteSpec{"midnight", "Midnight", hex(0x212121), hex(0x181818), hex(0x2a2a2a), hex(0x121212), hex(0x191919),
-        hex(0x333333), hex(0x3a3a3a), hex(0xe6e9ee), hex(0x8b95a3), hex(0x141414), hex(0x5eead4)},
-    PaletteSpec{"graphite", "Graphite", hex(0x2b2d31), hex(0x232428), hex(0x34363c), hex(0x1e1f22), hex(0x25272b),
-        hex(0x3d4047), hex(0x474a52), hex(0xeceef2), hex(0xa3abb8), hex(0x1b1c1f), hex(0x7dd3fc)},
+    PaletteSpec{"midnight", "Midnight", hex(0x212121), hex(0x181818), hex(0x2a2a2a), hex(0x121212),
+        hex(0x191919), hex(0x333333), hex(0x3a3a3a), hex(0xe6e9ee), hex(0x8b95a3), hex(0x141414),
+        hex(0x5eead4)},
+    PaletteSpec{"graphite", "Graphite", hex(0x2b2d31), hex(0x232428), hex(0x34363c), hex(0x1e1f22),
+        hex(0x25272b), hex(0x3d4047), hex(0x474a52), hex(0xeceef2), hex(0xa3abb8), hex(0x1b1c1f),
+        hex(0x7dd3fc)},
     PaletteSpec{"deep-black", "Deep Black", hex(0x0b0b0b), hex(0x050505), hex(0x141414), hex(0x000000),
-        hex(0x080808), hex(0x1f1f1f), hex(0x262626), hex(0xe6e9ee), hex(0x8b95a3), hex(0x000000), hex(0x5eead4)},
+        hex(0x080808), hex(0x1f1f1f), hex(0x262626), hex(0xe6e9ee), hex(0x8b95a3), hex(0x000000),
+        hex(0x5eead4)},
     PaletteSpec{"slate", "Slate", hex(0x1b2130), hex(0x151a26), hex(0x222a3b), hex(0x11151f), hex(0x171d2a),
         hex(0x2b3448), hex(0x344057), hex(0xe8ecf4), hex(0x9aa6bd), hex(0x0f131c), hex(0x93c5fd)},
     PaletteSpec{"forest", "Forest", hex(0x1a221d), hex(0x141a16), hex(0x212b25), hex(0x0f1511), hex(0x161d18),
@@ -56,13 +60,15 @@ std::span<const AccentSpec> accents() { return kAccents; }
 
 const PaletteSpec& paletteById(std::string_view id)
 {
-    const auto it = std::find_if(kPalettes.begin(), kPalettes.end(), [id](const PaletteSpec& p) { return p.id == id; });
+    const auto it
+        = std::find_if(kPalettes.begin(), kPalettes.end(), [id](const PaletteSpec& p) { return p.id == id; });
     return it != kPalettes.end() ? *it : kPalettes.front();
 }
 
 const AccentSpec& accentById(std::string_view id)
 {
-    const auto it = std::find_if(kAccents.begin(), kAccents.end(), [id](const AccentSpec& a) { return a.id == id; });
+    const auto it
+        = std::find_if(kAccents.begin(), kAccents.end(), [id](const AccentSpec& a) { return a.id == id; });
     return it != kAccents.end() ? *it : kAccents.front();
 }
 
@@ -155,14 +161,34 @@ Rgb toRgb(Hsl c)
     double g = 0.0;
     double b = 0.0;
     switch (static_cast<int>(h / 60.0)) {
-    case 0: r = chroma; g = x; break;
-    case 1: r = x; g = chroma; break;
-    case 2: g = chroma; b = x; break;
-    case 3: g = x; b = chroma; break;
-    case 4: r = x; b = chroma; break;
-    default: r = chroma; b = x; break;
+    case 0:
+        r = chroma;
+        g = x;
+        break;
+    case 1:
+        r = x;
+        g = chroma;
+        break;
+    case 2:
+        g = chroma;
+        b = x;
+        break;
+    case 3:
+        g = x;
+        b = chroma;
+        break;
+    case 4:
+        r = x;
+        b = chroma;
+        break;
+    default:
+        r = chroma;
+        b = x;
+        break;
     }
-    const auto byte = [m](double v) { return static_cast<std::uint8_t>(std::lround(std::clamp(v + m, 0.0, 1.0) * 255.0)); };
+    const auto byte = [m](double v) {
+        return static_cast<std::uint8_t>(std::lround(std::clamp(v + m, 0.0, 1.0) * 255.0));
+    };
     return {byte(r), byte(g), byte(b)};
 }
 
@@ -180,8 +206,8 @@ ThemeAdjustments clamped(ThemeAdjustments a)
 
 } // namespace
 
-ResolvedTheme resolveTheme(
-    const PaletteSpec& palette, const AccentSpec& accent, ThemeAdjustments adjustments, const ThemeOverrides& overrides)
+ResolvedTheme resolveTheme(const PaletteSpec& palette, const AccentSpec& accent, ThemeAdjustments adjustments,
+    const ThemeOverrides& overrides)
 {
     const ThemeAdjustments a = clamped(adjustments);
     const bool identity = a == ThemeAdjustments{};

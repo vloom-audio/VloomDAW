@@ -64,9 +64,11 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     general_ = new GeneralSettingsPage(this);
     addPage(QStringLiteral("sliders"), tr("General"), tr("How VloomDAW starts and behaves."), general_);
     audio_ = new AudioSettingsPage(this);
-    addPage(QStringLiteral("speaker"), tr("Audio"), tr("The device VloomDAW plays through and its format."), audio_);
+    addPage(QStringLiteral("speaker"), tr("Audio"), tr("The device VloomDAW plays through and its format."),
+        audio_);
     theme_ = new ThemeSettingsPage(this);
-    addPage(QStringLiteral("palette"), tr("Theme"), tr("Colours of the whole app. Changes show at once."), theme_);
+    addPage(QStringLiteral("palette"), tr("Theme"), tr("Colours of the whole app. Changes show at once."),
+        theme_);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::close);
@@ -86,7 +88,8 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     nav_->setCurrentRow(0);
 }
 
-void SettingsDialog::addPage(const QString& icon, const QString& title, const QString& subtitle, QWidget* page)
+void SettingsDialog::addPage(
+    const QString& icon, const QString& title, const QString& subtitle, QWidget* page)
 {
     // Each page: a heading and a one-line summary above its cards, scrolling
     // when the window is short.

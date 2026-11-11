@@ -18,7 +18,10 @@ namespace {
 constexpr int kPixelsPerStep = 12; ///< vertical drag per value
 constexpr int kDragThreshold = 4; ///< pixels before a press counts as a drag
 
-QString latin1(std::string_view text) { return QString::fromLatin1(text.data(), static_cast<qsizetype>(text.size())); }
+QString latin1(std::string_view text)
+{
+    return QString::fromLatin1(text.data(), static_cast<qsizetype>(text.size()));
+}
 
 int scaleCount() { return static_cast<int>(allScales().size()); }
 

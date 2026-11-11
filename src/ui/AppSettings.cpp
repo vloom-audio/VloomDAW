@@ -31,7 +31,7 @@ constexpr QLatin1StringView kThemeText{"theme/text"};
 /// Per-role colour overrides, stored as "#rrggbb" (absent = the preset's).
 struct RoleKey {
     QLatin1StringView key;
-    std::optional<Rgb> ThemeOverrides::*member;
+    std::optional<Rgb> ThemeOverrides::* member;
 };
 const RoleKey kRoleKeys[] = {
     {QLatin1StringView("theme/color/selection"), &ThemeOverrides::selection},

@@ -415,7 +415,10 @@ public:
     ThemedIconEngine* clone() const override { return new ThemedIconEngine(path_); }
     QString key() const override { return QStringLiteral("vloomdaw.themed"); }
 
-    QSize actualSize(const QSize& size, QIcon::Mode /*mode*/, QIcon::State /*state*/) override { return size; }
+    QSize actualSize(const QSize& size, QIcon::Mode /*mode*/, QIcon::State /*state*/) override
+    {
+        return size;
+    }
 
     QPixmap pixmap(const QSize& size, QIcon::Mode mode, QIcon::State state) override
     {
@@ -428,7 +431,8 @@ public:
             cache_.clear();
             cachedGeneration_ = Theme::generation();
         }
-        const QString cacheKey = QStringLiteral("%1x%2@%3/%4").arg(size.width()).arg(size.height()).arg(scale).arg(mode);
+        const QString cacheKey
+            = QStringLiteral("%1x%2@%3/%4").arg(size.width()).arg(size.height()).arg(scale).arg(mode);
         if (const auto it = cache_.constFind(cacheKey); it != cache_.constEnd())
             return *it;
 
@@ -458,8 +462,8 @@ private:
     {
         const Theme::Colors& c = Theme::colors();
         QByteArray svg = source_;
-        const std::pair<const char*, QColor> swaps[] = {
-            {"#e6e9ee", c.text}, {"#8b95a3", c.textDim}, {"#ff8a3d", c.accent}, {"#e81123", c.danger}};
+        const std::pair<const char*, QColor> swaps[]
+            = {{"#e6e9ee", c.text}, {"#8b95a3", c.textDim}, {"#ff8a3d", c.accent}, {"#e81123", c.danger}};
         for (const auto& [from, to] : swaps)
             svg.replace(from, to.name().toLatin1());
         return svg;

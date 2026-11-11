@@ -28,8 +28,14 @@ constexpr double kMaxPixelsPerBeat = 256.0;
 bool isBlackKey(int key)
 {
     switch (pitchClassOf(key)) {
-    case 1: case 3: case 6: case 8: case 10: return true;
-    default: return false;
+    case 1:
+    case 3:
+    case 6:
+    case 8:
+    case 10:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -84,7 +90,8 @@ void PianoRollView::setPlayhead(double tick)
         return;
     // Repaint only the strips under the old and new line, and only when the
     // line moves (a quarter pixel): a full repaint 30 times a second is the main cost.
-    const timeline::Scale scale{horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kKeyboardWidth};
+    const timeline::Scale scale{
+        horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kKeyboardWidth};
     const QRect area(0, 0, viewport()->width(), viewport()->height());
     if (!timeline::playheadMoved(area, scale, playhead_, tick)) {
         playhead_ = tick;
@@ -119,7 +126,8 @@ int PianoRollView::lengthTicks() const
 QRect PianoRollView::gridRect() const
 {
     const QRect v = viewport()->rect();
-    return {kKeyboardWidth, timeline::kRulerHeight, v.width() - kKeyboardWidth, v.height() - timeline::kRulerHeight};
+    return {kKeyboardWidth, timeline::kRulerHeight, v.width() - kKeyboardWidth,
+        v.height() - timeline::kRulerHeight};
 }
 
 double PianoRollView::tickAt(int x) const
@@ -162,7 +170,8 @@ void PianoRollView::updateScrollBars()
 {
     const QRect grid = gridRect();
     horizontalScrollBar()->setPageStep(grid.width());
-    horizontalScrollBar()->setRange(0, std::max(0, static_cast<int>(lengthTicks() * pixelsPerTick()) - grid.width()));
+    horizontalScrollBar()->setRange(
+        0, std::max(0, static_cast<int>(lengthTicks() * pixelsPerTick()) - grid.width()));
     verticalScrollBar()->setPageStep(grid.height());
     verticalScrollBar()->setRange(0, std::max(0, kKeyCount * kKeyHeight - grid.height()));
 }
@@ -191,7 +200,8 @@ void PianoRollView::paintEvent(QPaintEvent* event)
     const QRect grid = gridRect();
     // Only what Qt asked for: a moving playhead repaints a thin strip.
     const QRect area = grid.intersected(event->rect());
-    const timeline::Scale scale{horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kKeyboardWidth};
+    const timeline::Scale scale{
+        horizontalScrollBar()->value() / pixelsPerTick(), pixelsPerTick(), kKeyboardWidth};
     // Opaque mixes (no per-pixel blending) for the root row and past the end.
     const QColor rootRow = blend(c.sidebar, c.accent, 0.07);
     const QColor rootRowOut = blend(c.rail, c.accent, 0.07);
@@ -210,14 +220,16 @@ void PianoRollView::paintEvent(QPaintEvent* event)
             p.fillRect(row, fill);
             const int lineY = yOfKey(key) + kKeyHeight - 1;
             if (lineY >= area.top() && lineY <= area.bottom())
-                p.fillRect(QRect(area.left(), lineY, area.width(), 1), pitchClassOf(key) == 0 ? c.border : c.rail);
+                p.fillRect(
+                    QRect(area.left(), lineY, area.width(), 1), pitchClassOf(key) == 0 ? c.border : c.rail);
         }
         timeline::paintGrid(p, area, scale, kTicksPerStep);
 
         // Shade past the pattern's end.
         if (project_ != nullptr) {
             const int endX = static_cast<int>(scale.x(project_->patternLength(pattern_)));
-            const QRect past = QRect(endX, area.top(), area.right() - endX + 1, area.height()).intersected(area);
+            const QRect past
+                = QRect(endX, area.top(), area.right() - endX + 1, area.height()).intersected(area);
             if (!past.isEmpty())
                 p.fillRect(past, QColor(c.base.red(), c.base.green(), c.base.blue(), 110));
         }
@@ -367,7 +379,8 @@ void PianoRollView::wheelEvent(QWheelEvent* event)
         return;
     const int mouseX = static_cast<int>(event->position().x());
     const double anchor = tickAt(mouseX);
-    pixelsPerBeat_ = std::clamp(pixelsPerBeat_ * std::pow(1.25, notches), kMinPixelsPerBeat, kMaxPixelsPerBeat);
+    pixelsPerBeat_
+        = std::clamp(pixelsPerBeat_ * std::pow(1.25, notches), kMinPixelsPerBeat, kMaxPixelsPerBeat);
     updateScrollBars();
     horizontalScrollBar()->setValue(static_cast<int>(anchor * pixelsPerTick()) - (mouseX - kKeyboardWidth));
     viewport()->update();

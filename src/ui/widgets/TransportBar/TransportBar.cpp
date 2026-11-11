@@ -73,7 +73,8 @@ TransportBar::TransportBar(QWidget* parent)
         QKeySequence(Qt::SHIFT | Qt::Key_Space));
     connect(stopAction_, &QAction::triggered, this, &TransportBar::stopRequested);
 
-    recordAction_ = makeAction(QStringLiteral("record"), tr("Record"), tr("Arm recording"), QKeySequence(Qt::Key_R));
+    recordAction_
+        = makeAction(QStringLiteral("record"), tr("Record"), tr("Arm recording"), QKeySequence(Qt::Key_R));
     recordAction_->setCheckable(true);
     connect(recordAction_, &QAction::toggled, this, &TransportBar::recordArmedChanged);
 
@@ -109,7 +110,8 @@ TransportBar::TransportBar(QWidget* parent)
     leadingSpace_ = spacer(this, 0);
     addWidget(leadingSpace_);
 
-    QFrame* playGroup = makeToolGroup(this, {songModeAction_, playAction_, stopAction_, recordAction_}, iconSize());
+    QFrame* playGroup
+        = makeToolGroup(this, {songModeAction_, playAction_, stopAction_, recordAction_}, iconSize());
     const auto playButtons = playGroup->findChildren<QToolButton*>();
     playButtons.at(0)->setObjectName(QStringLiteral("modeButton"));
     playButtons.at(1)->setObjectName(QStringLiteral("playButton"));
@@ -150,8 +152,9 @@ TransportBar::TransportBar(QWidget* parent)
     volumeKnob_->setDescription(tr("Master volume"));
     volumeKnob_->setValueText([](double percent) {
         const double gain = (percent / 100.0) * (percent / 100.0);
-        const QString db = gain > 0.0 ? QString::number(20.0 * std::log10(gain), 'f', 1) + QStringLiteral(" dB")
-                                      : QStringLiteral("-inf dB");
+        const QString db = gain > 0.0
+            ? QString::number(20.0 * std::log10(gain), 'f', 1) + QStringLiteral(" dB")
+            : QStringLiteral("-inf dB");
         return QStringLiteral("%1% (%2)").arg(QString::number(percent, 'f', 0), db);
     });
     connect(volumeKnob_, &Knob::valueChanged, this, &TransportBar::masterVolumeChanged);
@@ -161,7 +164,8 @@ TransportBar::TransportBar(QWidget* parent)
     pitchKnob_ = new Knob(tr("PITCH"), -12.0, 12.0, 0.0, this);
     pitchKnob_->setDescription(tr("Master pitch"));
     pitchKnob_->setValueText([](double semitones) {
-        return tr("%1%2 semitones").arg(semitones > 0.0 ? QStringLiteral("+") : QString(), QString::number(semitones, 'f', 1));
+        return tr("%1%2 semitones")
+            .arg(semitones > 0.0 ? QStringLiteral("+") : QString(), QString::number(semitones, 'f', 1));
     });
     connect(pitchKnob_, &Knob::valueChanged, this, &TransportBar::masterPitchChanged);
     addRight(pitchKnob_);

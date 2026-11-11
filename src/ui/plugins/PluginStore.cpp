@@ -13,8 +13,14 @@ constexpr QLatin1StringView kPlugins{"plugins/scanned"};
 constexpr QLatin1StringView kLastScan{"plugins/lastScan"};
 constexpr QLatin1StringView kFolders{"plugins/extraFolders"};
 
-QString formatKey(PluginFormat format) { return format == PluginFormat::Clap ? QStringLiteral("clap") : QStringLiteral("vst3"); }
-PluginFormat formatFromKey(const QString& key) { return key == QLatin1String("clap") ? PluginFormat::Clap : PluginFormat::Vst3; }
+QString formatKey(PluginFormat format)
+{
+    return format == PluginFormat::Clap ? QStringLiteral("clap") : QStringLiteral("vst3");
+}
+PluginFormat formatFromKey(const QString& key)
+{
+    return key == QLatin1String("clap") ? PluginFormat::Clap : PluginFormat::Vst3;
+}
 
 // Paths go through QString::fromStdWString / toStdWString on Windows so
 // non-ASCII folder names survive.
@@ -45,7 +51,8 @@ PluginStore PluginStore::load()
         s.setArrayIndex(i);
         const QString path = s.value(QStringLiteral("path")).toString();
         if (!path.isEmpty())
-            store.extraFolders.push_back({formatFromKey(s.value(QStringLiteral("format")).toString()), toPath(path)});
+            store.extraFolders.push_back(
+                {formatFromKey(s.value(QStringLiteral("format")).toString()), toPath(path)});
     }
     s.endArray();
     return store;

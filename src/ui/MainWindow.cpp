@@ -53,8 +53,8 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMouseEvent>
-#include <QPushButton>
 #include <QPainter>
+#include <QPushButton>
 #include <QResizeEvent>
 #include <QScreen>
 #include <QScrollArea>
@@ -64,8 +64,8 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTimer>
-#include <QToolButton>
 #include <QToolBar>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -174,7 +174,8 @@ void MainWindow::createMenus()
     // these say so instead of doing nothing.
     const auto notYet = [this](const QString& feature) {
         return [this, feature] {
-            statusBar()->showMessage(tr("%1 is not available yet: projects arrive in milestone M4.").arg(feature), 5000);
+            statusBar()->showMessage(
+                tr("%1 is not available yet: projects arrive in milestone M4.").arg(feature), 5000);
         };
     };
 
@@ -213,8 +214,8 @@ void MainWindow::createMenus()
 
     // On macOS the preferences role moves this into the app menu.
     auto* optionsMenu = menuBar()->addMenu(tr("&Options"));
-    settingsAction_ = optionsMenu->addAction(Theme::icon(QStringLiteral("settings")), tr("Settings…"),
-        this, [this] { showSettings(SettingsDialog::Page::General); });
+    settingsAction_ = optionsMenu->addAction(Theme::icon(QStringLiteral("settings")), tr("Settings…"), this,
+        [this] { showSettings(SettingsDialog::Page::General); });
     // Not QKeySequence::Preferences: on Windows that is the "Settings" media
     // key, not Ctrl+,. Qt::CTRL is Cmd on macOS, so this is Cmd+, there.
     settingsAction_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
@@ -258,7 +259,8 @@ void MainWindow::createToolBars()
     // the button and say so, so the button is not silently dead.
     connect(transport_, &TransportBar::recordArmedChanged, this, [this](bool armed) {
         statusBar()->showMessage(
-            armed ? tr("Recording armed. Audio input is not available yet.") : tr("Recording disarmed"), 4000);
+            armed ? tr("Recording armed. Audio input is not available yet.") : tr("Recording disarmed"),
+            4000);
     });
     connect(transport_, &TransportBar::metronomeToggled, this,
         [this](bool on) { audio_.engine().setMetronomeEnabled(on); });
@@ -267,13 +269,15 @@ void MainWindow::createToolBars()
     // every mouse move) and only while a device drains the queue.
     connect(transport_, &TransportBar::masterVolumeChanged, this, [this] { updateMasterOutput(); });
     connect(transport_, &TransportBar::masterPitchChanged, this, [this](double semitones) {
-        statusBar()->showMessage(tr("Master pitch %1 semitones: it applies to instruments, which arrive in milestone M2.")
-                                     .arg(QString::number(semitones, 'f', 1)),
+        statusBar()->showMessage(
+            tr("Master pitch %1 semitones: it applies to instruments, which arrive in milestone M2.")
+                .arg(QString::number(semitones, 'f', 1)),
             4000);
     });
     connect(transport_, &TransportBar::songModeChanged, this, [this](bool song) {
-        statusBar()->showMessage(song ? tr("Song mode: the playlist arrives in milestone M3.")
-                                      : tr("Pattern mode: patterns arrive with the channel rack in milestone M1."),
+        statusBar()->showMessage(song
+                ? tr("Song mode: the playlist arrives in milestone M3.")
+                : tr("Pattern mode: patterns arrive with the channel rack in milestone M1."),
             4000);
     });
 
@@ -288,9 +292,10 @@ void MainWindow::createToolBars()
         const KeyDisplay* key = transport_->keyDisplay();
         const std::string_view root = noteName(key->rootNote());
         const std::string_view scale = scaleInfo(key->scale()).name;
-        statusBar()->showMessage(tr("Key: %1 %2 (highlighted in the piano roll)")
-                                     .arg(QString::fromLatin1(root.data(), static_cast<qsizetype>(root.size())),
-                                         QString::fromLatin1(scale.data(), static_cast<qsizetype>(scale.size()))),
+        statusBar()->showMessage(
+            tr("Key: %1 %2 (highlighted in the piano roll)")
+                .arg(QString::fromLatin1(root.data(), static_cast<qsizetype>(root.size())),
+                    QString::fromLatin1(scale.data(), static_cast<qsizetype>(scale.size()))),
             4000);
         pianoRoll_->setKey(key->rootNote(), key->scale());
     };
@@ -393,8 +398,8 @@ void MainWindow::setFloatingVisible(FloatingPanel* window, bool visible)
     }
 }
 
-FloatingPanel* MainWindow::makeFloatingPanel(const QString& title, const QString& settingsKey,
-    std::function<void()> onClosed)
+FloatingPanel* MainWindow::makeFloatingPanel(
+    const QString& title, const QString& settingsKey, std::function<void()> onClosed)
 {
     auto* window = new FloatingPanel(title, settingsKey);
     window->setWindowIcon(windowIcon());
@@ -407,7 +412,10 @@ FloatingPanel* MainWindow::makeFloatingPanel(const QString& title, const QString
     return window;
 }
 
-bool MainWindow::isMixerDetached() const { return mixerWindow_ != nullptr && mixerWindow_->content() == mixerPanel_; }
+bool MainWindow::isMixerDetached() const
+{
+    return mixerWindow_ != nullptr && mixerWindow_->content() == mixerPanel_;
+}
 
 bool MainWindow::isMixerOpen() const
 {
@@ -421,15 +429,15 @@ void MainWindow::setMixerDetached(bool detached)
     const bool open = isMixerOpen();
     if (detached) {
         if (mixerWindow_ == nullptr)
-            mixerWindow_ = makeFloatingPanel(tr("Mixer"), QString(kMixerWindowKey), [this] {
-                transport_->viewButtons()->setViewOpen(ViewButtons::View::Mixer, false);
-            });
+            mixerWindow_ = makeFloatingPanel(tr("Mixer"), QString(kMixerWindowKey),
+                [this] { transport_->viewButtons()->setViewOpen(ViewButtons::View::Mixer, false); });
         // Takes it out of the splitter; the window buttons join its header.
         mixerWindow_->host(mixerPanel_, [this](QWidget* buttons) { mixerPanel_->addHeaderWidget(buttons); });
     } else {
         QWidget* panel = mixerWindow_->release();
         workspaceSplitter_->insertWidget(1, panel);
-        workspaceSplitter_->setSizes({std::max(200, workspaceSplitter_->height() - kDefaultMixerHeight), kDefaultMixerHeight});
+        workspaceSplitter_->setSizes(
+            {std::max(200, workspaceSplitter_->height() - kDefaultMixerHeight), kDefaultMixerHeight});
     }
     mixerPanel_->setDetached(detached);
     setMixerVisible(open || detached); // detaching shows the window
@@ -451,8 +459,8 @@ const MainWindow::DetachablePage* MainWindow::detachable(WorkspacePage page) con
     return nullptr;
 }
 
-void MainWindow::makeDetachable(DetachablePage& d, WorkspacePage page, PanelFrame* frame, const QString& title,
-    const QString& name, const QString& settingsId)
+void MainWindow::makeDetachable(DetachablePage& d, WorkspacePage page, PanelFrame* frame,
+    const QString& title, const QString& name, const QString& settingsId)
 {
     d.page = page;
     d.frame = frame;
@@ -461,7 +469,8 @@ void MainWindow::makeDetachable(DetachablePage& d, WorkspacePage page, PanelFram
 
     d.button = new DetachButton(name);
     frame->addHeaderWidget(d.button);
-    connect(d.button, &QToolButton::clicked, this, [this, page] { setPageDetached(page, !isPageDetached(page)); });
+    connect(d.button, &QToolButton::clicked, this,
+        [this, page] { setPageDetached(page, !isPageDetached(page)); });
 
     // Stands in the workspace while the editor is in its own window, so the
     // page numbering stays put.
@@ -558,7 +567,8 @@ QWidget* MainWindow::createMixer()
     mixerPanel_ = new MixerPanel(mixer_.size() - 1, this);
     mixerPanel_->setMinimumHeight(200);
     connect(mixerPanel_, &MixerPanel::closeRequested, this, [this] { setMixerVisible(false); });
-    connect(mixerPanel_, &MixerPanel::detachRequested, this, [this] { setMixerDetached(!isMixerDetached()); });
+    connect(
+        mixerPanel_, &MixerPanel::detachRequested, this, [this] { setMixerDetached(!isMixerDetached()); });
 
     connect(mixerPanel_, &MixerPanel::faderChanged, this, [this](std::size_t track, double position) {
         mixer_.setFader(track, position);
@@ -593,8 +603,8 @@ void MainWindow::updateMasterOutput()
 {
     // The engine has one output stage: the transport's master volume knob and
     // the mixer's master track (fader, mute, pan) both feed it.
-    pendingGain_ = static_cast<float>(volumeToGain(transport_->masterVolume())
-        * mixer_.effectiveGain(MixerModel::kMaster));
+    pendingGain_ = static_cast<float>(
+        volumeToGain(transport_->masterVolume()) * mixer_.effectiveGain(MixerModel::kMaster));
     pendingPan_ = static_cast<float>(mixer_.track(MixerModel::kMaster).pan);
 }
 
@@ -761,7 +771,8 @@ QWidget* MainWindow::createWorkspace()
     channelRackFrame_->addHeaderWidget(addChannel);
     workspace_->addWidget(channelRackFrame_);
     connect(addChannel, &QToolButton::clicked, this, [this] {
-        const auto index = project_.addChannel(tr("Channel %1").arg(project_.channels().size() + 1).toStdString());
+        const auto index
+            = project_.addChannel(tr("Channel %1").arg(project_.channels().size() + 1).toStdString());
         channelRack_->refresh();
         selectChannel(index);
     });
@@ -784,8 +795,8 @@ QWidget* MainWindow::createWorkspace()
     pianoRoll_->setProject(&project_);
     pianoRollFrame_ = new PanelFrame(tr("PIANO ROLL"), pianoRoll_, workspace_);
     workspace_->addWidget(pianoRollFrame_);
-    makeDetachable(detachable_[0], WorkspacePage::PianoRoll, pianoRollFrame_, tr("Piano roll"), tr("piano roll"),
-        QStringLiteral("pianoRoll"));
+    makeDetachable(detachable_[0], WorkspacePage::PianoRoll, pianoRollFrame_, tr("Piano roll"),
+        tr("piano roll"), QStringLiteral("pianoRoll"));
     const auto notesEdited = [this] {
         pianoRoll_->viewport()->update();
         playlist_->viewport()->update(); // clip lengths follow the pattern
@@ -845,10 +856,11 @@ QWidget* MainWindow::createEmptyState()
     layout->addWidget(title);
 
     const QString playKey = transport_->playAction()->shortcut().toString(QKeySequence::NativeText);
-    auto* hint = new QLabel(tr("Press %1 to start the metronome.\n"
-                               "Open the playlist (F5), channel rack (F6) or piano roll (F7) to write a song.")
-                                .arg(playKey),
-        central);
+    auto* hint
+        = new QLabel(tr("Press %1 to start the metronome.\n"
+                        "Open the playlist (F5), channel rack (F6) or piano roll (F7) to write a song.")
+                         .arg(playKey),
+            central);
     hint->setObjectName(QStringLiteral("emptyHint"));
     hint->setAlignment(Qt::AlignCenter);
     layout->addWidget(hint);
@@ -867,7 +879,8 @@ void MainWindow::createStatusBar()
         const int current = listDevices();
         auto* group = new QActionGroup(menu);
         for (int i = 0; i < static_cast<int>(deviceNames_.size()); ++i) {
-            QAction* action = menu->addAction(QString::fromStdString(deviceNames_[static_cast<std::size_t>(i)]));
+            QAction* action
+                = menu->addAction(QString::fromStdString(deviceNames_[static_cast<std::size_t>(i)]));
             action->setCheckable(true);
             action->setChecked(i == current);
             group->addAction(action);
@@ -1122,7 +1135,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
     for (const DetachablePage& d : detachable_) {
         const bool detached = isPageDetached(d.page);
         settings.setValue(QStringLiteral("mainWindow/%1Detached").arg(d.settingsId), detached);
-        settings.setValue(QStringLiteral("mainWindow/%1WindowOpen").arg(d.settingsId), detached && d.window->isVisible());
+        settings.setValue(
+            QStringLiteral("mainWindow/%1WindowOpen").arg(d.settingsId), detached && d.window->isVisible());
     }
     settings.setValue(kSidebarPageKey, activityBar_->current());
 
@@ -1200,7 +1214,8 @@ void MainWindow::startDevice(int index)
     std::string error;
     if (!audio_.openDevice(index, &error)) {
         deviceStatus_->setText(tr("No audio output"));
-        settingsDialog_->audioPage()->setStatus(tr("Not running: %1").arg(QString::fromStdString(error)), false);
+        settingsDialog_->audioPage()->setStatus(
+            tr("Not running: %1").arg(QString::fromStdString(error)), false);
         statusBar()->showMessage(tr("Audio error: %1").arg(QString::fromStdString(error)), 8000);
         return;
     }
@@ -1345,8 +1360,8 @@ void MainWindow::refreshFromEngine()
     // recorded at the end, with how long it took).
     if (!performanceOverlay_->isHidden()) {
         if (due(nextOverlayAt_, 0.5))
-            performanceOverlay_->setFigures(frameStats_.snapshot(now), audio_.isRunning() ? engine.cpuLoad() : 0.0f,
-                refreshIntervalMs_);
+            performanceOverlay_->setFigures(
+                frameStats_.snapshot(now), audio_.isRunning() ? engine.cpuLoad() : 0.0f, refreshIntervalMs_);
     }
 
     const double ticks = engine.positionTicks();

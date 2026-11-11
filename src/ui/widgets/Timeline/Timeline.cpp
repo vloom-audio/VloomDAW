@@ -41,8 +41,8 @@ void paintRuler(QPainter& painter, const QRect& rect, const Scale& scale)
     const double barPixels = kTicksPerBar * scale.pixelsPerTick;
     const int labelEvery = std::max(1, static_cast<int>(std::ceil(28.0 / barPixels)));
     const bool beatMarks = kTicksPerBeat * scale.pixelsPerTick >= kMinLineSpacing;
-    for (long long t = firstMultiple(rect, scale, kTicksPerBeat); scale.x(static_cast<double>(t)) <= rect.right();
-         t += kTicksPerBeat) {
+    for (long long t = firstMultiple(rect, scale, kTicksPerBeat);
+        scale.x(static_cast<double>(t)) <= rect.right(); t += kTicksPerBeat) {
         if (t < 0)
             continue;
         const int x = static_cast<int>(std::lround(scale.x(static_cast<double>(t))));
@@ -51,8 +51,8 @@ void paintRuler(QPainter& painter, const QRect& rect, const Scale& scale)
             painter.fillRect(QRect(x, rect.top() + rect.height() / 2, 1, rect.height() / 2), c.textDim);
             if (bar % labelEvery == 0) {
                 painter.setPen(c.text);
-                painter.drawText(QRect(x + 4, rect.top(), 60, rect.height() - 2), Qt::AlignLeft | Qt::AlignVCenter,
-                    QString::number(bar + 1));
+                painter.drawText(QRect(x + 4, rect.top(), 60, rect.height() - 2),
+                    Qt::AlignLeft | Qt::AlignVCenter, QString::number(bar + 1));
             }
         } else if (beatMarks) {
             painter.fillRect(QRect(x, rect.bottom() - 5, 1, 5), c.border);
@@ -80,13 +80,14 @@ void paintGrid(QPainter& painter, const QRect& rect, const Scale& scale, int min
     int step = minorTicks;
     while (step * scale.pixelsPerTick < kMinLineSpacing && step < kTicksPerBar)
         step *= 2;
-    for (long long t = firstMultiple(rect, scale, step); scale.x(static_cast<double>(t)) <= rect.right(); t += step) {
+    for (long long t = firstMultiple(rect, scale, step); scale.x(static_cast<double>(t)) <= rect.right();
+        t += step) {
         if (t < 0)
             continue;
         const QColor& color = calm && t % kTicksPerPhrase == 0 ? phrase
-            : t % kTicksPerBar == 0                           ? bar
-            : t % kTicksPerBeat == 0                          ? beat
-                                                              : minor;
+            : t % kTicksPerBar == 0                            ? bar
+            : t % kTicksPerBeat == 0                           ? beat
+                                                               : minor;
         const int x = static_cast<int>(std::lround(scale.x(static_cast<double>(t))));
         painter.fillRect(QRect(x, rect.top(), 1, rect.height()), color);
     }

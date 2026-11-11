@@ -52,7 +52,8 @@ WindowButtons::WindowButtons(QWidget* parent)
 
 void WindowButtons::setMaximized(bool maximized)
 {
-    maximize_->setIcon(icon(maximized ? QStringLiteral("window-restore") : QStringLiteral("window-maximize")));
+    maximize_->setIcon(
+        icon(maximized ? QStringLiteral("window-restore") : QStringLiteral("window-maximize")));
     maximize_->setToolTip(maximized ? tr("Restore Down") : tr("Maximize"));
 }
 

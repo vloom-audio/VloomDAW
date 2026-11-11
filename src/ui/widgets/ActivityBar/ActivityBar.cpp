@@ -43,10 +43,7 @@ ActivityBar::ActivityBar(QWidget* parent)
     hoverLabel_->hide();
 }
 
-void ActivityBar::watchButton(QToolButton* button)
-{
-    button->installEventFilter(this);
-}
+void ActivityBar::watchButton(QToolButton* button) { button->installEventFilter(this); }
 
 bool ActivityBar::eventFilter(QObject* watched, QEvent* event)
 {

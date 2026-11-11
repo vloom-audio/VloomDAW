@@ -20,7 +20,8 @@ class Knob : public QWidget {
     Q_OBJECT
 
 public:
-    Knob(const QString& caption, double minimum, double maximum, double defaultValue, QWidget* parent = nullptr);
+    Knob(const QString& caption, double minimum, double maximum, double defaultValue,
+        QWidget* parent = nullptr);
 
     [[nodiscard]] double value() const { return value_; }
     /// How a value reads in the tool tip, e.g. "100% (0.0 dB)".
