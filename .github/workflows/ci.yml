@@ -17,7 +17,7 @@ jobs:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Must match required_version in scripts/format.sh.
       - name: Install clang-format
         run: |
@@ -32,7 +32,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: scripts/check_commit_messages.sh "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
@@ -46,13 +46,13 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout VloomDAW
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: VloomDAW
 
       # Same layout developers use: the engine sits next to the app.
       - name: Checkout vloom-engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: vloom-audio/vloom-engine
           path: vloom-engine
