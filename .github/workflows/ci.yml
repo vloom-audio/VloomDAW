@@ -61,8 +61,9 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           # Pinned. Qt 6.8 links the AGL framework, which the macOS 26 SDK no
-          # longer has, so macos-latest cannot link with it.
-          version: '6.11.3'
+          # longer has; aqt (used by this action) cannot install Qt >= 6.11 on
+          # Windows yet. 6.10.3 works on all three runners.
+          version: '6.10.3'
           cache: true
 
       - name: Install Linux build dependencies
