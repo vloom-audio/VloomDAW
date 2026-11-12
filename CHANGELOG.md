@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Plugin vendor and category: with "Read vendor and category" on, a scan loads each
+  new or changed plugin in a separate process (`vloomdaw-plugin-probe`) and asks its
+  factory for name, vendor, version and VST3 sub-categories / CLAP features. A plugin
+  that crashes or hangs (20 s) is skipped and marked; unchanged plugins reuse the last
+  scan. The sidebar groups by category (instruments split into Synth, Sampler, Drums,
+  Keys...), vendor or format, and searches names and vendors. Right-click a plugin to
+  set its category yourself (kept across scans); Rescan All reads every plugin again.
 - The channel rack plays: drop a WAV file from the browser or the desktop on a
   channel (below the last one for a new channel) and its steps trigger the sample
   through vloom-engine's step sequencer. Edits apply while playing without cutting

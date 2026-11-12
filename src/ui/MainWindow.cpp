@@ -717,6 +717,19 @@ void MainWindow::createCentralArea()
     pluginsPanel_ = new PluginsPanel(sidePanels_);
     pluginsPanel_->setStore(pluginStore_);
     connect(pluginsPanel_, &PluginsPanel::managerRequested, this, &MainWindow::showPluginManager);
+    connect(pluginsPanel_, &PluginsPanel::userCategoryChosen, this,
+        [this](std::size_t index, const QString& category, const QString& type) {
+            if (index >= pluginStore_.plugins.size())
+                return;
+            PluginInfo& plugin = pluginStore_.plugins[index];
+            plugin.userCategory = category.toStdString();
+            plugin.userInstrumentType
+                = category == QLatin1String("Instrument") ? type.toStdString() : std::string();
+            pluginStore_.save();
+            pluginsPanel_->setStore(pluginStore_);
+            if (pluginManager_ != nullptr)
+                pluginManager_->setStore(pluginStore_); // its next scan starts from this
+        });
     sidePanels_->addWidget(pluginsPanel_);
     activityBar_->addPage(Theme::icon(QStringLiteral("plug")), tr("Plugins"));
 
