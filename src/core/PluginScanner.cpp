@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <iterator>
 #include <set>
 #include <system_error>
 
@@ -21,6 +22,13 @@ std::string lowerExtension(const fs::path& path)
     std::transform(ext.begin(), ext.end(), ext.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return ext;
+}
+
+/// A path as UTF-8 (path::string() uses the ANSI code page on Windows).
+std::string utf8(const fs::path& path)
+{
+    const std::u8string text = path.u8string();
+    return {text.begin(), text.end()};
 }
 
 const char* extensionOf(PluginFormat format) { return format == PluginFormat::Vst3 ? ".vst3" : ".clap"; }
@@ -97,8 +105,21 @@ std::vector<PluginInfo> scanPluginFolders(const std::vector<PluginFolder>& folde
             const bool isDir = !isLink && entry.is_directory(statError);
             if (lowerExtension(entry.path()) == wanted && (isDir || entry.is_regular_file(statError))) {
                 const fs::path canonical = fs::weakly_canonical(entry.path(), statError);
-                if (seen.insert(statError ? entry.path() : canonical).second)
-                    found.push_back({entry.path().stem().string(), folder.format, entry.path()});
+                if (seen.insert(statError ? entry.path() : canonical).second) {
+                    PluginInfo info;
+                    info.name = utf8(entry.path().stem());
+                    info.format = folder.format;
+                    info.path = entry.path();
+                    // Installers group plugins in a vendor folder: VST3/FabFilter/Pro-Q 4.vst3.
+                    const fs::path relative = entry.path().lexically_relative(folder.path);
+                    if (std::distance(relative.begin(), relative.end()) > 1)
+                        info.vendor = utf8(*relative.begin());
+                    if (!isDir)
+                        info.fileSize = entry.file_size(statError);
+                    info.modified = static_cast<std::int64_t>(
+                        entry.last_write_time(statError).time_since_epoch().count());
+                    found.push_back(std::move(info));
+                }
                 if (isDir)
                     it.disable_recursion_pending(); // a bundle: its insides are not plugins
                 continue;
