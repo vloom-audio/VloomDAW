@@ -7,8 +7,11 @@ app/      VloomDAW (executable)      main(), object wiring
   │
 ui/       vloomdaw_ui   (Qt)          windows, widgets — no audio or business logic
   │
-audio/    vloomdaw_core (no Qt)       AudioController: vloom::Engine + audio device
-core/     vloomdaw_core (no Qt)       pure logic: formatting; later project model, undo
+audio/    vloomdaw_core (no Qt)       AudioController: vloom::Engine + audio device;
+                                      project and mixer turned into engine state
+core/     vloomdaw_core (no Qt)       pure logic: project and mixer models, plugin scan,
+                                      device watch, formatting; later undo
+probe/    vloomdaw-plugin-probe       child process that loads one plugin for its metadata
   │
 vloom-engine                          real-time audio (separate repo)
 ```
@@ -24,13 +27,22 @@ Rules:
    setters for what it shows. `MainWindow` (later: per-feature controllers)
    connects widgets to the model and engine.
 
-## Data flow (M0)
+## Data flow
 
 ```
 TransportBar ──playToggled/tempoChanged──▶ MainWindow ──▶ Engine control API (queued)
      ▲                                                              │
-     └──── setPosition/setPlaying ◀── QTimer 30 Hz ◀── Engine atomics (play state, playhead)
+     └──── setPosition/setPlaying ◀── screen-rate timer ◀── Engine atomics (play state, playhead)
+
+ChannelRackView ──step/volume/insert──▶ Project ──ChannelRackAudio──▶ SequencerState snapshot
+MixerPanel ──fader/pan/mute/solo──▶ MixerModel ──MixerAudio──▶ MixerState snapshot
+     ▲                                                              │
+     └──── meters ◀── screen-rate timer ◀── Engine peaks (output, per insert)
 ```
+
+Edits never wait for the audio thread: `ChannelRackAudio` and `MixerAudio`
+build immutable engine state from the models and publish it; samples are
+loaded on the control thread before they are published.
 
 The UI never blocks on the audio thread and the audio thread never waits for
 the UI. See the engine's
@@ -54,16 +66,7 @@ for the threading rules.
 Add new files to `src/CMakeLists.txt` under the right block and tests to
 `tests/CMakeLists.txt`.
 
-## Planned structure (M1+)
+## Planned
 
-```
-core/
-  model/        Project, Pattern, Channel — plain C++ data
-  commands/     every user edit is a Command (enables undo/redo)
-ui/
-  channelrack/  ChannelRackView, StepButton
-  pianoroll/
-  playlist/
-  mixer/
-  widgets/      Knob/, Meter/, … (one folder per widget)
-```
+- `core/commands/`: every user edit as a Command, for undo / redo.
+- Per-feature controllers that take the wiring out of `MainWindow`.
