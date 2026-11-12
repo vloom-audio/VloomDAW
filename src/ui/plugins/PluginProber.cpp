@@ -3,6 +3,7 @@
 #include "ui/plugins/PluginProber.hpp"
 
 #include "core/PluginMetadata.hpp"
+#include "ui/FilePaths.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -16,16 +17,6 @@ namespace vloomdaw {
 namespace {
 constexpr qsizetype kMaxOutput = 1 << 20; ///< a chatty plugin cannot fill memory
 
-/// A file system path as a QString. POSIX names are bytes (maybe not valid
-/// UTF-8): decode them like Qt does instead of path::wstring(), which throws.
-QString nativePath(const std::filesystem::path& p)
-{
-#if defined(Q_OS_WIN)
-    return QString::fromStdWString(p.wstring());
-#else
-    return QFile::decodeName(QByteArray::fromStdString(p.native()));
-#endif
-}
 } // namespace
 
 PluginProber::PluginProber(QObject* parent)
@@ -135,7 +126,7 @@ void PluginProber::next()
         timedOut_ = false;
         const QString format
             = module.format == PluginFormat::Clap ? QStringLiteral("--clap") : QStringLiteral("--vst3");
-        process_->start(program, {format, nativePath(module.path)});
+        process_->start(program, {format, toQString(module.path)});
         timeout_->start();
         return; // continues in moduleDone()
     }

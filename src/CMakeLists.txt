@@ -64,6 +64,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/Theme.hpp
     ui/AppSettings.cpp
     ui/AppSettings.hpp
+    ui/FilePaths.cpp
+    ui/FilePaths.hpp
     ui/browser/BrowserPanel.cpp
     ui/browser/BrowserPanel.hpp
     ui/channelrack/ChannelRackView.cpp
