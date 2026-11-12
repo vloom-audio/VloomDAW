@@ -17,7 +17,7 @@ jobs:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Must match required_version in scripts/format.sh.
       - name: Install clang-format
         run: |
@@ -32,7 +32,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - run: scripts/check_commit_messages.sh "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
@@ -46,19 +46,29 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout VloomDAW
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: VloomDAW
 
-      # Same layout developers use: the engine sits next to the app.
+      # Same layout developers use: the engine sits next to the app, at the
+      # revision pinned in cmake/Dependencies.cmake (one place to bump).
+      - name: Read the pinned vloom-engine revision
+        id: engine
+        shell: bash
+        run: |
+          sha=$(sed -nE 's/^set\(VLOOM_ENGINE_GIT_TAG "([0-9a-f]{40})".*/\1/p' VloomDAW/cmake/Dependencies.cmake)
+          test -n "$sha" || { echo "::error::no 40-character VLOOM_ENGINE_GIT_TAG in cmake/Dependencies.cmake"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Checkout vloom-engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vloom-audio/vloom-engine
+          ref: ${{ steps.engine.outputs.sha }}
           path: vloom-engine
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           # Pinned. Qt 6.8 links the AGL framework, which the macOS 26 SDK no
           # longer has; aqt (used by this action) cannot install Qt >= 6.11 on
@@ -68,9 +78,9 @@ jobs:
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libasound2-dev
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cpm-cache
           key: cpm-${{ runner.os }}-${{ hashFiles('VloomDAW/cmake/Dependencies.cmake', 'VloomDAW/tests/CMakeLists.txt', 'vloom-engine/cmake/Dependencies.cmake') }}

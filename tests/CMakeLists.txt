@@ -1,7 +1,10 @@
+# Pinned to the commit of the v3.7.1 tag (tags can be moved).
 CPMAddPackage(
     NAME Catch2
     GITHUB_REPOSITORY catchorg/Catch2
-    VERSION 3.7.1)
+    VERSION 3.7.1
+    GIT_TAG fa43b77429ba76c462b1898d6cd2f2d7a9416b14
+    GIT_SHALLOW FALSE)
 
 # Tests cover the Qt-free core only, so they build and run without Qt or a display.
 # Test files mirror src/: tests/<module>/<Name>Tests.cpp

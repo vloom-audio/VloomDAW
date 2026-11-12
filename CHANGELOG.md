@@ -6,6 +6,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- Supply chain: GitHub Actions are pinned to commit SHAs (checkout v7.0.1, cache
+  v6.1.0, install-qt-action v4.5.0; Dependabot keeps them current), the CPM.cmake
+  download is checked against a pinned SHA-256 (a cached copy that does not match is
+  fetched again), Catch2 is pinned to the commit of its v3.7.1 tag, and vloom-engine
+  is pinned to a commit in `cmake/Dependencies.cmake`, which CI checks out too, instead
+  of following the engine's `main`.
+
 ### Added
 - Channel rack volume and routing: each channel has a volume knob (drag, Shift
   for fine, scroll, double-click for 0 dB) and an insert box; click it to send
