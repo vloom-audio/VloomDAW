@@ -6,6 +6,7 @@
 #include "ui/Theme.hpp"
 
 #include <QApplication>
+#include <QIcon>
 
 int main(int argc, char* argv[])
 {
@@ -22,6 +23,7 @@ int main(int argc, char* argv[])
     QApplication::setApplicationVersion(QStringLiteral(VLOOMDAW_VERSION));
     QApplication::setOrganizationName(QStringLiteral("Vloom Audio"));
     QApplication::setOrganizationDomain(QStringLiteral("vloom-audio.com"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/app/vloomdaw.png")));
     // The saved theme, before any window exists.
     const vloomdaw::AppSettings settings = vloomdaw::AppSettings::load();
     vloomdaw::Theme::select(settings.theme);

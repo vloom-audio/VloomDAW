@@ -179,10 +179,23 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/window-maximize.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-minimize.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-restore.svg)
+# The app icon, set as the window icon in main() (resources/app/README.md).
+qt_add_resources(vloomdaw_ui "app_icon"
+    PREFIX "/app"
+    BASE "${PROJECT_SOURCE_DIR}/resources/app"
+    FILES ${PROJECT_SOURCE_DIR}/resources/app/vloomdaw.png)
 vloom_set_warnings(vloomdaw_ui)
 
 # ---------------------------------------------------------------- app
 qt_add_executable(VloomDAW app/main.cpp)
+# The icon the OS shows for the executable / bundle (generated, see resources/app/README.md).
+if(WIN32)
+    target_sources(VloomDAW PRIVATE app/VloomDAW.rc)
+elseif(APPLE)
+    set(VLOOMDAW_ICNS ${PROJECT_SOURCE_DIR}/resources/app/vloomdaw.icns)
+    set_source_files_properties(${VLOOMDAW_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(VloomDAW PRIVATE ${VLOOMDAW_ICNS})
+endif()
 target_link_libraries(VloomDAW PRIVATE vloomdaw_ui)
 # The app finds the probe next to its own executable (inside the bundle on macOS).
 add_dependencies(VloomDAW vloomdaw-plugin-probe)
@@ -202,6 +215,7 @@ set_target_properties(VloomDAW PROPERTIES
     MACOSX_BUNDLE ON
     MACOSX_BUNDLE_BUNDLE_NAME "VloomDAW"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.vloom-audio.vloomdaw"
+    MACOSX_BUNDLE_ICON_FILE "vloomdaw.icns"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
 

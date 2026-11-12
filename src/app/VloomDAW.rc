@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Vloom Audio contributors
+// Windows resources: the icon Explorer, the taskbar and Alt+Tab show.
+// The first icon in the file is the executable's icon.
+IDI_ICON1 ICON "../../resources/app/vloomdaw.ico"

@@ -124,6 +124,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Window size and position are remembered between sessions
 
 ### Fixed
+- The app has its own icon (Windows executable, macOS bundle, window icon).
 - macOS: detached panels (playlist, piano roll, mixer) no longer show a separate
   title bar: like the main window, the panel header takes its place, holds the
   window buttons and moves the window.
