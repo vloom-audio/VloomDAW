@@ -7,8 +7,8 @@
 
 class QComboBox;
 class QLabel;
-class QFileSystemModel;
 class QLineEdit;
+class QTimer;
 class QToolButton;
 class QTreeView;
 
@@ -19,6 +19,9 @@ namespace vloomdaw {
 /// The user keeps a list of folders, picks one, and can search it by name.
 /// QFileSystemModel reads the disk on its own thread, so large folders never
 /// block the UI. Read-only: nothing here changes files.
+class SampleTreeModel;
+class SearchResultsModel;
+
 class BrowserPanel : public QWidget {
     Q_OBJECT
 
@@ -34,7 +37,7 @@ signals:
 
 private:
     void showFolder(const QString& path);
-    void applySearch(const QString& text);
+    void applySearch();
     void addFolder();
     void removeFolder();
     void emitFolders();
@@ -44,7 +47,11 @@ private:
     QLineEdit* search_ = nullptr;
     QTreeView* tree_ = nullptr;
     QLabel* emptyHint_ = nullptr;
-    QFileSystemModel* model_ = nullptr;
+    SampleTreeModel* model_ = nullptr;
+    QTreeView* results_ = nullptr; ///< shown instead of tree_ while searching
+    SearchResultsModel* resultsModel_ = nullptr;
+    QTimer* searchDelay_ = nullptr; ///< searches once typing pauses, not per key
+    QString root_; ///< the folder shown; empty = none
 };
 
 } // namespace vloomdaw

@@ -91,7 +91,10 @@ jobs:
 
       - name: Build
         working-directory: VloomDAW
-        run: cmake --build --preset dev --parallel
+        # A bare --parallel is "make -j" with no limit on Linux (Makefiles):
+        # every compiler at once ran the runner out of memory (cc1plus killed).
+        # Hosted runners have 4 cores.
+        run: cmake --build --preset dev --parallel 4
 
       - name: Test
         working-directory: VloomDAW

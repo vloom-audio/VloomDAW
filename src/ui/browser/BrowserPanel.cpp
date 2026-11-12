@@ -2,15 +2,13 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/browser/BrowserPanel.hpp"
 
-#include "core/BrowserFilter.hpp"
 #include "ui/Theme.hpp"
+#include "ui/browser/SampleTreeModel.hpp"
+#include "ui/browser/SearchResultsModel.hpp"
 
-#include <QAbstractFileIconProvider>
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
-#include <QFileInfo>
-#include <QFileSystemModel>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -18,6 +16,7 @@
 #include <QLineEdit>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
@@ -36,24 +35,20 @@ QToolButton* smallButton(QWidget* parent, const QString& icon, const QString& ti
     return button;
 }
 
-/// Theme icons instead of the platform's (blue macOS folders etc.), so the
-/// tree matches the rest of the app on every OS.
-class BrowserIconProvider : public QAbstractFileIconProvider {
-public:
-    QIcon icon(IconType type) const override { return type == Folder ? folder_ : file_; }
-    QIcon icon(const QFileInfo& info) const override { return info.isDir() ? folder_ : file_; }
-
-private:
-    QIcon folder_ = Theme::icon(QStringLiteral("browser-folder"));
-    QIcon file_ = Theme::icon(QStringLiteral("browser-file"));
-};
-
-/// The model keeps a raw pointer and may use it while being destroyed, so
-/// the provider lives for the whole program.
-QAbstractFileIconProvider* browserIcons()
+/// The browser's list style, shared by the folder tree and the search results.
+QTreeView* browserView(QWidget* parent)
 {
-    static BrowserIconProvider provider;
-    return &provider;
+    auto* view = new QTreeView(parent);
+    view->setObjectName(QStringLiteral("browserTree"));
+    view->setHeaderHidden(true);
+    view->setFrameShape(QFrame::NoFrame);
+    view->setIndentation(14);
+    view->setIconSize(QSize(16, 16));
+    view->setUniformRowHeights(true);
+    // Files drag out as URLs: drop one on a channel in the channel rack.
+    view->setDragEnabled(true);
+    view->setDragDropMode(QAbstractItemView::DragOnly);
+    return view;
 }
 
 } // namespace
@@ -85,33 +80,33 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     search_->setObjectName(QStringLiteral("browserSearch"));
     search_->setPlaceholderText(tr("Search (Esc to leave)"));
     search_->setClearButtonEnabled(true);
-    connect(search_, &QLineEdit::textChanged, this, &BrowserPanel::applySearch);
+    searchDelay_ = new QTimer(this);
+    searchDelay_->setSingleShot(true);
+    searchDelay_->setInterval(150);
+    connect(searchDelay_, &QTimer::timeout, this, &BrowserPanel::applySearch);
+    connect(search_, &QLineEdit::textChanged, searchDelay_, qOverload<>(&QTimer::start));
     // Escape gives the keyboard back to the transport shortcuts (Space etc.).
     auto* leaveSearch
         = new QShortcut(QKeySequence(Qt::Key_Escape), search_, nullptr, nullptr, Qt::WidgetShortcut);
     connect(leaveSearch, &QShortcut::activated, search_, [this] { search_->clearFocus(); });
 
-    model_ = new QFileSystemModel(this);
-    model_->setFilter(QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot);
-    model_->setNameFilterDisables(false); // hide non-matching files instead of greying them
-    model_->setReadOnly(true);
-    model_->setIconProvider(browserIcons());
-    applySearch(QString());
-
-    tree_ = new QTreeView(this);
-    tree_->setObjectName(QStringLiteral("browserTree"));
+    // Folders are read, and searched, on worker threads (SampleTreeModel,
+    // SearchResultsModel): big sample libraries must not freeze the UI.
+    const QIcon fileIcon = Theme::icon(QStringLiteral("browser-file"));
+    model_ = new SampleTreeModel(this);
+    model_->setIcons(Theme::icon(QStringLiteral("browser-folder")), fileIcon);
+    tree_ = browserView(this);
     tree_->setModel(model_);
-    tree_->setHeaderHidden(true);
-    for (int column = 1; column < model_->columnCount(); ++column)
-        tree_->hideColumn(column); // name only: size, type and date add noise
-    tree_->setFrameShape(QFrame::NoFrame);
-    tree_->setIndentation(14);
-    tree_->setIconSize(QSize(16, 16));
-    tree_->setUniformRowHeights(true);
     tree_->setAnimated(true);
-    // Files drag out as URLs: drop one on a channel in the channel rack.
-    tree_->setDragEnabled(true);
-    tree_->setDragDropMode(QAbstractItemView::DragOnly);
+
+    // Search: every matching file below the folder, as one list. A separate
+    // view, so the tree keeps its open folders while searching.
+    resultsModel_ = new SearchResultsModel(this);
+    resultsModel_->setFileIcon(fileIcon);
+    results_ = browserView(this);
+    results_->setModel(resultsModel_);
+    results_->setRootIsDecorated(false);
+    results_->hide();
 
     emptyHint_ = new QLabel(tr("Add a folder with your samples using +."), this);
     emptyHint_->setObjectName(QStringLiteral("panelHint"));
@@ -120,7 +115,7 @@ BrowserPanel::BrowserPanel(QWidget* parent)
 
     // Only take keyboard focus when clicked: otherwise the search box would
     // grab it at start-up and Space would type instead of playing.
-    for (QWidget* w : std::initializer_list<QWidget*>{folders_, search_, tree_})
+    for (QWidget* w : std::initializer_list<QWidget*>{folders_, search_, tree_, results_})
         w->setFocusPolicy(Qt::ClickFocus);
 
     auto* folderRow = new QHBoxLayout;
@@ -136,6 +131,7 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     layout->addLayout(folderRow);
     layout->addWidget(search_);
     layout->addWidget(tree_, 1);
+    layout->addWidget(results_, 1);
     layout->addWidget(emptyHint_, 1);
     showFolder(QString());
 }
@@ -159,19 +155,24 @@ void BrowserPanel::showFolder(const QString& path)
     folders_->setToolTip(path);
     // With no folder, show a hint: an empty root path would list the whole disk.
     const bool hasFolder = !path.isEmpty();
-    tree_->setVisible(hasFolder);
+    root_ = hasFolder ? path : QString();
     search_->setEnabled(hasFolder);
     emptyHint_->setVisible(!hasFolder);
-    if (hasFolder)
-        tree_->setRootIndex(model_->setRootPath(path));
+    model_->setRootPath(root_);
+    applySearch(); // a search in progress follows the new folder
 }
 
-void BrowserPanel::applySearch(const QString& text)
+void BrowserPanel::applySearch()
 {
-    QStringList filters;
-    for (const auto& filter : audioFileNameFilters(text.toStdString()))
-        filters << QString::fromStdString(filter);
-    model_->setNameFilters(filters);
+    searchDelay_->stop();
+    const QString text = search_->text().trimmed();
+    const bool searching = !root_.isEmpty() && !text.isEmpty();
+    if (searching)
+        resultsModel_->search(root_, text);
+    else
+        resultsModel_->clear();
+    tree_->setVisible(!root_.isEmpty() && !searching);
+    results_->setVisible(searching);
 }
 
 void BrowserPanel::addFolder()
