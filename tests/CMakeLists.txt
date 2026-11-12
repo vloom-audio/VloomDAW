@@ -8,9 +8,18 @@ CPMAddPackage(
 add_executable(vloomdaw_tests
     core/AudioFormatTests.cpp
     core/BrowserFilterTests.cpp
+    core/DecibelsTests.cpp
     core/DeviceRefTests.cpp
+    core/FrameStatsTests.cpp
+    core/MixerModelTests.cpp
+    core/NoteNamesTests.cpp
+    core/PluginScannerTests.cpp
     core/PositionFormatTests.cpp
-    core/TapTempoTests.cpp)
+    core/ProcessMemoryTests.cpp
+    core/ProjectTests.cpp
+    core/ScalesTests.cpp
+    core/TapTempoTests.cpp
+    core/ThemePresetsTests.cpp)
 
 target_link_libraries(vloomdaw_tests PRIVATE vloomdaw_core Catch2::Catch2WithMain)
 vloom_set_warnings(vloomdaw_tests)

@@ -4,10 +4,11 @@
 
 #include <QWidget>
 
-class QCheckBox;
 class QComboBox;
 
 namespace vloomdaw {
+
+class ToggleSwitch;
 
 /// Settings → General: what VloomDAW looks like when it starts.
 /// A pure view: emits what the user picked.
@@ -27,7 +28,7 @@ signals:
 
 private:
     QComboBox* positionMode_ = nullptr;
-    QCheckBox* metronome_ = nullptr;
+    ToggleSwitch* metronome_ = nullptr;
 };
 
 } // namespace vloomdaw

@@ -3,6 +3,7 @@
 #include "ui/browser/BrowserPanel.hpp"
 
 #include "core/BrowserFilter.hpp"
+#include "ui/Theme.hpp"
 
 #include <QAbstractFileIconProvider>
 #include <QComboBox>
@@ -28,7 +29,7 @@ namespace {
 QToolButton* smallButton(QWidget* parent, const QString& icon, const QString& tip)
 {
     auto* button = new QToolButton(parent);
-    button->setIcon(QIcon(QStringLiteral(":/icons/%1.svg").arg(icon)));
+    button->setIcon(Theme::icon(icon));
     button->setIconSize(QSize(14, 14));
     button->setToolTip(tip);
     button->setFocusPolicy(Qt::NoFocus);
@@ -43,8 +44,8 @@ public:
     QIcon icon(const QFileInfo& info) const override { return info.isDir() ? folder_ : file_; }
 
 private:
-    QIcon folder_{QStringLiteral(":/icons/browser-folder.svg")};
-    QIcon file_{QStringLiteral(":/icons/browser-file.svg")};
+    QIcon folder_ = Theme::icon(QStringLiteral("browser-folder"));
+    QIcon file_ = Theme::icon(QStringLiteral("browser-file"));
 };
 
 /// The model keeps a raw pointer and may use it while being destroyed, so

@@ -14,35 +14,33 @@ and a mixer to open source.
 The audio engine lives in its own repository,
 [vloom-engine](https://github.com/vloom-audio/vloom-engine), and has no UI.
 
-> **Current milestone: M0 — first sound.** A window with a transport, a
-> metronome, an LCD-style tempo and position display, a sample browser and audio
-> settings.
+> **Current milestone: M0 — first sound.** The transport, metronome and master
+> output play through the engine. The song editors and mixer can already be
+> edited; they get audio in M1–M3.
 
 ---
 
-## Features (M0)
+## Features
 
-- **Transport bar**
-  - Play / pause, stop (returns to the start) and go to start.
-  - Metronome on / off.
-- **LCD displays**
-  - **Tempo:** drag up / down to change the BPM (`Shift` for fine steps), scroll,
-    or double-click to type a value. The time signature is shown next to it.
-  - **Song position:** bar · beat · tick (960 PPQ), or click to switch to
-    min : sec . ms.
-  - **Tap tempo** (`T`): averages the last four intervals between taps.
-- **Sidebar and sample browser**
-  - An icon strip opens a resizable side panel.
-  - The browser lists audio files (wav, aiff, flac, mp3, ogg) in your sample
-    folders; add or remove folders and search by name.
-- **Settings** (`Cmd/Ctrl + ,`)
-  - Audio: output device, sample rate, buffer size, and the latency one buffer
-    adds. The chosen device is remembered, even when two devices share a name.
-  - General: which position format and metronome state to start with.
-- **Dark theme**
-  - All colours come from one palette (`ui/Theme`); icons are SVG.
-  - macOS: the tool bar sits in the title bar row, full screen keeps the window
-    buttons, and the window size and position are remembered.
+Highlights. The **[feature list](docs/features.md)** has everything, with how far
+each feature goes (works / UI only / planned).
+
+- **Transport:** play, stop, metronome, LCD tempo and song position, tap tempo,
+  master volume, and a key display (root note and scale).
+- **Song editors** (editing only for now): channel rack with step pads, piano
+  roll, and a pattern playlist.
+- **Mixer:** master and 16 insert tracks with pan, fader, mute, solo and peak
+  meters; the master drives the engine.
+- **Plugins:** the Plugin Manager scans your VST3 and CLAP folders when you press
+  Scan, never automatically, and remembers what it found. Plugins are not loaded
+  yet (M4).
+- **Sample browser** for the audio files in your sample folders.
+- **Window layout:** the mixer, piano roll and playlist detach into their own windows.
+  On Windows, windows have no native title bar but still snap and resize natively.
+- **Settings and themes:** audio device and format; a theme editor with seven
+  dark presets, colour adjustments and a contrast check.
+- **Performance overlay** (`Ctrl/Cmd+Shift+D`) and a refresh rate that follows the
+  screen (up to 240 Hz).
 
 ---
 
@@ -53,6 +51,10 @@ The audio engine lives in its own repository,
 | <kbd>Space</kbd> | Play / pause |
 | <kbd>Shift</kbd> + <kbd>Space</kbd> | Stop and return to the start |
 | <kbd>Home</kbd> | Go to the start |
+| <kbd>R</kbd> | Arm / disarm recording (no audio input yet) |
+| <kbd>L</kbd> | Pattern / song mode |
+| <kbd>F5</kbd> / <kbd>F6</kbd> / <kbd>F7</kbd> / <kbd>F9</kbd> | Playlist / Channel rack / Piano roll / Mixer (editing only; playback of patterns comes in M1–M3) |
+| <kbd>Alt</kbd> + <kbd>F8</kbd> | Show / hide the browser |
 | <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>M</kbd> | Metronome on / off |
 | <kbd>T</kbd> | Tap tempo |
 | <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>,</kbd> | Settings |
@@ -147,6 +149,7 @@ VloomDAW/
 
 ## Documentation
 
+- **[Feature list](docs/features.md)**: everything VloomDAW has today, and how far each feature goes.
 - **[Getting started](docs/getting-started.md)**: tools, Qt setup, IDE setup.
 - **[Architecture](docs/architecture.md)**: how the UI, AudioController and engine fit together.
 - **[UI guidelines](docs/ui-guidelines.md)**: widget conventions, theme and icons.

@@ -45,7 +45,7 @@ private:
     void finishEdit(bool commit);
     [[nodiscard]] bool overTempo(const QPoint& pos) const;
 
-    double bpm_ = 120.0;
+    double bpm_ = 130.0;
     bool dragging_ = false;
     double dragStartBpm_ = 0.0;
     qreal dragStartY_ = 0.0;

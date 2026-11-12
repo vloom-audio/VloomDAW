@@ -12,9 +12,18 @@ target_sources(vloomdaw_core PRIVATE
     # core — pure logic: formatting, (later) project model, commands, undo
     core/AudioFormat.cpp
     core/BrowserFilter.cpp
+    core/Decibels.cpp
     core/DeviceRef.cpp
+    core/FrameStats.cpp
+    core/MixerModel.cpp
+    core/NoteNames.cpp
+    core/PluginScanner.cpp
     core/PositionFormat.cpp
+    core/ProcessMemory.cpp
+    core/Project.cpp
+    core/Scales.cpp
     core/TapTempo.cpp
+    core/ThemePresets.cpp
 
     # audio — owns the engine and the hardware device
     audio/AudioController.cpp)
@@ -37,29 +46,84 @@ qt_add_library(vloomdaw_ui STATIC
     ui/AppSettings.hpp
     ui/browser/BrowserPanel.cpp
     ui/browser/BrowserPanel.hpp
+    ui/channelrack/ChannelRackView.cpp
+    ui/channelrack/ChannelRackView.hpp
     ui/dialogs/SettingsDialog/AudioSettingsPage.cpp
     ui/dialogs/SettingsDialog/AudioSettingsPage.hpp
     ui/dialogs/SettingsDialog/GeneralSettingsPage.cpp
     ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp
+    ui/dialogs/SettingsDialog/SettingsCard.cpp
+    ui/dialogs/SettingsDialog/SettingsCard.hpp
     ui/dialogs/SettingsDialog/SettingsDialog.cpp
     ui/dialogs/SettingsDialog/SettingsDialog.hpp
+    ui/dialogs/SettingsDialog/ThemeSettingsPage.cpp
+    ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp
+    ui/mixer/MixerPanel.cpp
+    ui/mixer/MixerPanel.hpp
+    ui/mixer/MixerStrip.cpp
+    ui/mixer/MixerStrip.hpp
+    ui/pianoroll/PianoRollView.cpp
+    ui/pianoroll/PianoRollView.hpp
+    ui/playlist/PlaylistView.cpp
+    ui/playlist/PlaylistView.hpp
+    ui/plugins/PluginManagerDialog.cpp
+    ui/plugins/PluginManagerDialog.hpp
+    ui/plugins/PluginsPanel.cpp
+    ui/plugins/PluginsPanel.hpp
+    ui/plugins/PluginStore.cpp
+    ui/plugins/PluginStore.hpp
     ui/widgets/ActivityBar/ActivityBar.cpp
     ui/widgets/ActivityBar/ActivityBar.hpp
+    ui/widgets/DetachButton/DetachButton.cpp
+    ui/widgets/DetachButton/DetachButton.hpp
     ui/widgets/DeviceSelector/DeviceSelector.cpp
     ui/widgets/DeviceSelector/DeviceSelector.hpp
+    ui/widgets/Fader/Fader.cpp
+    ui/widgets/Fader/Fader.hpp
+    ui/widgets/FloatingPanel/FloatingPanel.cpp
+    ui/widgets/FloatingPanel/FloatingPanel.hpp
+    ui/widgets/KeyDisplay/KeyDisplay.cpp
+    ui/widgets/KeyDisplay/KeyDisplay.hpp
+    ui/widgets/Knob/Knob.cpp
+    ui/widgets/Knob/Knob.hpp
     ui/widgets/LcdDisplay/LcdDisplay.cpp
     ui/widgets/LcdDisplay/LcdDisplay.hpp
+    ui/widgets/LevelMeter/LevelMeter.cpp
+    ui/widgets/LevelMeter/LevelMeter.hpp
+    ui/widgets/PanelFrame/PanelFrame.cpp
+    ui/widgets/PanelFrame/PanelFrame.hpp
+    ui/widgets/PatternSelector/PatternSelector.cpp
+    ui/widgets/PatternSelector/PatternSelector.hpp
+    ui/widgets/PerformanceMeter/PerformanceMeter.cpp
+    ui/widgets/PerformanceMeter/PerformanceMeter.hpp
+    ui/widgets/PerformanceOverlay/PerformanceOverlay.cpp
+    ui/widgets/PerformanceOverlay/PerformanceOverlay.hpp
     ui/widgets/PositionDisplay/PositionDisplay.cpp
     ui/widgets/PositionDisplay/PositionDisplay.hpp
     ui/widgets/TempoDisplay/TempoDisplay.cpp
     ui/widgets/TempoDisplay/TempoDisplay.hpp
+    ui/widgets/Timeline/Timeline.cpp
+    ui/widgets/Timeline/Timeline.hpp
+    ui/widgets/ToggleSwitch/ToggleSwitch.cpp
+    ui/widgets/ToggleSwitch/ToggleSwitch.hpp
+    ui/widgets/ToolGroup/ToolGroup.cpp
+    ui/widgets/ToolGroup/ToolGroup.hpp
     ui/widgets/TransportBar/TransportBar.cpp
-    ui/widgets/TransportBar/TransportBar.hpp)
+    ui/widgets/TransportBar/TransportBar.hpp
+    ui/widgets/ViewButtons/ViewButtons.cpp
+    ui/widgets/ViewButtons/ViewButtons.hpp)
 # Qt6::Svg provides the SVG icon engine the icons below need at run time.
 target_link_libraries(vloomdaw_ui PUBLIC vloomdaw_core Qt6::Widgets Qt6::Svg)
 if(APPLE)
     target_sources(vloomdaw_ui PRIVATE ui/MacWindow.hpp ui/MacWindow.mm)
     target_link_libraries(vloomdaw_ui PRIVATE "-framework AppKit")
+elseif(WIN32)
+    target_sources(vloomdaw_ui PRIVATE
+        ui/WinWindow.hpp
+        ui/WinWindow.cpp
+        ui/widgets/WindowButtons/WindowButtons.cpp
+        ui/widgets/WindowButtons/WindowButtons.hpp)
+    target_link_libraries(vloomdaw_ui PRIVATE dwmapi)
 endif()
 qt_add_resources(vloomdaw_ui "icons"
     PREFIX "/icons"
@@ -67,16 +131,32 @@ qt_add_resources(vloomdaw_ui "icons"
     FILES
         ${PROJECT_SOURCE_DIR}/resources/icons/browser-file.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/browser-folder.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/channel-rack.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/chevron-down.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/chevrons-right.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/detach.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/dock.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/folder.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/metronome.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/minus.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/mixer.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/palette.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/pause.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/piano-roll.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/play.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/playlist.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/plug.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/plus.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/record.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/rewind.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/settings.svg
-        ${PROJECT_SOURCE_DIR}/resources/icons/stop.svg)
+        ${PROJECT_SOURCE_DIR}/resources/icons/sliders.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/speaker.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/stop.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/window-close.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/window-maximize.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/window-minimize.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/window-restore.svg)
 vloom_set_warnings(vloomdaw_ui)
 
 # ---------------------------------------------------------------- app

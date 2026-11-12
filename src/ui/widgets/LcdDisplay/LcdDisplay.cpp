@@ -33,6 +33,9 @@ LcdDisplay::LcdDisplay(QWidget* parent)
     : QWidget(parent)
 {
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    // Paints every pixel (the corners in the tool bar colour), so an update
+    // does not make Qt repaint the style-sheeted tool bar behind it.
+    setAttribute(Qt::WA_OpaquePaintEvent);
 
     digitFont_ = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     digitFont_.setPointSizeF(digitFont_.pointSizeF() * 1.4);
@@ -127,6 +130,7 @@ void LcdDisplay::paintEvent(QPaintEvent* /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
+    p.fillRect(rect(), c.panel); // the tool bar behind the rounded corners
     // Recessed panel: flat fill with a hairline border.
     const QRectF panel = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath path;
