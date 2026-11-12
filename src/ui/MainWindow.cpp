@@ -967,8 +967,6 @@ void MainWindow::extendIntoTitleBar()
     setWindowTitle(QString());
 
     transport_->setLeadingSpace(kWindowButtonsWidth);
-    // The app name the Windows menu bar row shows, after the window buttons.
-    transport_->showAppName(QStringLiteral("VLOOM"));
 
     // Native full screen hides the window buttons; toggleFullScreen() covers
     // the screen without it, and the green button zooms instead.

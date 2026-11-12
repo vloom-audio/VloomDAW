@@ -16,7 +16,6 @@
 #include <QFrame>
 #include <QIcon>
 #include <QKeySequence>
-#include <QLabel>
 #include <QLayout>
 #include <QTimer>
 #include <QToolButton>
@@ -110,11 +109,6 @@ TransportBar::TransportBar(QWidget* parent)
     //         [ CPU | RAM ] VOL PITCH [ TAP 🎵 ] [ views ]
     leadingSpace_ = spacer(this, 0);
     addWidget(leadingSpace_);
-    appName_ = new QLabel(this);
-    appName_->setObjectName(QStringLiteral("appName"));
-    appName_->setAttribute(Qt::WA_TransparentForMouseEvents);
-    appNameAction_ = addWidget(appName_);
-    appNameAction_->setVisible(false);
 
     QFrame* playGroup
         = makeToolGroup(this, {songModeAction_, playAction_, stopAction_, recordAction_}, iconSize());
@@ -198,13 +192,6 @@ QAction* TransportBar::makeAction(
 void TransportBar::setLeadingSpace(int pixels)
 {
     leadingSpace_->setFixedWidth(pixels);
-    scheduleRecentre();
-}
-
-void TransportBar::showAppName(const QString& name)
-{
-    appName_->setText(name);
-    appNameAction_->setVisible(true);
     scheduleRecentre();
 }
 

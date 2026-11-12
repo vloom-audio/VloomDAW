@@ -6,7 +6,6 @@
 #include <QToolBar>
 
 class QAction;
-class QLabel;
 class QResizeEvent;
 class QShowEvent;
 
@@ -53,10 +52,6 @@ public:
 
     /// Room at the start of the bar, e.g. for the macOS window buttons.
     void setLeadingSpace(int pixels);
-    /// Shows the app's name after the leading space (where no menu bar row
-    /// carries it, as on macOS). It ignores the mouse: a press there moves
-    /// the window like the rest of the bar's empty space.
-    void showAppName(const QString& name);
 
 public slots:
     void setPosition(const QString& barsBeatsTicks);
@@ -110,8 +105,6 @@ private:
     Knob* volumeKnob_ = nullptr;
     Knob* pitchKnob_ = nullptr;
     QWidget* leadingSpace_ = nullptr;
-    QLabel* appName_ = nullptr;
-    QAction* appNameAction_ = nullptr; ///< hides appName_ until showAppName()
     QWidget* centreSpacer_ = nullptr;
     QList<QWidget*> rightSide_; ///< widgets right of the displays, fixed size
     TempoDisplay* tempoDisplay_ = nullptr;
