@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include <QLabel>
 #include <QMargins>
 #include <QPointer>
 #include <QString>
@@ -69,11 +70,13 @@ private:
     WindowButtons* windowButtons_ = nullptr; ///< Windows only
     bool geometryRestored_ = false;
 
-    // macOS: the content's header, which hosts the system window buttons.
-    void adoptHeader(); ///< finds it, makes room for the buttons, makes it drag the window
+    // The content's header, this window's title bar: it shows "VLOOM" before
+    // the panel's title and, on macOS, hosts the system window buttons.
+    void adoptHeader(); ///< finds it, adds the app name; macOS: room for the buttons, drags the window
     void releaseHeader(); ///< undoes adoptHeader()
     void placeButtons();
     QPointer<QWidget> header_;
+    QPointer<QLabel> appName_; ///< "VLOOM" in header_
     QMargins headerMargins_; ///< the header layout's margins before adoptHeader()
 };
 

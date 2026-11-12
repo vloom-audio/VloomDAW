@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/widgets/FloatingPanel/FloatingPanel.hpp"
 
+#include <QBoxLayout>
 #include <QCloseEvent>
 #include <QLabel>
 #include <QLayout>
@@ -33,7 +34,7 @@ namespace {
 
 #if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
 constexpr int kMacButtonsInset = 14; ///< as on the main window
-constexpr int kMacButtonsWidth = 80; ///< inset + three buttons + a gap
+constexpr int kMacButtonsWidth = 92; ///< inset + three buttons + a gap before the title
 #endif
 
 /// Object names of the headers a panel can bring (PanelFrame, MixerPanel).
@@ -162,7 +163,6 @@ void FloatingPanel::resizeEvent(QResizeEvent* event)
 
 void FloatingPanel::adoptHeader()
 {
-#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
     releaseHeader();
     if (content_ == nullptr)
         return;
@@ -174,6 +174,17 @@ void FloatingPanel::adoptHeader()
         return;
     header_ = header;
 
+    // "VLOOM" before the panel's title, as the main window shows it: the
+    // header is this window's title bar. It ignores the mouse, so a press
+    // on it moves the window like the rest of the header.
+    if (auto* box = qobject_cast<QBoxLayout*>(header->layout())) {
+        appName_ = new QLabel(QStringLiteral("VLOOM"), header);
+        appName_->setObjectName(QStringLiteral("panelAppName"));
+        appName_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        box->insertWidget(0, appName_);
+    }
+
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
     // Room on the left for the window buttons.
     headerMargins_ = header->layout()->contentsMargins();
     const int headerX = header->mapTo(this, QPoint(0, 0)).x();
@@ -191,16 +202,17 @@ void FloatingPanel::adoptHeader()
 
 void FloatingPanel::releaseHeader()
 {
-#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+    delete appName_; // back in the main window, the panel has no app name
     if (header_ == nullptr)
         return;
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
     header_->removeEventFilter(this);
     for (auto* label : header_->findChildren<QLabel*>())
         label->removeEventFilter(this);
     if (header_->layout() != nullptr)
         header_->layout()->setContentsMargins(headerMargins_);
-    header_ = nullptr;
 #endif
+    header_ = nullptr;
 }
 
 void FloatingPanel::placeButtons()
