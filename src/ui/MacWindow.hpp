@@ -22,6 +22,11 @@ void placeMacWindowButtons(QWidget* window, int barHeight, int leftInset);
 /// for `window`. The green window button then zooms the window instead.
 void disableMacNativeFullScreen(QWidget* window);
 
+/// Stops macOS drawing the title text over the content of a window whose
+/// client area covers the title bar. The title stays set, so the Window
+/// menu, Mission Control and the Dock still name the window.
+void hideMacWindowTitle(QWidget* window);
+
 /// Auto-hides the menu bar and the Dock while `on` is true, so a window can
 /// cover the whole screen and still keep its window buttons.
 void setMacMenuBarAndDockHidden(bool on);

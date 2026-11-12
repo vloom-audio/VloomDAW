@@ -2,10 +2,23 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/widgets/FloatingPanel/FloatingPanel.hpp"
 
+#include <QBoxLayout>
 #include <QCloseEvent>
+#include <QLabel>
+#include <QLayout>
+#include <QMouseEvent>
 #include <QSettings>
 #include <QStringList>
+#include <QTimer>
 #include <QVBoxLayout>
+#include <QWindow>
+
+#include <algorithm>
+
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+#include "ui/MacWindow.hpp"
+#define VLOOMDAW_MAC_CLIENT_TITLE_BAR 1
+#endif
 
 #if defined(Q_OS_WIN)
 #include "ui/Theme.hpp"
@@ -17,12 +30,30 @@
 
 namespace vloomdaw {
 
+namespace {
+
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+constexpr int kMacButtonsInset = 14; ///< as on the main window
+constexpr int kMacButtonsWidth = 92; ///< inset + three buttons + a gap before the title
+#endif
+
+/// Object names of the headers a panel can bring (PanelFrame, MixerPanel).
+const QStringList& headerNames()
+{
+    static const QStringList names{QStringLiteral("panelHeader"), QStringLiteral("mixerHeader")};
+    return names;
+}
+
+} // namespace
+
 FloatingPanel::FloatingPanel(const QString& title, const QString& settingsKey)
     : QWidget(nullptr, Qt::Window) // minimise, maximise, close and a taskbar button
     , settingsKey_(settingsKey)
 {
     setObjectName(QStringLiteral("floatingPanel"));
-    setWindowTitle(title); // still shown on the taskbar
+    // Named after the app, as each window stands on its own in the taskbar,
+    // the Dock, window switchers and remote-desktop clients.
+    setWindowTitle(QStringLiteral("VLOOM %1").arg(title));
     setAttribute(Qt::WA_StyledBackground);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -37,6 +68,15 @@ FloatingPanel::FloatingPanel(const QString& title, const QString& settingsKey)
     connect(windowButtons_, &WindowButtons::maximizeToggled, this,
         [this] { isMaximized() ? showNormal() : showMaximized(); });
     connect(windowButtons_, &WindowButtons::closeRequested, this, &QWidget::close);
+#elif defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+    // As on the main window: the content runs under the title bar, whose
+    // buttons move into the panel's header (adoptHeader()).
+    setWindowFlag(Qt::ExpandedClientAreaHint);
+    setWindowFlag(Qt::NoTitleBarBackgroundHint);
+    setAttribute(Qt::WA_ContentsMarginsRespectsSafeArea, false);
+    hideMacWindowTitle(this);
+    // Native full screen would hide the buttons with nothing to bring them back.
+    disableMacNativeFullScreen(this);
 #endif
 
     if (const QByteArray geometry = QSettings().value(settingsKey_).toByteArray(); !geometry.isEmpty())
@@ -57,12 +97,14 @@ void FloatingPanel::host(QWidget* content, const std::function<void(QWidget*)>& 
         windowButtons_->show();
     }
 #else
-    Q_UNUSED(addToHeader) // the native title bar keeps its own buttons
+    Q_UNUSED(addToHeader) // the system's window buttons stay
 #endif
+    adoptHeader();
 }
 
 QWidget* FloatingPanel::release()
 {
+    releaseHeader();
     QWidget* content = content_;
 #if defined(Q_OS_WIN)
     if (windowButtons_ != nullptr) {
@@ -98,8 +140,116 @@ void FloatingPanel::hideEvent(QHideEvent* event)
 void FloatingPanel::changeEvent(QEvent* event)
 {
     QWidget::changeEvent(event);
-    if (event->type() == QEvent::WindowStateChange)
+    if (event->type() == QEvent::WindowStateChange) {
         updateFrame();
+        placeButtons();
+    }
+}
+
+void FloatingPanel::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+    hideMacWindowTitle(this); // in case AppKit set it up again for the new window
+#endif
+    placeButtons();
+}
+
+void FloatingPanel::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    placeButtons();
+}
+
+void FloatingPanel::adoptHeader()
+{
+    releaseHeader();
+    if (content_ == nullptr)
+        return;
+    QWidget* header = nullptr;
+    for (const QString& name : headerNames())
+        if ((header = content_->findChild<QWidget*>(name)) != nullptr)
+            break;
+    if (header == nullptr || header->layout() == nullptr)
+        return;
+    header_ = header;
+
+    // "VLOOM" before the panel's title, as the main window shows it: the
+    // header is this window's title bar. It ignores the mouse, so a press
+    // on it moves the window like the rest of the header.
+    if (auto* box = qobject_cast<QBoxLayout*>(header->layout())) {
+        appName_ = new QLabel(QStringLiteral("VLOOM"), header);
+        appName_->setObjectName(QStringLiteral("panelAppName"));
+        appName_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        box->insertWidget(0, appName_);
+    }
+
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+    // Room on the left for the window buttons.
+    headerMargins_ = header->layout()->contentsMargins();
+    const int headerX = header->mapTo(this, QPoint(0, 0)).x();
+    QMargins margins = headerMargins_;
+    margins.setLeft(std::max(margins.left(), kMacButtonsWidth - headerX));
+    header->layout()->setContentsMargins(margins);
+
+    // The header and its labels move the window; its buttons stay buttons.
+    header->installEventFilter(this);
+    for (auto* label : header->findChildren<QLabel*>())
+        label->installEventFilter(this);
+    placeButtons();
+#endif
+}
+
+void FloatingPanel::releaseHeader()
+{
+    delete appName_; // back in the main window, the panel has no app name
+    if (header_ == nullptr)
+        return;
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+    header_->removeEventFilter(this);
+    for (auto* label : header_->findChildren<QLabel*>())
+        label->removeEventFilter(this);
+    if (header_->layout() != nullptr)
+        header_->layout()->setContentsMargins(headerMargins_);
+#endif
+    header_ = nullptr;
+}
+
+void FloatingPanel::placeButtons()
+{
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+    if (header_ == nullptr || !isVisible())
+        return;
+    // Centred in the band from the window top to the header's bottom edge.
+    const auto place = [this] {
+        if (header_ != nullptr)
+            placeMacWindowButtons(
+                this, header_->mapTo(this, QPoint(0, header_->height())).y(), kMacButtonsInset);
+    };
+    place();
+    // AppKit may lay the title bar out again after this event; repeat once
+    // the event loop is idle so our position wins.
+    QTimer::singleShot(0, this, place);
+#endif
+}
+
+bool FloatingPanel::eventFilter(QObject* watched, QEvent* event)
+{
+#if defined(VLOOMDAW_MAC_CLIENT_TITLE_BAR)
+    if (header_ != nullptr && watched->isWidgetType()
+        && (watched == header_.data() || static_cast<QWidget*>(watched)->parentWidget() == header_.data())) {
+        if (event->type() == QEvent::MouseButtonPress
+            && static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton && windowHandle() != nullptr) {
+            windowHandle()->startSystemMove();
+            return true;
+        }
+        if (event->type() == QEvent::MouseButtonDblClick) {
+            isMaximized() ? showNormal() : showMaximized(); // the zoom a title bar double-click does
+            return true;
+        }
+    }
+#endif
+    return QWidget::eventFilter(watched, event);
 }
 
 void FloatingPanel::updateFrame()
@@ -120,9 +270,8 @@ bool FloatingPanel::isCaptionAt(QPoint pos) const
     if (hit == nullptr)
         return false;
     // The header strip and its labels; its buttons stay clickable.
-    static const QStringList kCaptionNames{QStringLiteral("panelHeader"), QStringLiteral("mixerHeader"),
-        QStringLiteral("panelTitle"), QStringLiteral("panelContext")};
-    return kCaptionNames.contains(hit->objectName());
+    static const QStringList kLabelNames{QStringLiteral("panelTitle"), QStringLiteral("panelContext")};
+    return headerNames().contains(hit->objectName()) || kLabelNames.contains(hit->objectName());
 }
 
 #if defined(Q_OS_WIN)

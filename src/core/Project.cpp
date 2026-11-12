@@ -3,13 +3,14 @@
 #include "core/Project.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace vloomdaw {
 
 Project::Project()
 {
     for (const char* name : {"Kick", "Clap", "Hat", "Snare"})
-        channels_.push_back(Channel{name, false});
+        channels_.push_back(Channel{name, false, {}});
     addPattern();
 }
 
@@ -17,7 +18,7 @@ Project::Project()
 
 std::size_t Project::addChannel(const std::string& name)
 {
-    channels_.push_back(Channel{name, false});
+    channels_.push_back(Channel{name, false, {}});
     for (Pattern& p : patterns_)
         p.channels.emplace_back();
     return channels_.size() - 1;
@@ -27,6 +28,36 @@ void Project::setChannelMuted(std::size_t channel, bool muted)
 {
     if (channel < channels_.size())
         channels_[channel].muted = muted;
+}
+
+void Project::setChannelName(std::size_t channel, const std::string& name)
+{
+    if (channel < channels_.size())
+        channels_[channel].name = name;
+}
+
+void Project::setChannelSample(std::size_t channel, const std::string& path)
+{
+    if (channel < channels_.size())
+        channels_[channel].samplePath = path;
+}
+
+void Project::setChannelVolume(std::size_t channel, double volume)
+{
+    if (channel < channels_.size() && !std::isnan(volume))
+        channels_[channel].volume = std::clamp(volume, 0.0, 1.0);
+}
+
+void Project::setChannelPan(std::size_t channel, double pan)
+{
+    if (channel < channels_.size() && !std::isnan(pan))
+        channels_[channel].pan = std::clamp(pan, -1.0, 1.0);
+}
+
+void Project::setChannelInsert(std::size_t channel, int insert)
+{
+    if (channel < channels_.size())
+        channels_[channel].insert = std::max(insert, 0);
 }
 
 // ---------------------------------------------------------------- patterns

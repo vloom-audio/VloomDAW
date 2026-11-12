@@ -210,6 +210,7 @@ QLabel#activityHint {
 QWidget#browserPanel, QWidget#pluginsPanel { background: @sidebar; }
 QWidget#browserPanel QComboBox { background: @window; }
 QLabel#panelTitle { color: @textDim; font-size: 9pt; font-weight: 700; letter-spacing: 1px; }
+QLabel#panelAppName { color: @accent; font-size: 9pt; font-weight: 700; letter-spacing: 1px; }
 QLabel#panelHint { color: @textDim; }
 QWidget#browserPanel QToolButton, QWidget#pluginsPanel QToolButton { border: none; border-radius: 6px; padding: 5px; }
 QWidget#browserPanel QToolButton:hover, QWidget#pluginsPanel QToolButton:hover { background: @raised; }

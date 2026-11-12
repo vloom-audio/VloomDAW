@@ -15,6 +15,26 @@ and the project uses [Semantic Versioning](https://semver.org/).
   of following the engine's `main`.
 
 ### Added
+- Channel rack volume and routing: each channel has a volume knob (drag, Shift
+  for fine, scroll, double-click for 0 dB) and an insert box; click it to send
+  the channel to one of the mixer's 16 inserts ("-" plays straight into the
+  master). Insert faders, pans, mute and solo now shape the sound, and insert
+  meters show what plays through them.
+- Losing the audio output (an unplugged interface or headphones) no longer leaves
+  the app playing in silence: it carries on through the system default right
+  away, says so in the status bar, and switches back to your device when it is
+  plugged in again. Your chosen device stays saved.
+- Plugin vendor and category: with "Read vendor and category" on, a scan loads each
+  new or changed plugin in a separate process (`vloomdaw-plugin-probe`) and asks its
+  factory for name, vendor, version and VST3 sub-categories / CLAP features. A plugin
+  that crashes or hangs (20 s) is skipped and marked; unchanged plugins reuse the last
+  scan. The sidebar groups by category (instruments split into Synth, Sampler, Drums,
+  Keys...), vendor or format, and searches names and vendors. Right-click a plugin to
+  set its category yourself (kept across scans); Rescan All reads every plugin again.
+- The channel rack plays: drop a WAV file from the browser or the desktop on a
+  channel (below the last one for a new channel) and its steps trigger the sample
+  through vloom-engine's step sequencer. Edits apply while playing without cutting
+  notes. Channels without a sample are dimmed.
 - Plugins side panel (second sidebar page): lists the VST3 and CLAP plugins found
   by the last scan, grouped by format, with search. Plugins are only available after
   a scan, which the user starts in the Plugin Manager (Options > Plugin Manager…);
@@ -102,3 +122,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   empty menu / tool bar space moves the window (resize, Aero Snap and the
   taskbar still work natively)
 - Window size and position are remembered between sessions
+
+### Fixed
+- macOS: detached panels (playlist, piano roll, mixer) no longer show a separate
+  title bar: like the main window, the panel header takes its place, holds the
+  window buttons and moves the window.
+- Detached panel windows are named "VLOOM Mixer", "VLOOM Playlist" and "VLOOM
+  Piano roll" in the taskbar, the Dock and window switchers.
+- Detached panels show "VLOOM" before their title in the header, which is the
+  window's title bar on every platform.

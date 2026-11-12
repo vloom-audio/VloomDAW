@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
+#include <iterator>
 #include <set>
 #include <system_error>
 
@@ -17,10 +19,36 @@ namespace {
 /// Extension in lower case, e.g. ".vst3".
 std::string lowerExtension(const fs::path& path)
 {
-    std::string ext = path.extension().string();
+    // UTF-8, not path::string(): on Windows that throws for names the ANSI
+    // code page cannot hold. Only ASCII is lower-cased; ".vst3" is ASCII.
+    const std::u8string wide = path.extension().u8string();
+    std::string ext(wide.begin(), wide.end());
     std::transform(ext.begin(), ext.end(), ext.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return ext;
+}
+
+/// A path as UTF-8 (path::string() uses the ANSI code page on Windows).
+std::string utf8(const fs::path& path)
+{
+    const std::u8string text = path.u8string();
+    return {text.begin(), text.end()};
+}
+
+/// The binary inside a bundle (what changes when the plugin is updated), or
+/// the bundle itself when its layout is unknown.
+fs::path bundleBinary(const fs::path& bundle)
+{
+#if defined(_WIN32)
+    fs::path binary = bundle / "Contents" / "x86_64-win" / bundle.filename();
+#elif defined(__APPLE__)
+    fs::path binary = bundle / "Contents" / "MacOS" / bundle.stem();
+#else
+    fs::path binary = bundle / "Contents" / "x86_64-linux" / bundle.filename();
+    binary.replace_extension(".so");
+#endif
+    std::error_code ec;
+    return fs::is_regular_file(binary, ec) ? binary : bundle;
 }
 
 const char* extensionOf(PluginFormat format) { return format == PluginFormat::Vst3 ? ".vst3" : ".clap"; }
@@ -28,9 +56,11 @@ const char* extensionOf(PluginFormat format) { return format == PluginFormat::Vs
 fs::path environmentPath(const char* name)
 {
 #if defined(_WIN32)
-    char* value = nullptr;
+    // Wide: a user name outside the ANSI code page must survive.
+    const std::wstring wideName(name, name + std::strlen(name));
+    wchar_t* value = nullptr;
     std::size_t size = 0;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr)
+    if (_wdupenv_s(&value, &size, wideName.c_str()) != 0 || value == nullptr)
         return {};
     fs::path path(value);
     std::free(value);
@@ -97,8 +127,24 @@ std::vector<PluginInfo> scanPluginFolders(const std::vector<PluginFolder>& folde
             const bool isDir = !isLink && entry.is_directory(statError);
             if (lowerExtension(entry.path()) == wanted && (isDir || entry.is_regular_file(statError))) {
                 const fs::path canonical = fs::weakly_canonical(entry.path(), statError);
-                if (seen.insert(statError ? entry.path() : canonical).second)
-                    found.push_back({entry.path().stem().string(), folder.format, entry.path()});
+                if (seen.insert(statError ? entry.path() : canonical).second) {
+                    PluginInfo info;
+                    info.name = utf8(entry.path().stem());
+                    info.format = folder.format;
+                    info.path = entry.path();
+                    // Installers group plugins in a vendor folder: VST3/FabFilter/Pro-Q 4.vst3.
+                    const fs::path relative = entry.path().lexically_relative(folder.path);
+                    if (std::distance(relative.begin(), relative.end()) > 1)
+                        info.vendor = utf8(*relative.begin());
+                    // Cache key: the file, or for a bundle the binary inside it
+                    // (updates replace that without touching the folder's time).
+                    const fs::path binary = isDir ? bundleBinary(entry.path()) : entry.path();
+                    if (fs::is_regular_file(binary, statError))
+                        info.fileSize = fs::file_size(binary, statError);
+                    info.modified = static_cast<std::int64_t>(
+                        fs::last_write_time(binary, statError).time_since_epoch().count());
+                    found.push_back(std::move(info));
+                }
                 if (isDir)
                     it.disable_recursion_pending(); // a bundle: its insides are not plugins
                 continue;

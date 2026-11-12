@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include <QStringList>
 #include <QWidget>
 
 #include <cstddef>
@@ -10,13 +11,19 @@ namespace vloomdaw {
 
 class Project;
 
-/// The channel rack's rows: a mute light, the channel name and 16 step pads
-/// per channel, for the current pattern. Reads the Project; edits are
-/// emitted as signals for MainWindow to apply.
+/// The channel rack's rows: a mute light, a volume knob, the mixer insert,
+/// the channel name and 16 step pads per channel, for the current pattern.
+/// Reads the Project; edits are emitted as signals for MainWindow to apply.
+///
+/// Volume knob: drag up / down (Shift: fine), scroll, double-click for unity.
+/// Insert box: click to pick the mixer insert the channel plays into, or
+/// scroll; "-" is the master.
 ///
 /// Click a pad to toggle it and drag along the row to paint the same state;
 /// right-click to clear. Click a name to select the channel, double-click it
-/// to open the piano roll.
+/// to open the piano roll. Drop a WAV file (from the browser or the desktop)
+/// on a channel to give it that sample, or below the last one for a new
+/// channel.
 class ChannelRackView : public QWidget {
     Q_OBJECT
 
@@ -30,6 +37,8 @@ public:
     void setPlayStep(int step);
     /// Re-reads the project (after an edit).
     void refresh();
+    /// Names for the insert menu: [0] the master, [i] insert i.
+    void setInsertNames(const QStringList& names);
 
     [[nodiscard]] QSize sizeHint() const override;
 
@@ -38,6 +47,13 @@ signals:
     void muteToggled(std::size_t channel);
     void channelSelected(std::size_t channel);
     void channelOpened(std::size_t channel);
+    /// A WAV file was dropped on `channel`; channel == the channel count
+    /// means below the last one (a new channel). `path` is a local path.
+    void sampleDropped(std::size_t channel, const QString& path);
+    /// The volume knob moved: fader position 0..1 (0.8 = unity).
+    void volumeChanged(std::size_t channel, double volume);
+    /// The channel was routed to mixer insert `insert` (0 = master).
+    void insertChanged(std::size_t channel, int insert);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -45,9 +61,15 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
-    enum class Part { None, Mute, Name, Step };
+    enum class Part { None, Mute, Volume, Insert, Name, Step };
     struct Hit {
         Part part = Part::None;
         std::size_t channel = 0;
@@ -56,11 +78,25 @@ private:
     [[nodiscard]] Hit hitAt(const QPoint& pos) const;
     [[nodiscard]] QRect padRect(std::size_t channel, int step) const;
     [[nodiscard]] std::size_t channelCount() const;
+    /// Channel row at y, or channelCount() below the last row.
+    [[nodiscard]] std::size_t dropRowAt(int y) const;
+    void setDropRow(int row);
+    void chooseInsert(std::size_t channel, const QPoint& at);
+    [[nodiscard]] QString insertLabel(int insert) const;
 
     const Project* project_ = nullptr;
+    int dropRow_ = -1; ///< row highlighted while a file is dragged over, -1 = none
     std::size_t pattern_ = 0;
     std::size_t selected_ = 0;
     int playStep_ = -1;
+
+    QStringList insertNames_{QStringLiteral("Master")};
+
+    // Volume knob drag.
+    bool draggingVolume_ = false;
+    std::size_t volumeChannel_ = 0;
+    double volumeAtPress_ = 0.0;
+    double pressY_ = 0.0;
 
     // Paint-drag along one row.
     bool painting_ = false;

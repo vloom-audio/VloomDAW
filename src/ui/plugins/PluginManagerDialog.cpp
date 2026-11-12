@@ -2,6 +2,10 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/plugins/PluginManagerDialog.hpp"
 
+#include "core/PluginMetadata.hpp"
+#include "ui/plugins/PluginProber.hpp"
+
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
@@ -13,10 +17,12 @@
 #include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QThread>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <memory>
 
 namespace vloomdaw {
@@ -43,8 +49,7 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
     auto* heading = new QLabel(tr("Plugin folders"), this);
     heading->setObjectName(QStringLiteral("settingsHeading"));
     auto* intro = new QLabel(tr("Plugins can be used once they have been found by a scan. Nothing is scanned "
-                                "automatically: press Scan after installing or removing plugins. Scanning "
-                                "only reads file names; no plugin is loaded."),
+                                "automatically: press Scan after installing or removing plugins."),
         this);
     intro->setObjectName(QStringLiteral("settingsSubtitle"));
     intro->setWordWrap(true);
@@ -61,7 +66,8 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
     connect(folders_, &QTreeWidget::itemSelectionChanged, this, [this] {
         const auto selected = folders_->selectedItems();
         removeButton_->setEnabled(!selected.isEmpty()
-            && selected.constFirst()->data(0, kExtraRole).toInt() >= 0 && scanThread_ == nullptr);
+            && selected.constFirst()->data(0, kExtraRole).toInt() >= 0 && scanThread_ == nullptr
+            && !prober_->isRunning());
     });
 
     addButton_ = new QPushButton(tr("Add Folder"), this);
@@ -77,7 +83,32 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
     scanButton_ = new QPushButton(tr("Scan"), this);
     scanButton_->setObjectName(QStringLiteral("accentButton"));
     scanButton_->setDefault(true);
-    connect(scanButton_, &QPushButton::clicked, this, &PluginManagerDialog::startScan);
+    connect(scanButton_, &QPushButton::clicked, this, [this] { startScan(false); });
+    rescanButton_ = new QPushButton(tr("Rescan All"), this);
+    rescanButton_->setToolTip(tr("Read every plugin again, also the ones an earlier scan already read "
+                                 "(after updating plugins). Categories you set yourself are kept."));
+    connect(rescanButton_, &QPushButton::clicked, this, [this] { startScan(true); });
+
+    probeBox_ = new QCheckBox(tr("Read vendor and category (loads each plugin)"), this);
+    probeBox_->setToolTip(tr("Each new or changed plugin is loaded in a separate process and asked for its "
+                             "vendor and category. This runs the plugin's own code. A plugin that crashes or "
+                             "hangs is skipped. Off: only file names are read."));
+    connect(probeBox_, &QCheckBox::toggled, this, [this](bool on) {
+        rescanButton_->setEnabled(on);
+        store_.probePlugins = on;
+        emit storeChanged(store_);
+    });
+
+    prober_ = new PluginProber(this);
+    connect(prober_, &PluginProber::progress, this, [this](int done, int total, const QString& current) {
+        progress_->setRange(0, std::max(total, 1));
+        progress_->setValue(done);
+        result_->setText(current.isEmpty()
+                ? tr("Finishing...")
+                : tr("Reading %1 (%2 of %3)...").arg(current).arg(done + 1).arg(total));
+    });
+    connect(prober_, &PluginProber::finished, this,
+        [this](const std::vector<PluginInfo>& plugins) { finishScan(plugins); });
 
     progress_ = new QProgressBar(this);
     progress_->setRange(0, 0); // busy: the scan does not know its total
@@ -92,6 +123,7 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
     folderButtons->addWidget(addButton_);
     folderButtons->addWidget(removeButton_);
     folderButtons->addStretch(1);
+    folderButtons->addWidget(rescanButton_);
     folderButtons->addWidget(scanButton_);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
@@ -104,6 +136,7 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
     layout->addWidget(intro);
     layout->addWidget(folders_, 1);
     layout->addLayout(folderButtons);
+    layout->addWidget(probeBox_);
     layout->addWidget(progress_);
     layout->addWidget(result_);
     layout->addWidget(buttons);
@@ -123,6 +156,15 @@ PluginManagerDialog::~PluginManagerDialog()
 void PluginManagerDialog::setStore(const PluginStore& store)
 {
     store_ = store;
+    const bool probeAvailable = !PluginProber::probeProgram().isEmpty();
+    {
+        const QSignalBlocker block(probeBox_);
+        probeBox_->setChecked(probeAvailable && store_.probePlugins);
+    }
+    probeBox_->setEnabled(probeAvailable);
+    rescanButton_->setEnabled(probeAvailable && store_.probePlugins);
+    if (!probeAvailable)
+        probeBox_->setToolTip(tr("The plugin probe (vloomdaw-plugin-probe) is missing next to VloomDAW."));
     listFolders();
     showResult();
 }
@@ -181,10 +223,17 @@ void PluginManagerDialog::removeFolder()
     emit storeChanged(store_);
 }
 
-void PluginManagerDialog::startScan()
+void PluginManagerDialog::startScan(bool everything)
 {
+    if (prober_->isRunning()) {
+        // The button reads "Stop" while plugins are being read.
+        prober_->stop();
+        scanButton_->setEnabled(false);
+        return;
+    }
     if (scanThread_ != nullptr)
         return;
+    rescanAll_ = everything;
     // The worker gets its own copy of the folders and writes only `found`,
     // which the GUI thread reads after the thread has finished.
     auto found = std::make_shared<std::vector<PluginInfo>>();
@@ -193,28 +242,47 @@ void PluginManagerDialog::startScan()
     connect(scanThread_, &QThread::finished, this, [this, found] {
         scanThread_->deleteLater();
         scanThread_ = nullptr;
-        finishScan(std::move(*found));
+        filesFound(std::move(*found));
     });
 
-    scanButton_->setEnabled(false);
-    scanButton_->setText(tr("Scanning…"));
-    addButton_->setEnabled(false);
-    removeButton_->setEnabled(false);
-    progress_->show();
-    result_->setText(tr("Scanning plugin folders…"));
+    setBusy(true);
+    progress_->setRange(0, 0);
+    result_->setText(tr("Scanning plugin folders..."));
     scanThread_->start(QThread::LowPriority);
+}
+
+void PluginManagerDialog::filesFound(std::vector<PluginInfo> modules)
+{
+    if (!probeBox_->isChecked() || modules.empty()) {
+        finishScan(std::move(modules));
+        return;
+    }
+    scanButton_->setText(tr("Stop"));
+    scanButton_->setEnabled(true);
+    // Rescan All: no earlier results to reuse.
+    prober_->start(std::move(modules), rescanAll_ ? std::vector<PluginInfo>{} : store_.plugins);
 }
 
 void PluginManagerDialog::finishScan(std::vector<PluginInfo> plugins)
 {
+    carryUserCategories(plugins, store_.plugins); // a scan never undoes the user's choices
     store_.plugins = std::move(plugins);
     store_.lastScan = QDateTime::currentDateTimeUtc();
-    scanButton_->setEnabled(true);
-    scanButton_->setText(tr("Scan"));
-    addButton_->setEnabled(true);
-    progress_->hide();
+    setBusy(false);
     showResult();
     emit storeChanged(store_);
+}
+
+void PluginManagerDialog::setBusy(bool busy)
+{
+    scanButton_->setEnabled(!busy);
+    scanButton_->setText(busy ? tr("Scanning...") : tr("Scan"));
+    addButton_->setEnabled(!busy);
+    rescanButton_->setEnabled(!busy && probeBox_->isChecked());
+    probeBox_->setEnabled(!busy && !PluginProber::probeProgram().isEmpty());
+    if (busy)
+        removeButton_->setEnabled(false);
+    progress_->setVisible(busy);
 }
 
 void PluginManagerDialog::showResult()
@@ -227,11 +295,19 @@ void PluginManagerDialog::showResult()
     for (const PluginInfo& p : store_.plugins)
         vst3 += p.format == PluginFormat::Vst3 ? 1 : 0;
     const int clap = static_cast<int>(store_.plugins.size()) - vst3;
-    result_->setText(tr("Last scan %1: %n plugin(s) found (%2 VST3, %3 CLAP).", nullptr,
+    int failed = 0;
+    for (const PluginInfo& p : store_.plugins)
+        failed += p.probe == PluginInfo::Probe::Failed ? 1 : 0;
+    QString text = tr("Last scan %1: %n plugin(s) found (%2 VST3, %3 CLAP).", nullptr,
         static_cast<int>(store_.plugins.size()))
-            .arg(QLocale().toString(store_.lastScan.toLocalTime(), QLocale::ShortFormat))
-            .arg(vst3)
-            .arg(clap));
+                       .arg(QLocale().toString(store_.lastScan.toLocalTime(), QLocale::ShortFormat))
+                       .arg(vst3)
+                       .arg(clap);
+    if (failed > 0)
+        text += QLatin1Char(' ')
+            + tr("%n could not be read (crashed, hung or not a plugin); hover them in the list for why.",
+                nullptr, failed);
+    result_->setText(text);
 }
 
 } // namespace vloomdaw

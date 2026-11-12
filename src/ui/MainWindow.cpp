@@ -3,6 +3,7 @@
 #include "ui/MainWindow.hpp"
 
 #include "audio/AudioController.hpp"
+#include "audio/MixerAudio.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/NoteNames.hpp"
 #include "core/PositionFormat.hpp"
@@ -44,7 +45,9 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDir>
 #include <QEvent>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
@@ -70,6 +73,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 
@@ -323,6 +327,7 @@ void MainWindow::selectPattern(std::size_t pattern)
     pianoRoll_->setTarget(currentPattern_, currentChannel_);
     playlist_->setCurrentPattern(currentPattern_);
     updatePanelContexts();
+    syncChannelRack(); // the engine plays the current pattern
 }
 
 void MainWindow::selectChannel(std::size_t channel)
@@ -597,6 +602,7 @@ void MainWindow::updateMixer()
     for (std::size_t i = 1; i < mixer_.size(); ++i)
         mixerPanel_->setSilenced(i, solo && !mixer_.track(i).soloed);
     updateMasterOutput();
+    audio_.engine().setMixerState(engineMixerState(mixer_));
 }
 
 void MainWindow::updateMasterOutput()
@@ -714,6 +720,19 @@ void MainWindow::createCentralArea()
     pluginsPanel_ = new PluginsPanel(sidePanels_);
     pluginsPanel_->setStore(pluginStore_);
     connect(pluginsPanel_, &PluginsPanel::managerRequested, this, &MainWindow::showPluginManager);
+    connect(pluginsPanel_, &PluginsPanel::userCategoryChosen, this,
+        [this](std::size_t index, const QString& category, const QString& type) {
+            if (index >= pluginStore_.plugins.size())
+                return;
+            PluginInfo& plugin = pluginStore_.plugins[index];
+            plugin.userCategory = category.toStdString();
+            plugin.userInstrumentType
+                = category == QLatin1String("Instrument") ? type.toStdString() : std::string();
+            pluginStore_.save();
+            pluginsPanel_->setStore(pluginStore_);
+            if (pluginManager_ != nullptr)
+                pluginManager_->setStore(pluginStore_); // its next scan starts from this
+        });
     sidePanels_->addWidget(pluginsPanel_);
     activityBar_->addPage(Theme::icon(QStringLiteral("plug")), tr("Plugins"));
 
@@ -775,15 +794,35 @@ QWidget* MainWindow::createWorkspace()
             = project_.addChannel(tr("Channel %1").arg(project_.channels().size() + 1).toStdString());
         channelRack_->refresh();
         selectChannel(index);
+        syncChannelRack();
     });
     connect(channelRack_, &ChannelRackView::stepSet, this, [this](std::size_t channel, int step, bool on) {
         project_.setStep(currentPattern_, channel, step, on);
         channelRack_->update();
+        syncChannelRack();
     });
     connect(channelRack_, &ChannelRackView::muteToggled, this, [this](std::size_t channel) {
         project_.setChannelMuted(channel, !project_.channels()[channel].muted);
         channelRack_->update();
+        syncChannelRack();
     });
+    connect(channelRack_, &ChannelRackView::volumeChanged, this, [this](std::size_t channel, double volume) {
+        project_.setChannelVolume(channel, volume);
+        channelRack_->update();
+        syncChannelRack();
+    });
+    connect(channelRack_, &ChannelRackView::insertChanged, this, [this](std::size_t channel, int insert) {
+        project_.setChannelInsert(channel, insert);
+        channelRack_->update();
+        syncChannelRack();
+    });
+    {
+        QStringList inserts{tr("Master")};
+        for (std::size_t i = 1; i < mixer_.size(); ++i)
+            inserts << tr("Insert %1").arg(i);
+        channelRack_->setInsertNames(inserts);
+    }
+    connect(channelRack_, &ChannelRackView::sampleDropped, this, &MainWindow::assignSample);
     connect(channelRack_, &ChannelRackView::channelSelected, this, &MainWindow::selectChannel);
     connect(channelRack_, &ChannelRackView::channelOpened, this, [this](std::size_t channel) {
         selectChannel(channel);
@@ -1209,16 +1248,21 @@ void MainWindow::changeAudioFormat(int sampleRate, int bufferFrames)
     openSelectedDevice(); // reopen with the new format
 }
 
-void MainWindow::startDevice(int index)
+bool MainWindow::startDevice(int index, bool fallback)
 {
+    if (!deviceClock_.isValid())
+        deviceClock_.start();
+    deviceWatch_.setPreferredIsDefault(selectedDevice().isDefault());
     std::string error;
     if (!audio_.openDevice(index, &error)) {
+        deviceWatch_.openFailed(deviceClock_.elapsed());
         deviceStatus_->setText(tr("No audio output"));
         settingsDialog_->audioPage()->setStatus(
             tr("Not running: %1").arg(QString::fromStdString(error)), false);
         statusBar()->showMessage(tr("Audio error: %1").arg(QString::fromStdString(error)), 8000);
-        return;
+        return false;
     }
+    deviceWatch_.opened(!fallback, deviceClock_.elapsed());
 
     // Re-send UI state so the engine matches what the user sees.
     pendingTempo_.reset();
@@ -1229,6 +1273,9 @@ void MainWindow::startDevice(int index)
     audio_.engine().setMasterPan(*pendingPan_);
     pendingGain_.reset();
     pendingPan_.reset();
+    audio_.engine().setMixerState(engineMixerState(mixer_));
+
+    syncChannelRack(); // samples at the device's rate
 
     const QString format = tr("%1 Hz  ·  %2 samples").arg(audio_.sampleRate()).arg(audio_.bufferFrames());
     deviceStatus_->setText(
@@ -1239,6 +1286,59 @@ void MainWindow::startDevice(int index)
     if (audio_.sampleRate() != audio_.requestedSampleRate())
         status += tr(" (device does not support %1 Hz)").arg(audio_.requestedSampleRate());
     settingsDialog_->audioPage()->setStatus(status, true);
+    return true;
+}
+
+void MainWindow::watchDevice()
+{
+    if (!deviceClock_.isValid())
+        return; // no device opened yet
+    const auto action = deviceWatch_.tick(audio_.isRunning(), deviceClock_.elapsed(),
+        [this] { return findDevice(audio_.outputDevices().names, selectedDevice()) >= 0; });
+    if (action == DeviceWatch::Action::None)
+        return;
+
+    // The transport keeps its position and play state across a reopen, so
+    // the song carries on through the new device.
+    const QString previous = QString::fromStdString(audio_.deviceName());
+    if (action == DeviceWatch::Action::OpenDefault) {
+        audio_.closeDevice();
+        listDevices();
+        if (!startDevice(-1, true))
+            return;
+        const QString now = QString::fromStdString(audio_.deviceName());
+        statusBar()->showMessage(previous.isEmpty()
+                ? tr("Audio output: %1").arg(now)
+                : tr("\u201C%1\u201D was disconnected: playing through \u201C%2\u201D").arg(previous, now),
+            10000);
+    } else if (startDevice(listDevices())) {
+        statusBar()->showMessage(
+            tr("\u201C%1\u201D is back").arg(QString::fromStdString(audio_.deviceName())), 6000);
+    }
+}
+
+void MainWindow::syncChannelRack()
+{
+    const auto errors = rackAudio_.sync(audio_.engine(), project_, currentPattern_, audio_.sampleRate());
+    if (errors.empty())
+        return;
+    const auto& first = errors.front();
+    const QString name = QFileInfo(QString::fromStdString(first.path)).fileName();
+    statusBar()->showMessage(
+        tr("Could not load %1: %2").arg(name, QString::fromStdString(first.message)), 8000);
+}
+
+void MainWindow::assignSample(std::size_t channel, const QString& path)
+{
+    const QString name = QFileInfo(path).completeBaseName();
+    if (channel >= project_.channels().size())
+        channel = project_.addChannel(name.toStdString());
+    else
+        project_.setChannelName(channel, name.toStdString());
+    project_.setChannelSample(channel, QDir::cleanPath(path).toStdString());
+    channelRack_->refresh();
+    selectChannel(channel);
+    syncChannelRack();
 }
 
 void MainWindow::newProject()
@@ -1251,6 +1351,7 @@ void MainWindow::newProject()
     transport_->keyDisplay()->setScale(Scale::Major);
     pianoRoll_->setKey(0, Scale::Major);
     project_ = Project{};
+    rackAudio_.reset();
     transport_->patternSelector()->reset();
     currentPattern_ = 0;
     currentChannel_ = 0;
@@ -1314,6 +1415,8 @@ void MainWindow::toggleFullScreen()
 void MainWindow::refreshFromEngine()
 {
     auto& engine = audio_.engine();
+    engine.collectGarbage(); // free channel-rack states the audio thread is done with
+    watchDevice();
 
     // Nothing to show while minimised; still send pending changes and drain
     // the meters below so they do not show a stale peak when restored.
@@ -1386,11 +1489,19 @@ void MainWindow::refreshFromEngine()
         pendingPan_.reset();
 
     // Meters: always take the engine's peaks (so a reopened mixer does not
-    // show an old one); insert tracks have no audio until M1.
-    const float left = audio_.isRunning() ? engine.takeOutputPeak(0) : 0.0f;
-    const float right = audio_.isRunning() ? engine.takeOutputPeak(1) : 0.0f;
+    // show an old one).
+    const bool running = audio_.isRunning();
+    const float left = running ? engine.takeOutputPeak(0) : 0.0f;
+    const float right = running ? engine.takeOutputPeak(1) : 0.0f;
+    std::array<std::array<float, 2>, kMixerInserts> insertPeaks{};
+    for (std::size_t i = 1; i <= insertPeaks.size() && i < mixer_.size(); ++i)
+        if (running)
+            insertPeaks[i - 1] = {
+                engine.takeInsertPeak(static_cast<int>(i), 0), engine.takeInsertPeak(static_cast<int>(i), 1)};
     if (mixerPanel_->isVisible()) {
         mixerPanel_->meter(MixerModel::kMaster)->addPeaks(left, right);
+        for (std::size_t i = 1; i <= insertPeaks.size() && i < mixer_.size(); ++i)
+            mixerPanel_->meter(i)->addPeaks(insertPeaks[i - 1][0], insertPeaks[i - 1][1]);
         for (std::size_t i = 0; i < mixerPanel_->trackCount(); ++i)
             mixerPanel_->meter(i)->tick(dt);
     }

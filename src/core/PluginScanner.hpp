@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -13,11 +14,28 @@ enum class PluginFormat { Vst3, Clap };
 
 [[nodiscard]] std::string_view formatName(PluginFormat format); ///< "VST3", "CLAP"
 
-/// A plugin found on disk. Nothing is loaded: the name comes from the file.
+/// A plugin. scanPluginFolders() fills in what the file system tells
+/// (name from the file, vendor from the install folder); a probe of the
+/// module (vloomdaw-plugin-probe) then replaces them with what the plugin's
+/// own factory says, and adds category and version.
 struct PluginInfo {
-    std::string name; ///< file name without its extension, e.g. "Vital"
+    enum class Probe { NotProbed, Ok, Failed };
+
+    std::string name; ///< file name without its extension until probed, e.g. "Vital"
     PluginFormat format = PluginFormat::Vst3;
     std::filesystem::path path; ///< the .vst3 / .clap file or bundle folder
+    std::string vendor; ///< factory vendor, else the install folder ("FabFilter/..."), else empty
+    std::string category = "Uncategorized"; ///< see pluginCategories()
+    std::string version;
+    std::string tags; ///< raw VST3 sub-categories / CLAP features
+    std::uintmax_t fileSize = 0; ///< with `modified`: skip unchanged files when scanning again
+    std::int64_t modified = 0; ///< last write time, file-clock ticks
+    Probe probe = Probe::NotProbed;
+    std::string probeError; ///< why the probe failed
+    /// Set by the user (empty: none). They win over what the plugin says and
+    /// survive scans; see effectiveCategory() and carryUserCategories().
+    std::string userCategory;
+    std::string userInstrumentType; ///< only with userCategory == "Instrument"
 };
 
 struct PluginFolder {
