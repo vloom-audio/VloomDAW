@@ -55,10 +55,11 @@ endforeach()
 add_test(NAME "Probe reads a VST3 factory" COMMAND vloomdaw-plugin-probe --vst3 ${probe_vst3})
 set_tests_properties("Probe reads a VST3 factory" PROPERTIES
     PASS_REGULAR_EXPRESSION "@@vloom\tplugin\tFake Reverb\tVloom Test\t1\\.2\\.3\tFx\\|Reverb"
-    FAIL_REGULAR_EXPRESSION "Fake Controller")
+    FAIL_REGULAR_EXPRESSION "Fake Controller|init without newline")
 add_test(NAME "Probe reads a CLAP factory" COMMAND vloomdaw-plugin-probe --clap ${probe_clap})
 set_tests_properties("Probe reads a CLAP factory" PROPERTIES
-    PASS_REGULAR_EXPRESSION "Fake CLAP Reverb\tVloom Test\t0\\.9\taudio-effect\\|reverb\\|stereo.*Fake CLAP Synth")
+    PASS_REGULAR_EXPRESSION "Fake CLAP Reverb\tVloom Test\t0\\.9\taudio-effect\\|reverb\\|stereo.*Fake CLAP Synth"
+    FAIL_REGULAR_EXPRESSION "Forged|licence ok")
 add_test(NAME "Probe fails cleanly on a file that is not a plugin"
     COMMAND vloomdaw-plugin-probe --vst3 ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
 set_tests_properties("Probe fails cleanly on a file that is not a plugin" PROPERTIES

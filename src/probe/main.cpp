@@ -44,8 +44,12 @@
 #include <shellapi.h>
 #elif defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
+#include <fcntl.h>
+#include <unistd.h>
 #else
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -73,17 +77,61 @@ template <std::size_t N> std::string field(const char (&text)[N])
     return field(std::string(text, strnlen(text, N)).c_str());
 }
 
+/// Where records go: a private copy of the original stdout. Standard output
+/// itself is pointed at the null device before any plugin code runs, so a
+/// plugin's own prints can neither forge records nor glue text onto them.
+int recordFd = -1;
+
+void writeRecord(const std::string& text)
+{
+    std::size_t done = 0;
+    while (done < text.size()) {
+#if defined(_WIN32)
+        const int n = _write(recordFd, text.data() + done, static_cast<unsigned>(text.size() - done));
+#else
+        const auto n = ::write(recordFd, text.data() + done, text.size() - done);
+#endif
+        if (n <= 0)
+            return;
+        done += static_cast<std::size_t>(n);
+    }
+}
+
+/// Keeps a private handle on stdout for records and silences stdout for
+/// everything else (C runtime and, on Windows, the OS handle plugins see).
+void isolateStdout()
+{
+    std::fflush(stdout);
+#if defined(_WIN32)
+    recordFd = _dup(_fileno(stdout));
+    _setmode(recordFd, _O_BINARY); // plain \n line ends
+    std::FILE* sink = nullptr;
+    if (freopen_s(&sink, "NUL", "w", stdout) != 0)
+        sink = nullptr;
+    HANDLE nul = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (nul != INVALID_HANDLE_VALUE)
+        SetStdHandle(STD_OUTPUT_HANDLE, nul);
+#else
+    recordFd = ::dup(STDOUT_FILENO);
+    const int nul = ::open("/dev/null", O_WRONLY);
+    if (nul >= 0) {
+        ::dup2(nul, STDOUT_FILENO);
+        ::close(nul);
+    }
+#endif
+}
+
 void emit(std::string_view kind, const std::vector<std::string>& fields)
 {
-    std::string line = "@@vloom\t";
+    // Leading newline: a record always starts a line of its own.
+    std::string line = "\n@@vloom\t";
     line += kind;
     for (const std::string& f : fields) {
         line += '\t';
         line += f;
     }
     line += '\n';
-    std::fwrite(line.data(), 1, line.size(), stdout);
-    std::fflush(stdout);
+    writeRecord(line);
 }
 
 int fail(const std::string& message)
@@ -103,8 +151,11 @@ public:
     bool open(const fs::path& path)
     {
 #if defined(_WIN32)
-        // Altered search path: the plugin's own folder resolves its DLLs.
-        handle_ = LoadLibraryExW(path.wstring().c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        // The plugin's own folder and the system folders resolve its DLLs;
+        // never the working directory or PATH (planted DLLs).
+        const std::wstring absolute = fs::absolute(path).wstring();
+        handle_ = LoadLibraryExW(
+            absolute.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         return handle_ != nullptr;
 #elif defined(__APPLE__)
         const std::string text = path.string();
@@ -298,7 +349,10 @@ int probeClap(const fs::path& plugin)
     if (entry->clapVersion.major < 1)
         return fail("unsupported CLAP version");
 
-    const std::string pluginPath = plugin.string();
+    // CLAP passes paths as UTF-8 (path::string() would use the ANSI code
+    // page on Windows, and throw on characters it lacks).
+    const std::u8string utf8Path = plugin.u8string();
+    const std::string pluginPath(utf8Path.begin(), utf8Path.end());
     if (!entry->init(pluginPath.c_str()))
         return fail("the module refused to initialise");
     const auto* factory = static_cast<const clap::PluginFactory*>(entry->getFactory(clap::kPluginFactoryId));
@@ -315,7 +369,10 @@ int probeClap(const fs::path& plugin)
         if (d == nullptr)
             continue;
         std::string tags;
-        for (const char* const* f = d->features; f != nullptr && *f != nullptr && tags.size() < 400; ++f) {
+        // Bounded by count too: a list of empty strings never grows `tags`.
+        int n = 0;
+        for (const char* const* f = d->features; f != nullptr && *f != nullptr && n < 64 && tags.size() < 400;
+            ++f, ++n) {
             if (!tags.empty())
                 tags += '|';
             tags += field(*f, 64);
@@ -334,8 +391,10 @@ int main(int argc, char** argv)
 #if defined(_WIN32)
     // No crash or "missing DLL" dialogs: the app reads the exit status.
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
-    _setmode(_fileno(stdout), _O_BINARY); // plain \n line ends
+    // No DLL from the working directory or PATH for anything loaded later.
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 #endif
+    isolateStdout();
     if (argc != 3) {
         std::fputs("usage: vloomdaw-plugin-probe --vst3|--clap <path>\n", stderr);
         return 2;

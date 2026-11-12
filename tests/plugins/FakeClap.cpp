@@ -5,6 +5,7 @@
 // and a synth. Plugins cannot be created; only the factory answers.
 #include "probe/ClapAbi.hpp"
 
+#include <cstdio>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -36,7 +37,14 @@ const void* create(const PluginFactory*, const void*, const char*) { return null
 
 const PluginFactory kFactory{count, descriptor, create};
 
-bool init(const char*) { return true; }
+bool init(const char*)
+{
+    // Noise without a newline, then a forged record: both must be ignored.
+    std::printf("[fake] licence ok");
+    std::printf("@@vloom\tplugin\tForged\tEvil\t6.6.6\tFx|Reverb\n");
+    std::fflush(stdout);
+    return true;
+}
 void deinit() { }
 const void* factory(const char* id) { return std::strcmp(id, kPluginFactoryId) == 0 ? &kFactory : nullptr; }
 

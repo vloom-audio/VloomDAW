@@ -6,6 +6,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QProcess>
 #include <QTimer>
@@ -15,7 +16,16 @@ namespace vloomdaw {
 namespace {
 constexpr qsizetype kMaxOutput = 1 << 20; ///< a chatty plugin cannot fill memory
 
-QString nativePath(const std::filesystem::path& p) { return QString::fromStdWString(p.wstring()); }
+/// A file system path as a QString. POSIX names are bytes (maybe not valid
+/// UTF-8): decode them like Qt does instead of path::wstring(), which throws.
+QString nativePath(const std::filesystem::path& p)
+{
+#if defined(Q_OS_WIN)
+    return QString::fromStdWString(p.wstring());
+#else
+    return QFile::decodeName(QByteArray::fromStdString(p.native()));
+#endif
+}
 } // namespace
 
 PluginProber::PluginProber(QObject* parent)
@@ -26,6 +36,9 @@ PluginProber::PluginProber(QObject* parent)
     process_->setProcessChannelMode(QProcess::SeparateChannels);
     process_->setStandardInputFile(QProcess::nullDevice());
     process_->setStandardErrorFile(QProcess::nullDevice());
+    // Not the app's working directory (could be Downloads): nothing there is
+    // looked at when a plugin loads its DLLs.
+    process_->setWorkingDirectory(QDir::tempPath());
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         const QByteArray chunk = process_->readAllStandardOutput();
         if (output_.size() < kMaxOutput)
@@ -101,7 +114,9 @@ void PluginProber::next()
         // Unchanged since the last scan: reuse what it found (every plugin of the module).
         bool cached = false;
         for (const PluginInfo& old : previous_) {
-            if (old.probe != PluginInfo::Probe::NotProbed && sameModule(old, module)) {
+            // Only successes are reused: a failure may have been transient
+            // (antivirus, a slow licence check), so it is tried again.
+            if (old.probe == PluginInfo::Probe::Ok && sameModule(old, module)) {
                 results_.push_back(old);
                 cached = true;
             }

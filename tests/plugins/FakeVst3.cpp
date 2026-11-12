@@ -7,6 +7,7 @@
 #include "probe/Vst3Abi.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -90,7 +91,12 @@ VLOOM_EXPORT IPluginFactory* VLOOM_VST3_API GetPluginFactory()
 }
 
 #if defined(_WIN32)
-VLOOM_EXPORT bool VLOOM_VST3_API InitDll() { return true; }
+VLOOM_EXPORT bool VLOOM_VST3_API InitDll()
+{
+    std::printf("[fake] init without newline");
+    std::fflush(stdout);
+    return true;
+}
 VLOOM_EXPORT bool VLOOM_VST3_API ExitDll() { return true; }
 #elif defined(__APPLE__)
 VLOOM_EXPORT bool bundleEntry(void*) { return true; }
