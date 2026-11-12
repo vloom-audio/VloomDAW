@@ -114,3 +114,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   empty menu / tool bar space moves the window (resize, Aero Snap and the
   taskbar still work natively)
 - Window size and position are remembered between sessions
+
+### Fixed
+- macOS: detached panels (playlist, piano roll, mixer) no longer show a separate
+  title bar: like the main window, the panel header takes its place, holds the
+  window buttons and moves the window.
