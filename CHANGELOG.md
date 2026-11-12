@@ -7,6 +7,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The channel rack plays: drop a WAV file from the browser or the desktop on a
+  channel (below the last one for a new channel) and its steps trigger the sample
+  through vloom-engine's step sequencer. Edits apply while playing without cutting
+  notes. Channels without a sample are dimmed.
 - Plugins side panel (second sidebar page): lists the VST3 and CLAP plugins found
   by the last scan, grouped by format, with search. Plugins are only available after
   a scan, which the user starts in the Plugin Manager (Options > Plugin Manager…);

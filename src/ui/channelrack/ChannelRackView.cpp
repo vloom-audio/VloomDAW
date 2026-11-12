@@ -5,8 +5,17 @@
 #include "core/Project.hpp"
 #include "ui/Theme.hpp"
 
+#include <QDir>
+#include <QDragEnterEvent>
+#include <QFileInfo>
+#include <QHelpEvent>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QToolTip>
+#include <QUrl>
+
+#include <algorithm>
 
 namespace vloomdaw {
 
@@ -24,6 +33,20 @@ constexpr int kPadGap = 3;
 constexpr int kGroupGap = 7; ///< extra space between groups of four steps
 constexpr int kPadInset = 4; ///< vertical inset of a pad in its row
 
+/// The first local .wav file in a drag, or "" (only WAV can be loaded).
+QString droppedWav(const QMimeData* mime)
+{
+    if (mime == nullptr || !mime->hasUrls())
+        return {};
+    for (const QUrl& url : mime->urls()) {
+        const QString path = url.toLocalFile();
+        if (!path.isEmpty()
+            && QFileInfo(path).suffix().compare(QStringLiteral("wav"), Qt::CaseInsensitive) == 0)
+            return path;
+    }
+    return {};
+}
+
 } // namespace
 
 ChannelRackView::ChannelRackView(QWidget* parent)
@@ -31,6 +54,7 @@ ChannelRackView::ChannelRackView(QWidget* parent)
 {
     setObjectName(QStringLiteral("channelRackView"));
     setMouseTracking(false);
+    setAcceptDrops(true);
 }
 
 void ChannelRackView::setProject(const Project* project)
@@ -83,7 +107,8 @@ std::size_t ChannelRackView::channelCount() const
 QSize ChannelRackView::sizeHint() const
 {
     const QRect last = padRect(0, kStepsPerBar - 1);
-    return {last.right() + 16, kTop + static_cast<int>(channelCount()) * kRowHeight + kTop};
+    // One spare row: dropping a file there adds a channel.
+    return {last.right() + 16, kTop + static_cast<int>(channelCount() + 1) * kRowHeight + kTop};
 }
 
 QRect ChannelRackView::padRect(std::size_t channel, int step) const
@@ -132,7 +157,8 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
         p.setBrush(ch == selected_ ? c.raised : c.panel);
         p.setPen(QPen(ch == selected_ ? c.accent : c.border, 1));
         p.drawRoundedRect(QRectF(nameRect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
-        p.setPen(channel.muted ? c.textDim : c.text);
+        // Dim names without a sample: they make no sound until one is dropped.
+        p.setPen(channel.muted || channel.samplePath.empty() ? c.textDim : c.text);
         p.drawText(nameRect.adjusted(8, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft,
             QFontMetrics(font()).elidedText(
                 QString::fromStdString(channel.name), Qt::ElideRight, nameRect.width() - 14));
@@ -150,6 +176,84 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
             p.drawRoundedRect(pad, 3, 3);
         }
     }
+
+    // Drop target while a WAV file is dragged over.
+    if (dropRow_ >= 0) {
+        const int y = kTop + dropRow_ * kRowHeight;
+        const QRectF row(
+            kNameX - 2, y + 1, padRect(0, kStepsPerBar - 1).right() - kNameX + 4, kRowHeight - 2);
+        QPen pen(c.accent, 1.5);
+        if (static_cast<std::size_t>(dropRow_) >= channelCount()) {
+            pen.setStyle(Qt::DashLine);
+            p.setPen(c.textDim);
+            p.drawText(row.adjusted(10, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, tr("New channel"));
+        }
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(row, 5, 5);
+    }
+}
+
+std::size_t ChannelRackView::dropRowAt(int y) const
+{
+    if (y < kTop)
+        return 0;
+    return std::min(static_cast<std::size_t>((y - kTop) / kRowHeight), channelCount());
+}
+
+void ChannelRackView::setDropRow(int row)
+{
+    if (row == dropRow_)
+        return;
+    dropRow_ = row;
+    update();
+}
+
+void ChannelRackView::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (project_ == nullptr || droppedWav(event->mimeData()).isEmpty())
+        return; // ignored: the cursor shows it cannot drop
+    event->acceptProposedAction();
+    setDropRow(static_cast<int>(dropRowAt(event->position().toPoint().y())));
+}
+
+void ChannelRackView::dragMoveEvent(QDragMoveEvent* event)
+{
+    event->acceptProposedAction();
+    setDropRow(static_cast<int>(dropRowAt(event->position().toPoint().y())));
+}
+
+void ChannelRackView::dragLeaveEvent(QDragLeaveEvent* /*event*/) { setDropRow(-1); }
+
+void ChannelRackView::dropEvent(QDropEvent* event)
+{
+    const QString path = droppedWav(event->mimeData());
+    const std::size_t row = dropRowAt(event->position().toPoint().y());
+    setDropRow(-1);
+    if (path.isEmpty())
+        return;
+    event->acceptProposedAction();
+    emit sampleDropped(row, path);
+}
+
+bool ChannelRackView::event(QEvent* event)
+{
+    if (event->type() == QEvent::ToolTip && project_ != nullptr) {
+        auto* help = static_cast<QHelpEvent*>(event);
+        const Hit hit = hitAt(help->pos());
+        if (hit.part == Part::Name) {
+            const std::string& path = project_->channels()[hit.channel].samplePath;
+            QToolTip::showText(help->globalPos(),
+                path.empty() ? tr("No sample: drop a WAV file here")
+                             : QDir::toNativeSeparators(QString::fromStdString(path)),
+                this);
+            return true;
+        }
+        QToolTip::hideText();
+        event->ignore();
+        return true;
+    }
+    return QWidget::event(event);
 }
 
 void ChannelRackView::mousePressEvent(QMouseEvent* event)

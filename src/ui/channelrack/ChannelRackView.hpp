@@ -16,7 +16,9 @@ class Project;
 ///
 /// Click a pad to toggle it and drag along the row to paint the same state;
 /// right-click to clear. Click a name to select the channel, double-click it
-/// to open the piano roll.
+/// to open the piano roll. Drop a WAV file (from the browser or the desktop)
+/// on a channel to give it that sample, or below the last one for a new
+/// channel.
 class ChannelRackView : public QWidget {
     Q_OBJECT
 
@@ -38,6 +40,9 @@ signals:
     void muteToggled(std::size_t channel);
     void channelSelected(std::size_t channel);
     void channelOpened(std::size_t channel);
+    /// A WAV file was dropped on `channel`; channel == the channel count
+    /// means below the last one (a new channel). `path` is a local path.
+    void sampleDropped(std::size_t channel, const QString& path);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -45,6 +50,11 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
     enum class Part { None, Mute, Name, Step };
@@ -56,8 +66,12 @@ private:
     [[nodiscard]] Hit hitAt(const QPoint& pos) const;
     [[nodiscard]] QRect padRect(std::size_t channel, int step) const;
     [[nodiscard]] std::size_t channelCount() const;
+    /// Channel row at y, or channelCount() below the last row.
+    [[nodiscard]] std::size_t dropRowAt(int y) const;
+    void setDropRow(int row);
 
     const Project* project_ = nullptr;
+    int dropRow_ = -1; ///< row highlighted while a file is dragged over, -1 = none
     std::size_t pattern_ = 0;
     std::size_t selected_ = 0;
     int playStep_ = -1;

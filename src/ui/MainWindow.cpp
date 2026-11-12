@@ -44,7 +44,9 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDir>
 #include <QEvent>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
@@ -323,6 +325,7 @@ void MainWindow::selectPattern(std::size_t pattern)
     pianoRoll_->setTarget(currentPattern_, currentChannel_);
     playlist_->setCurrentPattern(currentPattern_);
     updatePanelContexts();
+    syncChannelRack(); // the engine plays the current pattern
 }
 
 void MainWindow::selectChannel(std::size_t channel)
@@ -775,15 +778,19 @@ QWidget* MainWindow::createWorkspace()
             = project_.addChannel(tr("Channel %1").arg(project_.channels().size() + 1).toStdString());
         channelRack_->refresh();
         selectChannel(index);
+        syncChannelRack();
     });
     connect(channelRack_, &ChannelRackView::stepSet, this, [this](std::size_t channel, int step, bool on) {
         project_.setStep(currentPattern_, channel, step, on);
         channelRack_->update();
+        syncChannelRack();
     });
     connect(channelRack_, &ChannelRackView::muteToggled, this, [this](std::size_t channel) {
         project_.setChannelMuted(channel, !project_.channels()[channel].muted);
         channelRack_->update();
+        syncChannelRack();
     });
+    connect(channelRack_, &ChannelRackView::sampleDropped, this, &MainWindow::assignSample);
     connect(channelRack_, &ChannelRackView::channelSelected, this, &MainWindow::selectChannel);
     connect(channelRack_, &ChannelRackView::channelOpened, this, [this](std::size_t channel) {
         selectChannel(channel);
@@ -1230,6 +1237,8 @@ void MainWindow::startDevice(int index)
     pendingGain_.reset();
     pendingPan_.reset();
 
+    syncChannelRack(); // samples at the device's rate
+
     const QString format = tr("%1 Hz  ·  %2 samples").arg(audio_.sampleRate()).arg(audio_.bufferFrames());
     deviceStatus_->setText(
         QStringLiteral("%1  ·  %2").arg(QString::fromStdString(audio_.deviceName()), format));
@@ -1239,6 +1248,30 @@ void MainWindow::startDevice(int index)
     if (audio_.sampleRate() != audio_.requestedSampleRate())
         status += tr(" (device does not support %1 Hz)").arg(audio_.requestedSampleRate());
     settingsDialog_->audioPage()->setStatus(status, true);
+}
+
+void MainWindow::syncChannelRack()
+{
+    const auto errors = rackAudio_.sync(audio_.engine(), project_, currentPattern_, audio_.sampleRate());
+    if (errors.empty())
+        return;
+    const auto& first = errors.front();
+    const QString name = QFileInfo(QString::fromStdString(first.path)).fileName();
+    statusBar()->showMessage(
+        tr("Could not load %1: %2").arg(name, QString::fromStdString(first.message)), 8000);
+}
+
+void MainWindow::assignSample(std::size_t channel, const QString& path)
+{
+    const QString name = QFileInfo(path).completeBaseName();
+    if (channel >= project_.channels().size())
+        channel = project_.addChannel(name.toStdString());
+    else
+        project_.setChannelName(channel, name.toStdString());
+    project_.setChannelSample(channel, QDir::cleanPath(path).toStdString());
+    channelRack_->refresh();
+    selectChannel(channel);
+    syncChannelRack();
 }
 
 void MainWindow::newProject()
@@ -1251,6 +1284,7 @@ void MainWindow::newProject()
     transport_->keyDisplay()->setScale(Scale::Major);
     pianoRoll_->setKey(0, Scale::Major);
     project_ = Project{};
+    rackAudio_.reset();
     transport_->patternSelector()->reset();
     currentPattern_ = 0;
     currentChannel_ = 0;
@@ -1314,6 +1348,7 @@ void MainWindow::toggleFullScreen()
 void MainWindow::refreshFromEngine()
 {
     auto& engine = audio_.engine();
+    engine.collectGarbage(); // free channel-rack states the audio thread is done with
 
     // Nothing to show while minimised; still send pending changes and drain
     // the meters below so they do not show a stale peak when restored.
