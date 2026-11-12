@@ -4,7 +4,7 @@
 [![C++ Standard](https://img.shields.io/badge/C%2B%2B-20-brightgreen.svg)](#requirements)
 [![Framework: Qt 6](https://img.shields.io/badge/Qt-6.5%2B-green.svg)](https://www.qt.io/)
 [![Platforms](https://img.shields.io/badge/Platforms-macOS%20|%20Windows%20|%20Linux-lightgrey.svg)](#quick-start)
-[![Status: M0](https://img.shields.io/badge/Status-M0%20(First%20Sound)-orange.svg)](#roadmap)
+[![Status: M1](https://img.shields.io/badge/Status-M1%20(Channel%20Rack)-orange.svg)](#roadmap)
 
 **VloomDAW** is a free, open-source, pattern-based digital audio workstation for
 macOS, Windows and Linux. It follows the fast pattern workflow of FL Studio and
@@ -14,9 +14,10 @@ and a mixer to open source.
 The audio engine lives in its own repository,
 [vloom-engine](https://github.com/vloom-audio/vloom-engine), and has no UI.
 
-> **Current milestone: M0 — first sound.** The transport, metronome and master
-> output play through the engine. The song editors and mixer can already be
-> edited; they get audio in M1–M3.
+> **Current milestone: M1 — channel rack.** Drop WAV samples on the channel
+> rack and its step patterns play through the engine, each channel into the
+> mixer insert you pick. The piano roll and playlist can already be edited;
+> they get audio in M2 and M3.
 
 ---
 
@@ -27,16 +28,25 @@ each feature goes (works / UI only / planned).
 
 - **Transport:** play, stop, metronome, LCD tempo and song position, tap tempo,
   master volume, and a key display (root note and scale).
-- **Song editors** (editing only for now): channel rack with step pads, piano
-  roll, and a pattern playlist.
+- **Channel rack:** drop a WAV file on a channel and its 16 step pads play it;
+  each channel has a volume knob and picks the mixer insert it plays into.
+  Edits apply while playing without cutting notes.
+- **Song editors** (editing only for now): piano roll (audio in M2) and a
+  pattern playlist (M3).
 - **Mixer:** master and 16 insert tracks with pan, fader, mute, solo and peak
-  meters; the master drives the engine.
+  meters, all acting on the sound.
+- **Audio output:** WASAPI, CoreAudio or ALSA through the engine; when the
+  device is unplugged, playback moves to the system default and comes back
+  when it returns.
 - **Plugins:** the Plugin Manager scans your VST3 and CLAP folders when you press
-  Scan, never automatically, and remembers what it found. Plugins are not loaded
-  yet (M4).
-- **Sample browser** for the audio files in your sample folders.
+  Scan, never automatically. It can read each plugin's vendor and category in a
+  separate process, so a crashing plugin cannot take the app down; the sidebar
+  groups them by category, vendor or format. Plugins are not played yet (M4).
+- **Sample browser** for the audio files in your sample folders; drag samples
+  onto the channel rack.
 - **Window layout:** the mixer, piano roll and playlist detach into their own windows.
-  On Windows, windows have no native title bar but still snap and resize natively.
+  No separate title bar on Windows or macOS: the panel header holds the window
+  buttons, and windows still snap and resize natively.
 - **Settings and themes:** audio device and format; a theme editor with seven
   dark presets, colour adjustments and a contrast check.
 - **Performance overlay** (`Ctrl/Cmd+Shift+D`) and a refresh rate that follows the
@@ -53,7 +63,7 @@ each feature goes (works / UI only / planned).
 | <kbd>Home</kbd> | Go to the start |
 | <kbd>R</kbd> | Arm / disarm recording (no audio input yet) |
 | <kbd>L</kbd> | Pattern / song mode |
-| <kbd>F5</kbd> / <kbd>F6</kbd> / <kbd>F7</kbd> / <kbd>F9</kbd> | Playlist / Channel rack / Piano roll / Mixer (editing only; playback of patterns comes in M1–M3) |
+| <kbd>F5</kbd> / <kbd>F6</kbd> / <kbd>F7</kbd> / <kbd>F9</kbd> | Playlist / Channel rack / Piano roll / Mixer (the piano roll plays in M2, the playlist in M3) |
 | <kbd>Alt</kbd> + <kbd>F8</kbd> | Show / hide the browser |
 | <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>M</kbd> | Metronome on / off |
 | <kbd>T</kbd> | Tap tempo |
@@ -118,16 +128,22 @@ Per-platform details: **[docs/getting-started.md](docs/getting-started.md)**.
 VloomDAW/
 ├── src/
 │   ├── app/              # main(): creates the AudioController and the window
-│   ├── audio/            # AudioController: owns vloom::Engine and the device (no Qt)
-│   ├── core/             # Logic without Qt: formatting, tap tempo, file filters…
+│   ├── audio/            # AudioController (engine + device); project and mixer → engine state (no Qt)
+│   ├── core/             # Logic without Qt: project model, mixer model, plugin scan, formatting…
+│   ├── probe/            # vloomdaw-plugin-probe: reads one plugin's metadata in a child process
 │   └── ui/               # Qt Widgets (target vloomdaw_ui)
 │       ├── MainWindow    # The main window; connects widgets to the engine
 │       ├── Theme         # Colours and style sheet
 │       ├── browser/      # Sample browser panel
+│       ├── channelrack/  # Channel rack (steps, volume, insert)
+│       ├── mixer/        # Mixer panel and strips
+│       ├── pianoroll/    # Piano roll
+│       ├── playlist/     # Playlist
+│       ├── plugins/      # Plugins side panel and Plugin Manager
 │       ├── dialogs/      # Settings window
 │       └── widgets/      # Reusable widgets, one folder each (TransportBar, LcdDisplay, …)
 ├── resources/icons/      # SVG icons (sources and licences in its README)
-├── tests/                # Catch2 tests for core/ (no Qt, no display)
+├── tests/                # Catch2 tests for core/ and audio/ (no Qt, no display), probe tests
 ├── cmake/                # Build helpers; dependencies in Dependencies.cmake
 ├── docs/                 # Getting started, architecture, UI guidelines
 └── scripts/              # bootstrap.sh, format.sh
@@ -139,10 +155,10 @@ VloomDAW/
 
 | Milestone | Deliverables | Status |
 |:---:|---|:---:|
-| **M0** | Window, audio device settings, transport, metronome, sample browser | *In review* |
-| **M1** | Channel rack and step sequencer with sample playback | *Next* |
-| **M2** | Piano roll and a first built-in synth | *Planned* |
-| **M3** | Playlist (patterns on a timeline), mixer, WAV export | *Planned* |
+| **M0** | Window, audio device settings, transport, metronome, sample browser | *Done* |
+| **M1** | Channel rack and step sequencer with sample playback; mixer routing to inserts | *Done* |
+| **M2** | Piano roll and a first built-in synth | *Next* |
+| **M3** | Playlist (patterns on a timeline), WAV export | *Planned* |
 | **M4** | CLAP, then VST3 plugin hosting; project save / load → first alpha | *Planned* |
 
 ---
