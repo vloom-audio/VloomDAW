@@ -135,6 +135,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   search cancels the previous one, and clearing it brings the folder tree
   back as it was.
 - The app has its own icon (Windows executable, macOS bundle, window icon).
+- No more UI stutter every 2 s while the chosen output device is missing: the
+  app lists devices only when the OS reports a change, and on a background
+  thread, instead of polling on the UI thread (each listing took 50-200 ms).
 - macOS: detached panels (playlist, piano roll, mixer) no longer show a separate
   title bar: like the main window, the panel header takes its place, holds the
   window buttons and moves the window.

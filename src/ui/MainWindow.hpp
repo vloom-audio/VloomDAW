@@ -14,13 +14,17 @@
 #include "ui/plugins/PluginStore.hpp"
 #include "ui/widgets/ViewButtons/ViewButtons.hpp"
 
+#include <vloom/engine/io/AudioDevice.hpp>
+
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QRect>
 #include <QStringList>
 
 #include <array>
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -39,6 +43,8 @@ class QTimer;
 class QToolButton;
 
 namespace vloomdaw {
+
+class DeviceScanner;
 
 class AudioController;
 class ActivityBar;
@@ -197,6 +203,10 @@ private:
     PluginStore pluginStore_;
     AppSettings settings_;
     DeviceWatch deviceWatch_;
+    DeviceScanner* deviceScanner_ = nullptr; ///< lists devices off the UI thread for deviceWatch_
+    std::unique_ptr<vloom::DeviceListWatcher> deviceListWatcher_; ///< the OS says when devices change
+    std::uint64_t scannedGeneration_ = 0; ///< deviceListWatcher_ generation at the last scan
+    bool preferredPresent_ = false; ///< the user's device was in the last scan
     QElapsedTimer deviceClock_; ///< time base for deviceWatch_
     std::vector<std::string> deviceNames_; ///< as last listed, for dialog indices
     std::optional<double> pendingTempo_; ///< latest user tempo not yet sent

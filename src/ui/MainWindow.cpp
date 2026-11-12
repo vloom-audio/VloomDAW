@@ -9,6 +9,7 @@
 #include "core/PositionFormat.hpp"
 #include "core/ProcessMemory.hpp"
 #include "core/Scales.hpp"
+#include "ui/DeviceScanner.hpp"
 #include "ui/Theme.hpp"
 #include "ui/browser/BrowserPanel.hpp"
 #include "ui/channelrack/ChannelRackView.hpp"
@@ -1293,10 +1294,28 @@ void MainWindow::watchDevice()
 {
     if (!deviceClock_.isValid())
         return; // no device opened yet
-    const auto action = deviceWatch_.tick(audio_.isRunning(), deviceClock_.elapsed(),
-        [this] { return findDevice(audio_.outputDevices().names, selectedDevice()) >= 0; });
+    if (deviceScanner_ == nullptr) {
+        deviceScanner_ = new DeviceScanner(this);
+        connect(deviceScanner_, &DeviceScanner::scanned, this,
+            [this] { preferredPresent_ = findDevice(deviceScanner_->names(), selectedDevice()) >= 0; });
+        deviceListWatcher_ = std::make_unique<vloom::DeviceListWatcher>();
+    }
+    // Listing devices takes up to ~200 ms and disturbs the UI even from
+    // another thread, so it happens only when the OS reports a change
+    // (where it cannot, every poll, still off the UI thread). Each poll
+    // answers from the last scan: a returning device is noticed one poll
+    // (2 s) after the OS reports it.
+    const auto action = deviceWatch_.tick(audio_.isRunning(), deviceClock_.elapsed(), [this] {
+        const std::uint64_t generation = deviceListWatcher_->generation();
+        if (!deviceListWatcher_->isSupported() || generation != scannedGeneration_) {
+            scannedGeneration_ = generation;
+            deviceScanner_->scan();
+        }
+        return preferredPresent_;
+    });
     if (action == DeviceWatch::Action::None)
         return;
+    preferredPresent_ = false; // the next wait for the user's device starts from a fresh scan
 
     // The transport keeps its position and play state across a reopen, so
     // the song carries on through the new device.
