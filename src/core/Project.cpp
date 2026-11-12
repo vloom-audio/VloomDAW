@@ -9,7 +9,7 @@ namespace vloomdaw {
 Project::Project()
 {
     for (const char* name : {"Kick", "Clap", "Hat", "Snare"})
-        channels_.push_back(Channel{name, false});
+        channels_.push_back(Channel{name, false, {}});
     addPattern();
 }
 
@@ -17,7 +17,7 @@ Project::Project()
 
 std::size_t Project::addChannel(const std::string& name)
 {
-    channels_.push_back(Channel{name, false});
+    channels_.push_back(Channel{name, false, {}});
     for (Pattern& p : patterns_)
         p.channels.emplace_back();
     return channels_.size() - 1;
@@ -27,6 +27,18 @@ void Project::setChannelMuted(std::size_t channel, bool muted)
 {
     if (channel < channels_.size())
         channels_[channel].muted = muted;
+}
+
+void Project::setChannelName(std::size_t channel, const std::string& name)
+{
+    if (channel < channels_.size())
+        channels_[channel].name = name;
+}
+
+void Project::setChannelSample(std::size_t channel, const std::string& path)
+{
+    if (channel < channels_.size())
+        channels_[channel].samplePath = path;
 }
 
 // ---------------------------------------------------------------- patterns

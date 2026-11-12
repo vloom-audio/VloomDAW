@@ -26,7 +26,8 @@ target_sources(vloomdaw_core PRIVATE
     core/ThemePresets.cpp
 
     # audio — owns the engine and the hardware device
-    audio/AudioController.cpp)
+    audio/AudioController.cpp
+    audio/ChannelRackAudio.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vloomdaw_core PUBLIC vloom::engine)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")

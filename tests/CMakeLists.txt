@@ -6,6 +6,7 @@ CPMAddPackage(
 # Tests cover the Qt-free core only, so they build and run without Qt or a display.
 # Test files mirror src/: tests/<module>/<Name>Tests.cpp
 add_executable(vloomdaw_tests
+    audio/ChannelRackAudioTests.cpp
     core/AudioFormatTests.cpp
     core/BrowserFilterTests.cpp
     core/DecibelsTests.cpp

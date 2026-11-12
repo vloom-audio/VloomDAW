@@ -116,3 +116,24 @@ TEST_CASE("Muting a channel", "[project]")
     CHECK(p.channels()[2].muted);
     p.setChannelMuted(42, true); // ignored
 }
+
+TEST_CASE("Channels take a sample and a new name", "[project]")
+{
+    Project p;
+    CHECK(p.channels()[1].samplePath.empty());
+    p.setChannelSample(1, "C:/samples/clap \xE0\xB8\x81.wav");
+    p.setChannelName(1, "clap");
+    CHECK(p.channels()[1].samplePath == "C:/samples/clap \xE0\xB8\x81.wav");
+    CHECK(p.channels()[1].name == "clap");
+    p.setChannelSample(99, "x.wav"); // ignored
+    p.setChannelName(99, "x");
+    CHECK(p.channels().size() == 4);
+}
+
+TEST_CASE("Pattern steps follow the pattern length", "[project]")
+{
+    Project p;
+    CHECK(p.patternSteps(0) == kStepsPerBar);
+    p.addNote(0, 0, Note{60, kTicksPerBar + 10, kTicksPerStep}); // reaches into bar 2
+    CHECK(p.patternSteps(0) == 2 * kStepsPerBar);
+}

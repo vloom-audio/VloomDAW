@@ -44,6 +44,7 @@ struct Pattern {
 struct Channel {
     std::string name;
     bool muted = false;
+    std::string samplePath; ///< UTF-8 path of the sample it plays; empty = none (silent)
 };
 
 /// A pattern placed in the playlist. Its length is the pattern's length.
@@ -56,7 +57,8 @@ struct Clip {
 };
 
 /// The song: channels, patterns (steps and notes per channel) and the
-/// playlist, as in FL Studio. Settings only; nothing here makes sound yet.
+/// playlist, as in FL Studio. Settings only: audio/ChannelRackAudio turns
+/// the channel rack into sound.
 ///
 /// Indices are 0-based. Every method that takes an index ignores (or
 /// returns empty for) one out of range, and every position, key and length
@@ -76,6 +78,9 @@ public:
     /// Adds a channel to every pattern; returns its index.
     std::size_t addChannel(const std::string& name);
     void setChannelMuted(std::size_t channel, bool muted);
+    void setChannelName(std::size_t channel, const std::string& name);
+    /// The sample the channel plays (UTF-8 path; empty = none).
+    void setChannelSample(std::size_t channel, const std::string& path);
 
     // ---- patterns
     /// Appends "Pattern N"; returns its index.
@@ -86,6 +91,12 @@ public:
     /// Length in ticks: whole bars covering the steps and every note, at
     /// least one bar.
     [[nodiscard]] int patternLength(std::size_t pattern) const;
+
+    /// Steps in the pattern's length (16 per bar).
+    [[nodiscard]] int patternSteps(std::size_t pattern) const
+    {
+        return patternLength(pattern) / kTicksPerStep;
+    }
 
     // ---- step sequencer
     [[nodiscard]] bool step(std::size_t pattern, std::size_t channel, int step) const;
