@@ -23,6 +23,7 @@ target_sources(vloomdaw_core PRIVATE
     core/PositionFormat.cpp
     core/ProcessMemory.cpp
     core/Project.cpp
+    core/SampleFolder.cpp
     core/Scales.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
@@ -68,6 +69,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/FilePaths.hpp
     ui/browser/BrowserPanel.cpp
     ui/browser/BrowserPanel.hpp
+    ui/browser/SampleTreeModel.cpp
+    ui/browser/SampleTreeModel.hpp
+    ui/browser/SearchResultsModel.cpp
+    ui/browser/SearchResultsModel.hpp
     ui/channelrack/ChannelRackView.cpp
     ui/channelrack/ChannelRackView.hpp
     ui/dialogs/SettingsDialog/AudioSettingsPage.cpp

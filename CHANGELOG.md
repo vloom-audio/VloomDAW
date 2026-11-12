@@ -124,6 +124,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Window size and position are remembered between sessions
 
 ### Fixed
+- Opening a big folder in the sample browser no longer freezes the app: folders
+  are read and sorted on a background thread and their rows added at once (a
+  folder of 20 000 samples now shows in about 50 ms instead of hanging the
+  window for 2 s). Hidden folders and macOS "._" files stay hidden; a folder
+  with more than 100 000 items shows the first 100 000 and says so.
+- Browser search finds samples in every sub-folder, not only in folders that
+  are open: matches show as one list (hover for the folder), drag onto the
+  channel rack as before. It runs in the background once typing pauses, a new
+  search cancels the previous one, and clearing it brings the folder tree
+  back as it was.
 - The app has its own icon (Windows executable, macOS bundle, window icon).
 - macOS: detached panels (playlist, piano roll, mixer) no longer show a separate
   title bar: like the main window, the panel header takes its place, holds the
