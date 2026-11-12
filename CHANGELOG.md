@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Channel rack volume and routing: each channel has a volume knob (drag, Shift
+  for fine, scroll, double-click for 0 dB) and an insert box; click it to send
+  the channel to one of the mixer's 16 inserts ("-" plays straight into the
+  master). Insert faders, pans, mute and solo now shape the sound, and insert
+  meters show what plays through them.
 - Losing the audio output (an unplugged interface or headphones) no longer leaves
   the app playing in silence: it carries on through the system default right
   away, says so in the status bar, and switches back to your device when it is

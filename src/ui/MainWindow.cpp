@@ -3,6 +3,7 @@
 #include "ui/MainWindow.hpp"
 
 #include "audio/AudioController.hpp"
+#include "audio/MixerAudio.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/NoteNames.hpp"
 #include "core/PositionFormat.hpp"
@@ -72,6 +73,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 
@@ -600,6 +602,7 @@ void MainWindow::updateMixer()
     for (std::size_t i = 1; i < mixer_.size(); ++i)
         mixerPanel_->setSilenced(i, solo && !mixer_.track(i).soloed);
     updateMasterOutput();
+    audio_.engine().setMixerState(engineMixerState(mixer_));
 }
 
 void MainWindow::updateMasterOutput()
@@ -803,6 +806,22 @@ QWidget* MainWindow::createWorkspace()
         channelRack_->update();
         syncChannelRack();
     });
+    connect(channelRack_, &ChannelRackView::volumeChanged, this, [this](std::size_t channel, double volume) {
+        project_.setChannelVolume(channel, volume);
+        channelRack_->update();
+        syncChannelRack();
+    });
+    connect(channelRack_, &ChannelRackView::insertChanged, this, [this](std::size_t channel, int insert) {
+        project_.setChannelInsert(channel, insert);
+        channelRack_->update();
+        syncChannelRack();
+    });
+    {
+        QStringList inserts{tr("Master")};
+        for (std::size_t i = 1; i < mixer_.size(); ++i)
+            inserts << tr("Insert %1").arg(i);
+        channelRack_->setInsertNames(inserts);
+    }
     connect(channelRack_, &ChannelRackView::sampleDropped, this, &MainWindow::assignSample);
     connect(channelRack_, &ChannelRackView::channelSelected, this, &MainWindow::selectChannel);
     connect(channelRack_, &ChannelRackView::channelOpened, this, [this](std::size_t channel) {
@@ -1254,6 +1273,7 @@ bool MainWindow::startDevice(int index, bool fallback)
     audio_.engine().setMasterPan(*pendingPan_);
     pendingGain_.reset();
     pendingPan_.reset();
+    audio_.engine().setMixerState(engineMixerState(mixer_));
 
     syncChannelRack(); // samples at the device's rate
 
@@ -1469,11 +1489,19 @@ void MainWindow::refreshFromEngine()
         pendingPan_.reset();
 
     // Meters: always take the engine's peaks (so a reopened mixer does not
-    // show an old one); insert tracks have no audio until M1.
-    const float left = audio_.isRunning() ? engine.takeOutputPeak(0) : 0.0f;
-    const float right = audio_.isRunning() ? engine.takeOutputPeak(1) : 0.0f;
+    // show an old one).
+    const bool running = audio_.isRunning();
+    const float left = running ? engine.takeOutputPeak(0) : 0.0f;
+    const float right = running ? engine.takeOutputPeak(1) : 0.0f;
+    std::array<std::array<float, 2>, kMixerInserts> insertPeaks{};
+    for (std::size_t i = 1; i <= insertPeaks.size() && i < mixer_.size(); ++i)
+        if (running)
+            insertPeaks[i - 1] = {
+                engine.takeInsertPeak(static_cast<int>(i), 0), engine.takeInsertPeak(static_cast<int>(i), 1)};
     if (mixerPanel_->isVisible()) {
         mixerPanel_->meter(MixerModel::kMaster)->addPeaks(left, right);
+        for (std::size_t i = 1; i <= insertPeaks.size() && i < mixer_.size(); ++i)
+            mixerPanel_->meter(i)->addPeaks(insertPeaks[i - 1][0], insertPeaks[i - 1][1]);
         for (std::size_t i = 0; i < mixerPanel_->trackCount(); ++i)
             mixerPanel_->meter(i)->tick(dt);
     }

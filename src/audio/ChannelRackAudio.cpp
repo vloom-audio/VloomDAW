@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "audio/ChannelRackAudio.hpp"
 
+#include "core/Decibels.hpp"
+
 #include <vloom/engine/sample/SampleLoader.hpp>
 
 #include <exception>
@@ -36,6 +38,9 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
         vloom::ChannelState out;
         out.voices = voices_[c];
         out.muted = channel.muted;
+        out.gain = static_cast<float>(faderToGain(channel.volume));
+        out.pan = static_cast<float>(channel.pan);
+        out.insert = channel.insert;
         if (c < p.channels.size())
             for (const bool on : p.channels[c].steps)
                 out.steps.push_back(on ? 1 : 0);

@@ -45,6 +45,9 @@ struct Channel {
     std::string name;
     bool muted = false;
     std::string samplePath; ///< UTF-8 path of the sample it plays; empty = none (silent)
+    double volume = 0.8; ///< fader position 0..1 (faderToGain(); 0.8 is unity, as on the mixer)
+    double pan = 0.0; ///< -1 left .. +1 right
+    int insert = 0; ///< mixer insert it plays into; 0 = the master
 };
 
 /// A pattern placed in the playlist. Its length is the pattern's length.
@@ -81,6 +84,12 @@ public:
     void setChannelName(std::size_t channel, const std::string& name);
     /// The sample the channel plays (UTF-8 path; empty = none).
     void setChannelSample(std::size_t channel, const std::string& path);
+    /// Fader position 0..1 (clamped; NaN ignored).
+    void setChannelVolume(std::size_t channel, double volume);
+    /// -1 .. +1 (clamped; NaN ignored).
+    void setChannelPan(std::size_t channel, double pan);
+    /// Mixer insert, 0 = master (negative counts as 0).
+    void setChannelInsert(std::size_t channel, int insert);
 
     // ---- patterns
     /// Appends "Pattern N"; returns its index.

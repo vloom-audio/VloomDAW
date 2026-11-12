@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/channelrack/ChannelRackView.hpp"
 
+#include "core/Decibels.hpp"
 #include "core/Project.hpp"
 #include "ui/Theme.hpp"
 
@@ -9,13 +10,16 @@
 #include <QDragEnterEvent>
 #include <QFileInfo>
 #include <QHelpEvent>
+#include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QToolTip>
 #include <QUrl>
+#include <QWheelEvent>
 
 #include <algorithm>
+#include <cmath>
 
 namespace vloomdaw {
 
@@ -25,7 +29,12 @@ constexpr int kRowHeight = 32;
 constexpr int kTop = 6;
 constexpr int kLedX = 10;
 constexpr int kLedSize = 12;
-constexpr int kNameX = 32;
+constexpr int kVolumeX = 30; ///< volume knob
+constexpr int kVolumeSize = 20;
+constexpr int kInsertX = kVolumeX + kVolumeSize + 6; ///< mixer insert box
+constexpr int kInsertWidth = 30;
+constexpr int kNameX = kInsertX + kInsertWidth + 8;
+constexpr double kVolumePerPixel = 0.005; ///< knob drag; Shift: a fifth of it
 constexpr int kNameWidth = 130;
 constexpr int kPadsX = kNameX + kNameWidth + 12;
 constexpr int kPadWidth = 24;
@@ -130,8 +139,12 @@ ChannelRackView::Hit ChannelRackView::hitAt(const QPoint& pos) const
     if (pos.y() < kTop || row < 0 || static_cast<std::size_t>(row) >= channelCount())
         return {};
     const auto channel = static_cast<std::size_t>(row);
-    if (pos.x() >= kLedX - 4 && pos.x() < kNameX - 2)
+    if (pos.x() >= kLedX - 4 && pos.x() < kVolumeX - 2)
         return {Part::Mute, channel, -1};
+    if (pos.x() >= kVolumeX - 2 && pos.x() < kVolumeX + kVolumeSize + 2)
+        return {Part::Volume, channel, -1};
+    if (pos.x() >= kInsertX && pos.x() < kInsertX + kInsertWidth)
+        return {Part::Insert, channel, -1};
     if (pos.x() >= kNameX && pos.x() < kNameX + kNameWidth)
         return {Part::Name, channel, -1};
     for (int s = 0; s < kStepsPerBar; ++s)
@@ -157,6 +170,26 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
         p.setPen(Qt::NoPen);
         p.setBrush(channel.muted ? c.border : c.playing);
         p.drawEllipse(QRectF(kLedX, y + (kRowHeight - kLedSize) / 2.0, kLedSize, kLedSize));
+
+        // Volume knob: an arc from 7 to 5 o'clock, lit up to the value.
+        const QRectF knob(
+            kVolumeX + 2, y + (kRowHeight - kVolumeSize) / 2.0 + 2, kVolumeSize - 4, kVolumeSize - 4);
+        constexpr int kStart = 225 * 16; // Qt angles: 1/16 degree, counter-clockwise from 3 o'clock
+        constexpr int kSpan = -270 * 16;
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(c.border, 2.5, Qt::SolidLine, Qt::RoundCap));
+        p.drawArc(knob, kStart, kSpan);
+        p.setPen(QPen(channel.muted ? c.textDim : c.accent, 2.5, Qt::SolidLine, Qt::RoundCap));
+        p.drawArc(knob, kStart, static_cast<int>(kSpan * channel.volume));
+
+        // Mixer insert box: "-" for the master, else the insert number.
+        const QRect insertRect(kInsertX, y + kPadInset + 3, kInsertWidth, kRowHeight - 2 * kPadInset - 6);
+        p.setBrush(c.panel);
+        p.setPen(QPen(c.border, 1));
+        p.drawRoundedRect(QRectF(insertRect).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
+        p.setPen(channel.insert == 0 ? c.textDim : c.text);
+        p.drawText(insertRect, Qt::AlignCenter,
+            channel.insert == 0 ? QStringLiteral("-") : QString::number(channel.insert));
 
         // Name button.
         const QRect nameRect(kNameX, y + kPadInset, kNameWidth, kRowHeight - 2 * kPadInset);
@@ -247,6 +280,21 @@ bool ChannelRackView::event(QEvent* event)
     if (event->type() == QEvent::ToolTip && project_ != nullptr) {
         auto* help = static_cast<QHelpEvent*>(event);
         const Hit hit = hitAt(help->pos());
+        if (hit.part == Part::Volume) {
+            const double volume = project_->channels()[hit.channel].volume;
+            QToolTip::showText(help->globalPos(),
+                tr("Volume %1\nDrag or scroll; Shift: fine; double-click: 0 dB")
+                    .arg(QString::fromStdString(formatDb(faderToGain(volume)))),
+                this);
+            return true;
+        }
+        if (hit.part == Part::Insert) {
+            QToolTip::showText(help->globalPos(),
+                tr("Plays into: %1\nClick to choose a mixer insert, or scroll")
+                    .arg(insertLabel(project_->channels()[hit.channel].insert)),
+                this);
+            return true;
+        }
         if (hit.part == Part::Name) {
             const std::string& path = project_->channels()[hit.channel].samplePath;
             QToolTip::showText(help->globalPos(),
@@ -272,6 +320,17 @@ void ChannelRackView::mousePressEvent(QMouseEvent* event)
         emit muteToggled(hit.channel);
         return;
     }
+    if (event->button() == Qt::LeftButton && hit.part == Part::Volume) {
+        draggingVolume_ = true;
+        volumeChannel_ = hit.channel;
+        volumeAtPress_ = project_->channels()[hit.channel].volume;
+        pressY_ = event->position().y();
+        return;
+    }
+    if (event->button() == Qt::LeftButton && hit.part == Part::Insert) {
+        chooseInsert(hit.channel, event->position().toPoint());
+        return;
+    }
     if (event->button() == Qt::LeftButton && hit.part == Part::Name) {
         emit channelSelected(hit.channel);
         return;
@@ -288,6 +347,14 @@ void ChannelRackView::mousePressEvent(QMouseEvent* event)
 
 void ChannelRackView::mouseMoveEvent(QMouseEvent* event)
 {
+    if (draggingVolume_) {
+        const double perPixel
+            = event->modifiers().testFlag(Qt::ShiftModifier) ? kVolumePerPixel / 5 : kVolumePerPixel;
+        const double volume
+            = std::clamp(volumeAtPress_ + (pressY_ - event->position().y()) * perPixel, 0.0, 1.0);
+        emit volumeChanged(volumeChannel_, volume);
+        return;
+    }
     if (!painting_)
         return;
     const Hit hit = hitAt(event->position().toPoint());
@@ -299,6 +366,7 @@ void ChannelRackView::mouseMoveEvent(QMouseEvent* event)
 
 void ChannelRackView::mouseReleaseEvent(QMouseEvent* /*event*/)
 {
+    draggingVolume_ = false;
     painting_ = false;
     lastPaintedStep_ = -1;
 }
@@ -308,8 +376,56 @@ void ChannelRackView::mouseDoubleClickEvent(QMouseEvent* event)
     const Hit hit = hitAt(event->position().toPoint());
     if (event->button() == Qt::LeftButton && hit.part == Part::Name)
         emit channelOpened(hit.channel);
+    else if (event->button() == Qt::LeftButton && hit.part == Part::Volume)
+        emit volumeChanged(hit.channel, kUnityFaderPosition);
     else
         mousePressEvent(event); // fast clicks on pads still toggle
+}
+
+void ChannelRackView::wheelEvent(QWheelEvent* event)
+{
+    const Hit hit = hitAt(event->position().toPoint());
+    const int notches = event->angleDelta().y() / 120;
+    if (project_ == nullptr || notches == 0 || (hit.part != Part::Volume && hit.part != Part::Insert)) {
+        event->ignore(); // let the rack scroll
+        return;
+    }
+    const Channel& channel = project_->channels()[hit.channel];
+    if (hit.part == Part::Volume) {
+        emit volumeChanged(hit.channel, std::clamp(channel.volume + 0.02 * notches, 0.0, 1.0));
+    } else {
+        const int last = static_cast<int>(insertNames_.size()) - 1;
+        emit insertChanged(hit.channel, std::clamp(channel.insert + notches, 0, std::max(last, 0)));
+    }
+    event->accept();
+}
+
+void ChannelRackView::setInsertNames(const QStringList& names)
+{
+    insertNames_ = names.isEmpty() ? QStringList{QStringLiteral("Master")} : names;
+    update();
+}
+
+QString ChannelRackView::insertLabel(int insert) const
+{
+    if (insert >= 0 && insert < insertNames_.size())
+        return insertNames_[insert];
+    return tr("Insert %1").arg(insert);
+}
+
+void ChannelRackView::chooseInsert(std::size_t channel, const QPoint& at)
+{
+    QMenu menu(this);
+    const int current = project_->channels()[channel].insert;
+    for (int i = 0; i < insertNames_.size(); ++i) {
+        QAction* action
+            = menu.addAction(insertNames_[i], this, [this, channel, i] { emit insertChanged(channel, i); });
+        action->setCheckable(true);
+        action->setChecked(i == current);
+        if (i == 0)
+            menu.addSeparator();
+    }
+    menu.exec(mapToGlobal(at));
 }
 
 } // namespace vloomdaw

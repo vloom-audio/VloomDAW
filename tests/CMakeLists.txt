@@ -7,6 +7,7 @@ CPMAddPackage(
 # Test files mirror src/: tests/<module>/<Name>Tests.cpp
 add_executable(vloomdaw_tests
     audio/ChannelRackAudioTests.cpp
+    audio/MixerAudioTests.cpp
     core/AudioFormatTests.cpp
     core/BrowserFilterTests.cpp
     core/DecibelsTests.cpp

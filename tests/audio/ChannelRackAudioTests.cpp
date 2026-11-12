@@ -144,3 +144,23 @@ TEST_CASE("Nothing is published without a running device", "[audio]")
     engine.play();
     CHECK(onsets(render(engine, 0.2)).empty());
 }
+
+TEST_CASE("A channel's volume and insert reach the engine", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.setStep(0, 0, 0, true);
+    project.setChannelVolume(0, 0.8); // unity
+    project.setChannelInsert(0, 2);
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.sync(engine, project, 0, kRate);
+    engine.play();
+    const auto audio = render(engine, 0.05);
+    CHECK(audio[0] > 0.7f); // the impulse, centred: about 0.707
+    CHECK(engine.takeInsertPeak(2, 0) > 0.7f); // went through insert 2
+    CHECK(engine.takeInsertPeak(1, 0) == 0.0f);
+}

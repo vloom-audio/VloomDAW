@@ -4,6 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
+
 using namespace vloomdaw;
 
 TEST_CASE("A new project has four channels and one empty pattern", "[project]")
@@ -136,4 +138,26 @@ TEST_CASE("Pattern steps follow the pattern length", "[project]")
     CHECK(p.patternSteps(0) == kStepsPerBar);
     p.addNote(0, 0, Note{60, kTicksPerBar + 10, kTicksPerStep}); // reaches into bar 2
     CHECK(p.patternSteps(0) == 2 * kStepsPerBar);
+}
+
+TEST_CASE("Channels have a volume, a pan and a mixer insert", "[project]")
+{
+    Project p;
+    CHECK(p.channels()[0].volume == 0.8); // unity, like a mixer fader
+    CHECK(p.channels()[0].pan == 0.0);
+    CHECK(p.channels()[0].insert == 0); // the master
+    p.setChannelVolume(0, 0.5);
+    p.setChannelPan(0, -0.25);
+    p.setChannelInsert(0, 3);
+    CHECK(p.channels()[0].volume == 0.5);
+    CHECK(p.channels()[0].pan == -0.25);
+    CHECK(p.channels()[0].insert == 3);
+    p.setChannelVolume(0, 7.0);
+    p.setChannelPan(0, -9.0);
+    p.setChannelInsert(0, -2);
+    CHECK(p.channels()[0].volume == 1.0);
+    CHECK(p.channels()[0].pan == -1.0);
+    CHECK(p.channels()[0].insert == 0);
+    p.setChannelVolume(0, std::nan(""));
+    CHECK(p.channels()[0].volume == 1.0);
 }

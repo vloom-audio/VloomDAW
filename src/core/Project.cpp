@@ -3,6 +3,7 @@
 #include "core/Project.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace vloomdaw {
 
@@ -39,6 +40,24 @@ void Project::setChannelSample(std::size_t channel, const std::string& path)
 {
     if (channel < channels_.size())
         channels_[channel].samplePath = path;
+}
+
+void Project::setChannelVolume(std::size_t channel, double volume)
+{
+    if (channel < channels_.size() && !std::isnan(volume))
+        channels_[channel].volume = std::clamp(volume, 0.0, 1.0);
+}
+
+void Project::setChannelPan(std::size_t channel, double pan)
+{
+    if (channel < channels_.size() && !std::isnan(pan))
+        channels_[channel].pan = std::clamp(pan, -1.0, 1.0);
+}
+
+void Project::setChannelInsert(std::size_t channel, int insert)
+{
+    if (channel < channels_.size())
+        channels_[channel].insert = std::max(insert, 0);
 }
 
 // ---------------------------------------------------------------- patterns
