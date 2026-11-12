@@ -64,6 +64,7 @@ dependencies between builds and repos.
 | Check formatting like CI | `scripts/format.sh --check` |
 | Check commit messages like CI | `scripts/check_commit_messages.sh origin/main..HEAD` |
 | Build without Qt (core + tests) | `cmake --preset core && cmake --build --preset core && ctest --preset core` |
-| Use a specific engine version | `cmake --preset dev -DVLOOM_ENGINE_DIR=/nonexistent -DVLOOM_ENGINE_GIT_TAG=v0.1.0` |
+| Use a specific engine version | `cmake --preset dev -DVLOOM_ENGINE_DIR=/nonexistent -DVLOOM_ENGINE_GIT_TAG=<commit>` |
+| Move to a newer engine | Set `VLOOM_ENGINE_GIT_TAG` in `cmake/Dependencies.cmake` to the engine commit (full 40-character SHA); CI checks out the same one |
 
 Next: [architecture.md](architecture.md) and [ui-guidelines.md](ui-guidelines.md).

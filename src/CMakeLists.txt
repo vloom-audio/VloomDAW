@@ -14,9 +14,11 @@ target_sources(vloomdaw_core PRIVATE
     core/BrowserFilter.cpp
     core/Decibels.cpp
     core/DeviceRef.cpp
+    core/DeviceWatch.cpp
     core/FrameStats.cpp
     core/MixerModel.cpp
     core/NoteNames.cpp
+    core/PluginMetadata.cpp
     core/PluginScanner.cpp
     core/PositionFormat.cpp
     core/ProcessMemory.cpp
@@ -26,11 +28,29 @@ target_sources(vloomdaw_core PRIVATE
     core/ThemePresets.cpp
 
     # audio — owns the engine and the hardware device
-    audio/AudioController.cpp)
+    audio/AudioController.cpp
+    audio/ChannelRackAudio.cpp
+    audio/MixerAudio.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vloomdaw_core PUBLIC vloom::engine)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
 vloom_set_warnings(vloomdaw_core)
+
+# ---------------------------------------------------------------- plugin probe (no Qt)
+# Loads one plugin per run to read its factory; the app runs it as a child
+# process so a crashing plugin cannot take VloomDAW down. See probe/main.cpp.
+add_executable(vloomdaw-plugin-probe probe/main.cpp)
+target_include_directories(vloomdaw-plugin-probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vloomdaw-plugin-probe PRIVATE cxx_std_20)
+set_target_properties(vloomdaw-plugin-probe PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+vloom_set_warnings(vloomdaw-plugin-probe)
+if(WIN32)
+    target_link_libraries(vloomdaw-plugin-probe PRIVATE shell32)
+elseif(APPLE)
+    target_link_libraries(vloomdaw-plugin-probe PRIVATE "-framework CoreFoundation")
+elseif(UNIX)
+    target_link_libraries(vloomdaw-plugin-probe PRIVATE ${CMAKE_DL_LIBS})
+endif()
 
 if(NOT VLOOMDAW_BUILD_APP)
     return()
@@ -68,6 +88,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/playlist/PlaylistView.hpp
     ui/plugins/PluginManagerDialog.cpp
     ui/plugins/PluginManagerDialog.hpp
+    ui/plugins/PluginProber.cpp
+    ui/plugins/PluginProber.hpp
     ui/plugins/PluginsPanel.cpp
     ui/plugins/PluginsPanel.hpp
     ui/plugins/PluginStore.cpp
@@ -162,6 +184,17 @@ vloom_set_warnings(vloomdaw_ui)
 # ---------------------------------------------------------------- app
 qt_add_executable(VloomDAW app/main.cpp)
 target_link_libraries(VloomDAW PRIVATE vloomdaw_ui)
+# The app finds the probe next to its own executable (inside the bundle on macOS).
+add_dependencies(VloomDAW vloomdaw-plugin-probe)
+if(APPLE)
+    add_custom_command(TARGET VloomDAW POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:vloomdaw-plugin-probe> $<TARGET_FILE_DIR:VloomDAW>/
+        VERBATIM)
+else()
+    set_target_properties(vloomdaw-plugin-probe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:VloomDAW>)
+endif()
 vloom_set_warnings(VloomDAW)
 
 set_target_properties(VloomDAW PROPERTIES
@@ -176,3 +209,6 @@ include(GNUInstallDirs)
 install(TARGETS VloomDAW
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(NOT APPLE)
+    install(TARGETS vloomdaw-plugin-probe RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()

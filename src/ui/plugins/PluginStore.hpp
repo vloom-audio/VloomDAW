@@ -17,6 +17,9 @@ struct PluginStore {
     std::vector<PluginInfo> plugins; ///< from the last scan
     QDateTime lastScan; ///< invalid: never scanned
     std::vector<PluginFolder> extraFolders; ///< added by the user, besides the defaults
+    /// Load each plugin (in vloomdaw-plugin-probe) while scanning to read its
+    /// vendor and category. Off: file names only, no plugin code runs.
+    bool probePlugins = true;
 
     [[nodiscard]] static PluginStore load();
     void save() const;

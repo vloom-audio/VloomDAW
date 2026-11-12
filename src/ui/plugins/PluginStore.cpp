@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/plugins/PluginStore.hpp"
 
+#include <QFile>
 #include <QSettings>
 #include <QString>
 
@@ -12,6 +13,33 @@ namespace {
 constexpr QLatin1StringView kPlugins{"plugins/scanned"};
 constexpr QLatin1StringView kLastScan{"plugins/lastScan"};
 constexpr QLatin1StringView kFolders{"plugins/extraFolders"};
+constexpr QLatin1StringView kProbe{"plugins/probe"};
+
+QString probeKey(PluginInfo::Probe probe)
+{
+    switch (probe) {
+    case PluginInfo::Probe::Ok:
+        return QStringLiteral("ok");
+    case PluginInfo::Probe::Failed:
+        return QStringLiteral("failed");
+    case PluginInfo::Probe::NotProbed:
+        break;
+    }
+    return QStringLiteral("none");
+}
+PluginInfo::Probe probeFromKey(const QString& key)
+{
+    if (key == QLatin1String("ok"))
+        return PluginInfo::Probe::Ok;
+    if (key == QLatin1String("failed"))
+        return PluginInfo::Probe::Failed;
+    return PluginInfo::Probe::NotProbed;
+}
+
+std::string text(const QSettings& s, const char* key)
+{
+    return s.value(QLatin1String(key)).toString().toStdString();
+}
 
 QString formatKey(PluginFormat format)
 {
@@ -24,8 +52,24 @@ PluginFormat formatFromKey(const QString& key)
 
 // Paths go through QString::fromStdWString / toStdWString on Windows so
 // non-ASCII folder names survive.
-QString toQString(const std::filesystem::path& p) { return QString::fromStdWString(p.wstring()); }
-std::filesystem::path toPath(const QString& s) { return std::filesystem::path(s.toStdWString()); }
+// POSIX names are bytes, maybe not valid UTF-8: Qt's file name codec keeps
+// them intact where path::wstring() would throw.
+QString toQString(const std::filesystem::path& p)
+{
+#if defined(Q_OS_WIN)
+    return QString::fromStdWString(p.wstring());
+#else
+    return QFile::decodeName(QByteArray::fromStdString(p.native()));
+#endif
+}
+std::filesystem::path toPath(const QString& s)
+{
+#if defined(Q_OS_WIN)
+    return std::filesystem::path(s.toStdWString());
+#else
+    return std::filesystem::path(QFile::encodeName(s).toStdString());
+#endif
+}
 
 } // namespace
 
@@ -40,11 +84,23 @@ PluginStore PluginStore::load()
         info.name = s.value(QStringLiteral("name")).toString().toStdString();
         info.format = formatFromKey(s.value(QStringLiteral("format")).toString());
         info.path = toPath(s.value(QStringLiteral("path")).toString());
+        info.vendor = text(s, "vendor");
+        info.version = text(s, "version");
+        info.tags = text(s, "tags");
+        info.category
+            = s.value(QStringLiteral("category"), QStringLiteral("Uncategorized")).toString().toStdString();
+        info.fileSize = s.value(QStringLiteral("size")).toULongLong();
+        info.modified = s.value(QStringLiteral("modified")).toLongLong();
+        info.probe = probeFromKey(s.value(QStringLiteral("probe")).toString());
+        info.probeError = text(s, "probeError");
+        info.userCategory = text(s, "userCategory");
+        info.userInstrumentType = text(s, "userType");
         if (!info.name.empty())
             store.plugins.push_back(std::move(info));
     }
     s.endArray();
     store.lastScan = s.value(kLastScan).toDateTime();
+    store.probePlugins = s.value(kProbe, true).toBool();
 
     const int folders = s.beginReadArray(kFolders);
     for (int i = 0; i < folders; ++i) {
@@ -69,9 +125,20 @@ void PluginStore::save() const
         s.setValue(QStringLiteral("name"), QString::fromStdString(info.name));
         s.setValue(QStringLiteral("format"), formatKey(info.format));
         s.setValue(QStringLiteral("path"), toQString(info.path));
+        s.setValue(QStringLiteral("vendor"), QString::fromStdString(info.vendor));
+        s.setValue(QStringLiteral("version"), QString::fromStdString(info.version));
+        s.setValue(QStringLiteral("tags"), QString::fromStdString(info.tags));
+        s.setValue(QStringLiteral("category"), QString::fromStdString(info.category));
+        s.setValue(QStringLiteral("size"), static_cast<qulonglong>(info.fileSize));
+        s.setValue(QStringLiteral("modified"), static_cast<qlonglong>(info.modified));
+        s.setValue(QStringLiteral("probe"), probeKey(info.probe));
+        s.setValue(QStringLiteral("probeError"), QString::fromStdString(info.probeError));
+        s.setValue(QStringLiteral("userCategory"), QString::fromStdString(info.userCategory));
+        s.setValue(QStringLiteral("userType"), QString::fromStdString(info.userInstrumentType));
     }
     s.endArray();
     s.setValue(kLastScan, lastScan);
+    s.setValue(kProbe, probePlugins);
 
     s.remove(kFolders);
     s.beginWriteArray(kFolders, static_cast<int>(extraFolders.size()));

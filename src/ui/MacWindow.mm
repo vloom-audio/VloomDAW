@@ -66,6 +66,13 @@ void disableMacNativeFullScreen(QWidget* window)
     nsWindow.collectionBehavior = behavior;
 }
 
+void hideMacWindowTitle(QWidget* window)
+{
+    NSWindow* nsWindow = nativeWindow(window);
+    if (nsWindow != nil)
+        nsWindow.titleVisibility = NSWindowTitleHidden;
+}
+
 void setMacMenuBarAndDockHidden(bool on)
 {
     NSApp.presentationOptions = on

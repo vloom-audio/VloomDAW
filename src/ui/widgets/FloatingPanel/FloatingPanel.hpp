@@ -2,6 +2,9 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include <QLabel>
+#include <QMargins>
+#include <QPointer>
 #include <QString>
 #include <QWidget>
 
@@ -17,13 +20,16 @@ class WindowButtons;
 /// the panel; it stays detached until docked. Remembers its geometry under
 /// `settingsKey`. Unparented: the main window deletes it.
 ///
-/// On Windows it has no native title bar, like the main window: the window
-/// buttons go into the panel's own header, whose empty space moves the
-/// window, and the edges still resize it.
+/// It has no title bar of its own, like the main window: the panel's header
+/// takes its place and its empty space moves the window. On Windows our
+/// window buttons join the header and the edges still resize it; on macOS
+/// the content covers the title bar and the system buttons move into the
+/// header (Qt 6.9 or later; older Qt keeps the native title bar).
 class FloatingPanel : public QWidget {
     Q_OBJECT
 
 public:
+    /// The window is titled "VLOOM <title>", e.g. "VLOOM Mixer".
     FloatingPanel(const QString& title, const QString& settingsKey);
 
     /// Takes `content` (reparenting it) and fills the window with it.
@@ -45,6 +51,9 @@ protected:
     void closeEvent(QCloseEvent* event) override;
     void hideEvent(QHideEvent* event) override;
     void changeEvent(QEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 #if defined(Q_OS_WIN)
     void paintEvent(QPaintEvent* event) override;
     bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
@@ -60,6 +69,15 @@ private:
     QWidget* content_ = nullptr;
     WindowButtons* windowButtons_ = nullptr; ///< Windows only
     bool geometryRestored_ = false;
+
+    // The content's header, this window's title bar: it shows "VLOOM" before
+    // the panel's title and, on macOS, hosts the system window buttons.
+    void adoptHeader(); ///< finds it, adds the app name; macOS: room for the buttons, drags the window
+    void releaseHeader(); ///< undoes adoptHeader()
+    void placeButtons();
+    QPointer<QWidget> header_;
+    QPointer<QLabel> appName_; ///< "VLOOM" in header_
+    QMargins headerMargins_; ///< the header layout's margins before adoptHeader()
 };
 
 } // namespace vloomdaw

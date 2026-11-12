@@ -2,7 +2,9 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "audio/ChannelRackAudio.hpp"
 #include "core/DeviceRef.hpp"
+#include "core/DeviceWatch.hpp"
 #include "core/FrameStats.hpp"
 #include "core/MixerModel.hpp"
 #include "core/Project.hpp"
@@ -142,10 +144,20 @@ private:
     /// Re-lists the output devices; returns the selected one's index (-1 = default).
     int listDevices();
     void openSelectedDevice();
-    void startDevice(int index);
+    /// Opens output device `index` of deviceNames_ (-1 = system default);
+    /// `fallback`: standing in for a lost device. Returns whether it runs.
+    bool startDevice(int index, bool fallback = false);
+    /// Follows DeviceWatch: falls back to the default when the device is
+    /// lost, back to the user's device when it returns.
+    void watchDevice();
     /// Opens output device `index` of deviceNames_ and remembers it.
     void selectOutputDevice(int index);
     void showSettings(SettingsDialog::Page page);
+    /// Sends the channel rack of the current pattern to the engine and
+    /// reports samples that could not be loaded.
+    void syncChannelRack();
+    /// Gives `channel` the WAV file at `path` (channel == count: a new channel).
+    void assignSample(std::size_t channel, const QString& path);
     /// Opens the Plugin Manager, where the user scans for plugins.
     void showPluginManager();
     /// Starts over: stops, returns to the start and resets the tempo.
@@ -169,6 +181,7 @@ private:
     AudioController& audio_;
     MixerModel mixer_;
     Project project_;
+    ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
     std::size_t currentPattern_ = 0;
     std::size_t currentChannel_ = 0;
 
@@ -183,6 +196,8 @@ private:
     PluginManagerDialog* pluginManager_ = nullptr; ///< created on first use
     PluginStore pluginStore_;
     AppSettings settings_;
+    DeviceWatch deviceWatch_;
+    QElapsedTimer deviceClock_; ///< time base for deviceWatch_
     std::vector<std::string> deviceNames_; ///< as last listed, for dialog indices
     std::optional<double> pendingTempo_; ///< latest user tempo not yet sent
     std::optional<float> pendingGain_; ///< latest master gain not yet sent

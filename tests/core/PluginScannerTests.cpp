@@ -107,3 +107,19 @@ TEST_CASE("Default folders exist for both formats", "[plugins]")
     CHECK(formatName(PluginFormat::Vst3) == "VST3");
     CHECK(formatName(PluginFormat::Clap) == "CLAP");
 }
+
+TEST_CASE("The install folder gives the vendor; size and time are recorded", "[plugins]")
+{
+    TempFolder vst3;
+    vst3.touch("FabFilter/FabFilter Pro-Q 4.vst3");
+    vst3.touch("Loose.vst3");
+    const auto plugins = scanPluginFolders({{PluginFormat::Vst3, vst3.path}});
+    REQUIRE(plugins.size() == 2);
+    CHECK(plugins[0].name == "FabFilter Pro-Q 4");
+    CHECK(plugins[0].vendor == "FabFilter");
+    CHECK(plugins[0].fileSize > 0);
+    CHECK(plugins[0].modified != 0);
+    CHECK(plugins[1].vendor.empty()); // directly in the root: unknown until probed
+    CHECK(plugins[1].category == "Uncategorized");
+    CHECK(plugins[1].probe == PluginInfo::Probe::NotProbed);
+}

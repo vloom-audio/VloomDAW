@@ -109,6 +109,9 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     tree_->setIconSize(QSize(16, 16));
     tree_->setUniformRowHeights(true);
     tree_->setAnimated(true);
+    // Files drag out as URLs: drop one on a channel in the channel rack.
+    tree_->setDragEnabled(true);
+    tree_->setDragDropMode(QAbstractItemView::DragOnly);
 
     emptyHint_ = new QLabel(tr("Add a folder with your samples using +."), this);
     emptyHint_->setObjectName(QStringLiteral("panelHint"));
