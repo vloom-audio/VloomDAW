@@ -1,7 +1,7 @@
 # Feature list
 
 Everything VloomDAW has today, with how far each feature goes. The
-[roadmap](../README.md#roadmap) lists what comes next; the
+[roadmap](roadmap.md) lists what comes next and when each unfinished feature lands; the
 [changelog](../CHANGELOG.md) lists changes in detail.
 
 **Status**
@@ -25,11 +25,11 @@ Everything VloomDAW has today, with how far each feature goes. The
 | Time signature display | ✅ | Next to the tempo |
 | Song position LCD | ✅ | Bar · beat · tick (960 PPQ), or click for min : sec . ms |
 | Master volume knob | ✅ | Drives the engine's master gain |
-| Pitch knob | ⏳ | |
+| Pitch knob | ⏳ | M2: transposes instruments |
 | Pattern / song mode | ⏳ | `L`; the channel rack always loops the current pattern, song mode arrives with the playlist in M3 |
-| Record arm | 🎨 | `R`; keeps the armed state only, no audio input yet |
-| Key LCD (root note and scale) | 🎨 | C .. B; major, minors, modes, pentatonics, blues, chromatic. Scale shading in the piano roll arrives in M2 |
-| Pattern selector | 🎨 | Add, pick and delete patterns |
+| Record arm | 🎨 | `R`; keeps the armed state only; audio input in M6 |
+| Key LCD (root note and scale) | ✅ | C .. B; major, minors, modes, pentatonics, blues, chromatic; shades the piano roll |
+| Pattern selector | ✅ | Add, pick and delete patterns; the channel rack plays the selected one |
 | CPU and RAM meter | ✅ | Engine load and process memory |
 
 ## Song editors
@@ -44,9 +44,9 @@ the transport in all three editors.
 | Samples on channels | ✅ | Drop a WAV file from the browser or the desktop on a channel (below the last one for a new channel); edits apply while playing without cutting notes; channels without a sample are dimmed |
 | Channel volume | ✅ | Knob per channel: drag (`Shift`: fine), scroll, double-click for 0 dB |
 | Channel routing | ✅ | Insert box per channel: click to pick a mixer insert, or scroll; `-` plays straight into the master |
-| Channel pan | ⏳ | The engine supports it; no control in the rack yet |
-| Piano roll (`F7`) | 🎨 | Add, move, resize and delete notes; snap (`Alt`: off); `Ctrl+wheel` zoom; scale shading |
-| Playlist (`F5`) | 🎨 | 16 tracks; place, move (`Shift`: snap to beats) and delete pattern clips |
+| Channel pan | ⏳ | M1.5: the engine supports it, no control in the rack yet |
+| Piano roll (`F7`) | 🎨 | Add, move, resize and delete notes; snap (`Alt`: off); `Ctrl+wheel` zoom; scale shading. Plays in M2 |
+| Playlist (`F5`) | 🎨 | 16 tracks; place, move (`Shift`: snap to beats) and delete pattern clips. Plays in M3 |
 
 ## Mixer
 
@@ -66,7 +66,7 @@ the transport in all three editors.
 | Scan | ✅ | Only when you press Scan, never automatically. Runs in the background and the results are remembered across restarts |
 | Vendor and category | ✅ | With "Read vendor and category" on, each new or changed plugin is loaded in a separate process (`vloomdaw-plugin-probe`); a plugin that crashes or hangs (20 s) is skipped and marked. Rescan All reads every plugin again |
 | Your own categories | ✅ | Right-click a plugin to set its category; kept across scans |
-| Loading and playing plugins | ⏳ | CLAP, then VST3 hosting in M4 |
+| Loading and playing plugins | ⏳ | CLAP hosting in M4, VST3 in M5 |
 
 ## Browser
 
@@ -74,7 +74,7 @@ the transport in all three editors.
 |---|---|---|
 | Sample browser | ✅ | Audio files (wav, aiff, flac, mp3, ogg) in your sample folders; add or remove folders; search by name (`Alt+F8`) |
 | Drag samples onto the channel rack | ✅ | |
-| Preview samples | ⏳ | |
+| Preview samples | ⏳ | M1.5 |
 
 ## Windows and layout
 
@@ -102,14 +102,14 @@ the transport in all three editors.
 | Colour per role | ✅ | Selection, playing, record, LCD and text, with a colour picker |
 | Contrast warning | ✅ | Warns when the theme drops below WCAG AA |
 | Themed icons | ✅ | SVG icons take the theme's colours |
-| Light theme | ⏳ | |
+| Light theme | ⏳ | Any time (UI only) |
 
 ## Projects and files
 
 | Feature | Status | Notes |
 |---|---|---|
 | New project | ✅ | `Ctrl/Cmd+N`: stop, rewind, reset tempo |
-| Open, Open Recent, Save, Save As, Import, Export | ⏳ | Menu items and shortcuts exist; project files arrive in M4, WAV export in M3 |
+| Open, Open Recent, Save, Save As, Import, Export | ⏳ | Menu items and shortcuts exist; WAV export in M3, project files and import in M4 |
 
 ## Performance and diagnostics
 

@@ -157,15 +157,22 @@ VloomDAW/
 |:---:|---|:---:|
 | **M0** | Window, audio device settings, transport, metronome, sample browser | *Done* |
 | **M1** | Channel rack and step sequencer with sample playback; mixer routing to inserts | *Done* |
-| **M2** | Piano roll and a first built-in synth | *Next* |
-| **M3** | Playlist (patterns on a timeline), WAV export | *Planned* |
-| **M4** | CLAP, then VST3 plugin hosting; project save / load → first alpha | *Planned* |
+| **M1.5** | Channel pan, sample preview | *Next* |
+| **M2** | Piano roll, first built-in synth, undo / redo | *Planned* |
+| **M3** | Playlist (patterns on a timeline), song mode, WAV export | *Planned* |
+| **M4** | Project save / load, CLAP hosting, mixer effect slots → first alpha | *Planned* |
+| **M5** | VST3 hosting, built-in effects, sends | *Planned* |
+| **M6** | Audio recording, MIDI input | *Planned* |
+
+Every unfinished feature, the milestone it lands in and what "done" means:
+**[docs/roadmap.md](docs/roadmap.md)**.
 
 ---
 
 ## Documentation
 
 - **[Feature list](docs/features.md)**: everything VloomDAW has today, and how far each feature goes.
+- **[Roadmap](docs/roadmap.md)**: the plan until every feature works.
 - **[Getting started](docs/getting-started.md)**: tools, Qt setup, IDE setup.
 - **[Architecture](docs/architecture.md)**: how the UI, AudioController and engine fit together.
 - **[UI guidelines](docs/ui-guidelines.md)**: widget conventions, theme and icons.
