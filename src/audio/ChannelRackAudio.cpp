@@ -4,6 +4,8 @@
 
 #include <vloom/engine/sample/SampleLoader.hpp>
 
+#include <exception>
+
 namespace vloomdaw {
 
 std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
@@ -43,7 +45,13 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
             auto found = samples_.find(path);
             if (found == samples_.end()) {
                 std::string error;
-                auto sample = vloom::loadSample(path, sampleRate, &error);
+                std::shared_ptr<const vloom::SampleBuffer> sample;
+                try {
+                    sample = vloom::loadSample(path, sampleRate, &error);
+                } catch (const std::exception&) {
+                    // Out of memory or a file system error: report, keep running.
+                    error = "not enough memory to load it";
+                }
                 if (sample)
                     found = samples_.emplace(path, std::move(sample)).first;
                 else {

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/plugins/PluginStore.hpp"
 
+#include <QFile>
 #include <QSettings>
 #include <QString>
 
@@ -51,8 +52,24 @@ PluginFormat formatFromKey(const QString& key)
 
 // Paths go through QString::fromStdWString / toStdWString on Windows so
 // non-ASCII folder names survive.
-QString toQString(const std::filesystem::path& p) { return QString::fromStdWString(p.wstring()); }
-std::filesystem::path toPath(const QString& s) { return std::filesystem::path(s.toStdWString()); }
+// POSIX names are bytes, maybe not valid UTF-8: Qt's file name codec keeps
+// them intact where path::wstring() would throw.
+QString toQString(const std::filesystem::path& p)
+{
+#if defined(Q_OS_WIN)
+    return QString::fromStdWString(p.wstring());
+#else
+    return QFile::decodeName(QByteArray::fromStdString(p.native()));
+#endif
+}
+std::filesystem::path toPath(const QString& s)
+{
+#if defined(Q_OS_WIN)
+    return std::filesystem::path(s.toStdWString());
+#else
+    return std::filesystem::path(QFile::encodeName(s).toStdString());
+#endif
+}
 
 } // namespace
 
