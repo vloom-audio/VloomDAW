@@ -121,3 +121,5 @@ and the project uses [Semantic Versioning](https://semver.org/).
   window buttons and moves the window.
 - Detached panel windows are named "VLOOM Mixer", "VLOOM Playlist" and "VLOOM
   Piano roll" in the taskbar, the Dock and window switchers.
+- macOS: the main window shows "VLOOM" after the window buttons, as the menu bar
+  row does on Windows.
