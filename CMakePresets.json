@@ -42,12 +42,12 @@
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev" },
+    { "name": "dev", "configurePreset": "dev", "configuration": "Debug" },
     { "name": "release", "configurePreset": "release", "configuration": "Release" },
-    { "name": "core", "configurePreset": "core" }
+    { "name": "core", "configurePreset": "core", "configuration": "Debug" }
   ],
   "testPresets": [
-    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
-    { "name": "core", "configurePreset": "core", "output": { "outputOnFailure": true } }
+    { "name": "dev", "configurePreset": "dev", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "core", "configurePreset": "core", "configuration": "Debug", "output": { "outputOnFailure": true } }
   ]
 }
