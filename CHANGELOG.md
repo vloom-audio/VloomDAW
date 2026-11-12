@@ -119,3 +119,5 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - macOS: detached panels (playlist, piano roll, mixer) no longer show a separate
   title bar: like the main window, the panel header takes its place, holds the
   window buttons and moves the window.
+- Detached panel windows are named "VLOOM Mixer", "VLOOM Playlist" and "VLOOM
+  Piano roll" in the taskbar, the Dock and window switchers.

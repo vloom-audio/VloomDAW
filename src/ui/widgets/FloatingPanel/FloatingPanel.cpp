@@ -50,7 +50,9 @@ FloatingPanel::FloatingPanel(const QString& title, const QString& settingsKey)
     , settingsKey_(settingsKey)
 {
     setObjectName(QStringLiteral("floatingPanel"));
-    setWindowTitle(title); // still shown on the taskbar
+    // Named after the app, as each window stands on its own in the taskbar,
+    // the Dock, window switchers and remote-desktop clients.
+    setWindowTitle(QStringLiteral("VLOOM %1").arg(title));
     setAttribute(Qt::WA_StyledBackground);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);

@@ -28,6 +28,7 @@ class FloatingPanel : public QWidget {
     Q_OBJECT
 
 public:
+    /// The window is titled "VLOOM <title>", e.g. "VLOOM Mixer".
     FloatingPanel(const QString& title, const QString& settingsKey);
 
     /// Takes `content` (reparenting it) and fills the window with it.
