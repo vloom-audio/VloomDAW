@@ -14,6 +14,7 @@ target_sources(vloomdaw_core PRIVATE
     core/BrowserFilter.cpp
     core/Decibels.cpp
     core/DeviceRef.cpp
+    core/DeviceWatch.cpp
     core/FrameStats.cpp
     core/MixerModel.cpp
     core/NoteNames.cpp

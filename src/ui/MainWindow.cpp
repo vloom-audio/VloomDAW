@@ -1229,16 +1229,21 @@ void MainWindow::changeAudioFormat(int sampleRate, int bufferFrames)
     openSelectedDevice(); // reopen with the new format
 }
 
-void MainWindow::startDevice(int index)
+bool MainWindow::startDevice(int index, bool fallback)
 {
+    if (!deviceClock_.isValid())
+        deviceClock_.start();
+    deviceWatch_.setPreferredIsDefault(selectedDevice().isDefault());
     std::string error;
     if (!audio_.openDevice(index, &error)) {
+        deviceWatch_.openFailed(deviceClock_.elapsed());
         deviceStatus_->setText(tr("No audio output"));
         settingsDialog_->audioPage()->setStatus(
             tr("Not running: %1").arg(QString::fromStdString(error)), false);
         statusBar()->showMessage(tr("Audio error: %1").arg(QString::fromStdString(error)), 8000);
-        return;
+        return false;
     }
+    deviceWatch_.opened(!fallback, deviceClock_.elapsed());
 
     // Re-send UI state so the engine matches what the user sees.
     pendingTempo_.reset();
@@ -1261,6 +1266,35 @@ void MainWindow::startDevice(int index)
     if (audio_.sampleRate() != audio_.requestedSampleRate())
         status += tr(" (device does not support %1 Hz)").arg(audio_.requestedSampleRate());
     settingsDialog_->audioPage()->setStatus(status, true);
+    return true;
+}
+
+void MainWindow::watchDevice()
+{
+    if (!deviceClock_.isValid())
+        return; // no device opened yet
+    const auto action = deviceWatch_.tick(audio_.isRunning(), deviceClock_.elapsed(),
+        [this] { return findDevice(audio_.outputDevices().names, selectedDevice()) >= 0; });
+    if (action == DeviceWatch::Action::None)
+        return;
+
+    // The transport keeps its position and play state across a reopen, so
+    // the song carries on through the new device.
+    const QString previous = QString::fromStdString(audio_.deviceName());
+    if (action == DeviceWatch::Action::OpenDefault) {
+        audio_.closeDevice();
+        listDevices();
+        if (!startDevice(-1, true))
+            return;
+        const QString now = QString::fromStdString(audio_.deviceName());
+        statusBar()->showMessage(previous.isEmpty()
+                ? tr("Audio output: %1").arg(now)
+                : tr("\u201C%1\u201D was disconnected: playing through \u201C%2\u201D").arg(previous, now),
+            10000);
+    } else if (startDevice(listDevices())) {
+        statusBar()->showMessage(
+            tr("\u201C%1\u201D is back").arg(QString::fromStdString(audio_.deviceName())), 6000);
+    }
 }
 
 void MainWindow::syncChannelRack()
@@ -1362,6 +1396,7 @@ void MainWindow::refreshFromEngine()
 {
     auto& engine = audio_.engine();
     engine.collectGarbage(); // free channel-rack states the audio thread is done with
+    watchDevice();
 
     // Nothing to show while minimised; still send pending changes and drain
     // the meters below so they do not show a stale peak when restored.

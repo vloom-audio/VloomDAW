@@ -7,6 +7,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Losing the audio output (an unplugged interface or headphones) no longer leaves
+  the app playing in silence: it carries on through the system default right
+  away, says so in the status bar, and switches back to your device when it is
+  plugged in again. Your chosen device stays saved.
 - Plugin vendor and category: with "Read vendor and category" on, a scan loads each
   new or changed plugin in a separate process (`vloomdaw-plugin-probe`) and asks its
   factory for name, vendor, version and VST3 sub-categories / CLAP features. A plugin

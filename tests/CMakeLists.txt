@@ -11,6 +11,7 @@ add_executable(vloomdaw_tests
     core/BrowserFilterTests.cpp
     core/DecibelsTests.cpp
     core/DeviceRefTests.cpp
+    core/DeviceWatchTests.cpp
     core/FrameStatsTests.cpp
     core/MixerModelTests.cpp
     core/NoteNamesTests.cpp
