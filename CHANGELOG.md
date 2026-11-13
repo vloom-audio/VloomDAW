@@ -6,6 +6,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Installers built by CI (`.github/workflows/release.yml`, see
+  `docs/releasing.md`): a Windows setup (Inno Setup), a universal macOS DMG
+  and a Linux AppImage. A `v*` tag drafts a GitHub Release with them and
+  their SHA-256 sums; "Run workflow" builds them as artifacts. Not code-signed
+  yet.
+
 ### Security
 - Supply chain: GitHub Actions are pinned to commit SHAs (checkout v7.0.1, cache
   v6.1.0, install-qt-action v4.5.0; Dependabot keeps them current), the CPM.cmake
