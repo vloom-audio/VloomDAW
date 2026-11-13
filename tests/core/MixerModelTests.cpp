@@ -158,3 +158,17 @@ TEST_CASE("Moving an insert takes its settings and name along", "[mixer]")
     CHECK(mixer.moveInsert(MixerModel::kMaster, 2) == MixerModel::kMaster);
     CHECK(mixer.track(MixerModel::kMaster).name == "Master");
 }
+
+TEST_CASE("A mixer track keeps its colour when inserts move", "[mixer]")
+{
+    MixerModel mixer(3);
+    mixer.setColor(1, 0xa78bfau);
+    mixer.setColor(0, 0x112233u); // the master too
+    CHECK(mixer.track(0).color == 0x112233u);
+    mixer.moveInsert(1, 3);
+    CHECK_FALSE(mixer.track(1).color);
+    CHECK(mixer.track(3).color == 0xa78bfau);
+    mixer.setColor(3, std::nullopt);
+    CHECK_FALSE(mixer.track(3).color);
+    mixer.setColor(99, 0x111111u); // out of range: ignored
+}

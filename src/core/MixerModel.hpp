@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@ struct MixerTrack {
     double pan = 0.0; ///< -1 left .. +1 right
     bool muted = false;
     bool soloed = false;
+    std::optional<std::uint32_t> color; ///< 0xRRGGBB chosen by the user; none: no colour
 };
 
 /// The mixer: track 0 is the master, tracks 1..N are inserts, as in FL
@@ -59,6 +61,8 @@ public:
     void setPan(std::size_t index, double pan);
     void setMuted(std::size_t index, bool muted);
     void setSoloed(std::size_t index, bool soloed);
+    /// The track's colour, 0xRRGGBB (higher bits dropped); nullopt: none.
+    void setColor(std::size_t index, std::optional<std::uint32_t> color);
 
     /// True while any insert is soloed.
     [[nodiscard]] bool anySoloed() const;

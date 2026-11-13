@@ -3,6 +3,7 @@
 #include "ui/mixer/MixerStrip.hpp"
 
 #include "core/Decibels.hpp"
+#include "ui/widgets/ColorMenu/ColorMenu.hpp"
 #include "ui/widgets/Fader/Fader.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
 #include "ui/widgets/LevelMeter/LevelMeter.hpp"
@@ -10,6 +11,7 @@
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPainter>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -104,6 +106,26 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     number_->setAlignment(Qt::AlignCenter);
     layout->addWidget(number_);
     setLabel(name, number);
+}
+
+void MixerStrip::setColor(std::optional<std::uint32_t> color)
+{
+    if (color == color_)
+        return;
+    color_ = color;
+    update();
+}
+
+void MixerStrip::paintEvent(QPaintEvent* event)
+{
+    QFrame::paintEvent(event);
+    if (!color_)
+        return;
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(toQColor(*color_));
+    p.drawRoundedRect(QRectF(4, 2, width() - 8, 3), 1.5, 1.5);
 }
 
 bool MixerStrip::eventFilter(QObject* watched, QEvent* event)

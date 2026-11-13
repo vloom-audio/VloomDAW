@@ -78,7 +78,23 @@ jobs:
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libasound2-dev
+        # FFmpeg (>= 5.1) decodes MP3 and other samples (cmake/FFmpeg.cmake).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libasound2-dev \
+            pkg-config libavformat-dev libavcodec-dev libswresample-dev libavutil-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg pkgconf
+
+      # Windows: the configure step downloads a pinned FFmpeg build (checked
+      # against its SHA-256); kept between runs.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: runner.os == 'Windows'
+        with:
+          path: VloomDAW/build/dev/_deps/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('VloomDAW/cmake/FFmpeg.cmake') }}
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

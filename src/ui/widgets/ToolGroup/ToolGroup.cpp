@@ -26,4 +26,20 @@ QFrame* makeToolGroup(QWidget* parent, std::initializer_list<QAction*> actions, 
     return group;
 }
 
+QFrame* makePanelButtonGroup(const QList<QToolButton*>& buttons)
+{
+    auto* group = new QFrame;
+    group->setObjectName(QStringLiteral("panelButtonGroup"));
+    auto* layout = new QHBoxLayout(group);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    for (QToolButton* button : buttons) {
+        button->setParent(group);
+        button->setObjectName(QStringLiteral("panelSegment"));
+        button->setProperty("iconOnly", button->toolButtonStyle() == Qt::ToolButtonIconOnly);
+        layout->addWidget(button);
+    }
+    return group;
+}
+
 } // namespace vloomdaw

@@ -6,6 +6,8 @@
 #include <QWidget>
 
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 
 namespace vloomdaw {
 
@@ -60,6 +62,8 @@ signals:
     void insertChanged(std::size_t channel, int insert);
     /// The user clicked the "+" after the last pad: one bar of pads more.
     void addBarRequested();
+    /// A colour (0xRRGGBB) was picked for `channel` (right-click its name); nullopt: none.
+    void channelColorChanged(std::size_t channel, std::optional<std::uint32_t> color);
 
 protected:
     void paintEvent(QPaintEvent* event) override;

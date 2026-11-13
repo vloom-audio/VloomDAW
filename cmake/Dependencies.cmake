@@ -8,7 +8,7 @@
 # change on the engine's main reaches VloomDAW only through a PR that bumps it.
 set(VLOOM_ENGINE_DIR "${PROJECT_SOURCE_DIR}/../vloom-engine"
     CACHE PATH "Local vloom-engine checkout, used when it exists")
-set(VLOOM_ENGINE_GIT_TAG "af215ba0b04db3f32b97d4373ad78d82cc329357"
+set(VLOOM_ENGINE_GIT_TAG "9eb681d797c8d2b787f21db90a5ad7317ccfbc5e"
     CACHE STRING "vloom-engine commit to fetch when no local checkout exists")
 
 if(EXISTS "${VLOOM_ENGINE_DIR}/CMakeLists.txt")
@@ -23,6 +23,26 @@ else()
         GIT_SHALLOW FALSE
         OPTIONS "VLOOM_ENGINE_BUILD_TESTS OFF" "VLOOM_ENGINE_BUILD_TOOLS OFF")
 endif()
+
+# ---------------------------------------------------------------- Signalsmith Stretch
+# Time-stretching for audio clips fitted to the song's tempo (audio/TimeStretch).
+# MIT, header-only. Both pinned to the commits of their tags; Linear is added
+# first so Stretch's own CMake does not fetch it by a (movable) tag.
+CPMAddPackage(
+    NAME signalsmith-linear
+    GITHUB_REPOSITORY Signalsmith-Audio/linear
+    GIT_TAG de55e6a50ffcf6f8f43f649692d94691c7025151 # 0.6.4
+    GIT_SHALLOW FALSE)
+CPMAddPackage(
+    NAME signalsmith-stretch
+    GITHUB_REPOSITORY Signalsmith-Audio/signalsmith-stretch
+    GIT_TAG a670068d9aeb64913331d5cc29337b19a457a7df # 1.4.0
+    GIT_SHALLOW FALSE)
+# Their headers as system headers: their warnings are not ours to fail on.
+set_target_properties(signalsmith-linear signalsmith-stretch PROPERTIES SYSTEM TRUE)
+
+# ---------------------------------------------------------------- FFmpeg
+include(${CMAKE_CURRENT_LIST_DIR}/FFmpeg.cmake)
 
 # ---------------------------------------------------------------- Qt 6
 if(VLOOMDAW_BUILD_APP)

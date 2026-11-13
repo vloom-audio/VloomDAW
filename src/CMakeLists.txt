@@ -33,9 +33,12 @@ target_sources(vloomdaw_core PRIVATE
     # audio — owns the engine and the hardware device
     audio/AudioController.cpp
     audio/ChannelRackAudio.cpp
+    audio/FileDecoder.cpp
+    audio/TempoDetector.cpp
+    audio/TimeStretch.cpp
     audio/MixerAudio.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(vloomdaw_core PUBLIC vloom::engine)
+target_link_libraries(vloomdaw_core PUBLIC vloom::engine PRIVATE vloomdaw::ffmpeg signalsmith-stretch)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
 vloom_set_warnings(vloomdaw_core)
 
@@ -73,10 +76,14 @@ qt_add_library(vloomdaw_ui STATIC
     ui/FilePaths.hpp
     ui/browser/BrowserPanel.cpp
     ui/browser/BrowserPanel.hpp
+    ui/AudioDecoder.cpp
+    ui/AudioDecoder.hpp
     ui/DroppedFiles.cpp
     ui/DroppedFiles.hpp
     ui/browser/BrowserRoles.hpp
     ui/browser/SamplePreviewer.cpp
+    ui/browser/SampleWaveform.cpp
+    ui/browser/SampleWaveform.hpp
     ui/browser/SamplePreviewer.hpp
     ui/browser/SampleTreeModel.cpp
     ui/browser/SampleTreeModel.hpp
@@ -112,6 +119,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/PluginStore.hpp
     ui/widgets/ActivityBar/ActivityBar.cpp
     ui/widgets/ActivityBar/ActivityBar.hpp
+    ui/widgets/ColorMenu/ColorMenu.cpp
+    ui/widgets/ColorMenu/ColorMenu.hpp
     ui/widgets/DetachButton/DetachButton.cpp
     ui/widgets/DetachButton/DetachButton.hpp
     ui/widgets/DeviceSelector/DeviceSelector.cpp
@@ -192,6 +201,16 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/sliders.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/speaker.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/stop.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-delete.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-draw.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-mute.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-paint.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-playback.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-select.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-slice.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/tool-zoom.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/track-mute.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/track-solo.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-close.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-maximize.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-minimize.svg
@@ -214,6 +233,7 @@ elseif(APPLE)
     target_sources(VloomDAW PRIVATE ${VLOOMDAW_ICNS})
 endif()
 target_link_libraries(VloomDAW PRIVATE vloomdaw_ui)
+vloomdaw_copy_ffmpeg_dlls(VloomDAW)
 # The app finds the probe next to its own executable (inside the bundle on macOS).
 add_dependencies(VloomDAW vloomdaw-plugin-probe)
 if(APPLE)
@@ -242,4 +262,12 @@ install(TARGETS VloomDAW
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(NOT APPLE)
     install(TARGETS vloomdaw-plugin-probe RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+# Windows: FFmpeg's DLLs (LGPL) go next to the app, with FFmpeg's licence.
+# macOS and Linux release builds link a static FFmpeg (scripts/build-ffmpeg.sh).
+if(WIN32 AND VLOOMDAW_FFMPEG_DLLS)
+    install(FILES ${VLOOMDAW_FFMPEG_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if(EXISTS "${FFMPEG_ROOT}/LICENSE.txt")
+        install(FILES "${FFMPEG_ROOT}/LICENSE.txt" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME FFmpeg-LICENSE.txt)
+    endif()
 endif()

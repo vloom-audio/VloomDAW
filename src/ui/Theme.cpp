@@ -255,6 +255,27 @@ QToolButton#panelButton {
     padding: 3px 10px 3px 6px;
 }
 QToolButton#panelButton:hover { border-color: @textDim; }
+/* The browser's preview strip under its list (waveform, play / stop). */
+QWidget#sampleWaveform { background: @panel; border: 1px solid @border; border-radius: 6px; }
+QLabel#sampleWaveformName { font-weight: 600; }
+QToolButton#panelButton[iconOnly="true"] { padding: 3px 7px; }
+/* Panel header buttons side by side in one box (the playlist's tools, its
+   "+ Track" and "−"): the box has a panelButton's border, so it is as tall. */
+QFrame#panelButtonGroup {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 6px;
+}
+QFrame#panelButtonGroup QToolButton#panelSegment {
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    padding: 3px 10px 3px 6px;
+}
+QFrame#panelButtonGroup QToolButton#panelSegment[iconOnly="true"] { padding: 3px 7px; }
+QFrame#panelButtonGroup QToolButton#panelSegment:hover { background: @raised; }
+QFrame#panelButtonGroup QToolButton#panelSegment:pressed { background: @border; }
+QFrame#panelButtonGroup QToolButton#panelSegment:checked { background: @accentTint; }
 QScrollArea#channelRackScroll, QWidget#channelRackView { background: @window; }
 
 /* Mixer panel (F9): the master strip has an accent outline; strips silenced

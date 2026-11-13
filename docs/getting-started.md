@@ -4,11 +4,17 @@
 
 | OS | Compiler & CMake | Qt 6.5+ |
 |---|---|---|
-| macOS | `xcode-select --install` · `brew install cmake ninja pipx` | `brew install qt` → `export QT_DIR=$(brew --prefix qt)` |
+| macOS | `xcode-select --install` · `brew install cmake ninja pipx ffmpeg pkgconf` | `brew install qt` → `export QT_DIR=$(brew --prefix qt)` |
 | Windows | Visual Studio 2022 (*Desktop development with C++*) + CMake | [Qt online installer](https://www.qt.io/download-qt-installer-oss), component *MSVC 2022 64-bit* → `set QT_DIR=C:\Qt\6.10.3\msvc2022_64` |
-| Ubuntu / Debian | `sudo apt install build-essential cmake ninja-build pipx libasound2-dev` | `sudo apt install qt6-base-dev qt6-svg-dev libgl1-mesa-dev` (QT_DIR not needed) |
+| Ubuntu / Debian | `sudo apt install build-essential cmake ninja-build pipx libasound2-dev pkg-config libavformat-dev libavcodec-dev libswresample-dev libavutil-dev` | `sudo apt install qt6-base-dev qt6-svg-dev libgl1-mesa-dev` (QT_DIR not needed) |
 
 Put the `QT_DIR` line in your shell profile so every terminal has it.
+
+FFmpeg (5.1 or later) decodes MP3, FLAC, Ogg, AIFF and M4A samples. On Windows the first
+configure downloads a pinned build into `build/<preset>/_deps/ffmpeg` (checked against its
+SHA-256) and copies its DLLs next to the executables. To use another FFmpeg, pass
+`-DFFMPEG_ROOT=<prefix with include/ and lib/>`; release builds on macOS and Linux use a
+small static one made by `scripts/build-ffmpeg.sh`.
 
 Formatting uses **clang-format 23.1.3 exactly** (other versions format differently and
 fail CI). Install it on any OS with `pipx install clang-format==23.1.3`

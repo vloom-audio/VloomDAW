@@ -7,6 +7,8 @@
 #include <QWidget>
 
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 
 class QHBoxLayout;
 class QScrollArea;
@@ -40,6 +42,8 @@ public:
     void moveInsert(std::size_t from, std::size_t to);
     /// Shows insert `track` under `name`.
     void setTrackName(std::size_t track, const QString& name);
+    /// Shows track `track` (0 = master) in the user's colour (0xRRGGBB; nullopt: none).
+    void setTrackColor(std::size_t track, std::optional<std::uint32_t> color);
 
 public slots:
     void setSilenced(std::size_t track, bool silenced);
@@ -64,6 +68,8 @@ signals:
     void renameRequested(std::size_t track);
     /// The user asked to move insert `from` to position `to` (context menu).
     void moveInsertRequested(std::size_t from, std::size_t to);
+    /// The user picked a colour for track `track` (0 = master); nullopt: none.
+    void colorChanged(std::size_t track, std::optional<std::uint32_t> color);
 
 private:
     void connectStrip(MixerStrip* strip);

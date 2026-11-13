@@ -8,10 +8,11 @@ class QMimeData;
 
 namespace vloomdaw {
 
-/// The first local .wav file in a drag (browser or desktop), or "" (only
-/// WAV can be loaded). Network paths are refused: file://host/share/x.wav
+/// The first local audio file the app can load in a drag (browser or
+/// desktop): WAV, or a type it decodes (AudioDecoder: MP3, FLAC, Ogg,
+/// AIFF); "" if none. Network paths are refused: file://host/share/x.wav
 /// would make Windows open an SMB connection to that host (and send the
 /// user's NTLM hash).
-[[nodiscard]] QString droppedWav(const QMimeData* mime);
+[[nodiscard]] QString droppedAudio(const QMimeData* mime);
 
 } // namespace vloomdaw

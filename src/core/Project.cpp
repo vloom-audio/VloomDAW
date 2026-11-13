@@ -45,6 +45,12 @@ void Project::setChannelMuted(std::size_t channel, bool muted)
         channels_[channel].muted = muted;
 }
 
+void Project::setChannelColor(std::size_t channel, std::optional<std::uint32_t> color)
+{
+    if (channel < channels_.size())
+        channels_[channel].color = color ? std::optional<std::uint32_t>(*color & 0xffffffu) : std::nullopt;
+}
+
 void Project::setChannelName(std::size_t channel, const std::string& name)
 {
     if (channel < channels_.size())
@@ -369,6 +375,8 @@ Clip Project::clamped(Clip clip) const
 {
     clip.track = std::clamp(clip.track, 0, static_cast<int>(tracks_.size()) - 1);
     clip.start = std::max(0, clip.start);
+    clip.offset = std::max(0, clip.offset);
+    clip.length = std::max(0, clip.length);
     return clip;
 }
 
@@ -376,7 +384,9 @@ std::optional<std::size_t> Project::addTrack()
 {
     if (tracks_.size() >= static_cast<std::size_t>(kMaxPlaylistTracks))
         return std::nullopt;
-    tracks_.push_back(PlaylistTrack{"Track " + std::to_string(tracks_.size() + 1), false});
+    PlaylistTrack track;
+    track.name = "Track " + std::to_string(tracks_.size() + 1);
+    tracks_.push_back(std::move(track));
     return tracks_.size() - 1;
 }
 
@@ -397,6 +407,7 @@ void Project::removeTrack(std::size_t track)
     for (AudioClip& c : audioClips_)
         if (c.track > removed)
             --c.track;
+    normalizeTrackDepths(); // its sub-tracks move up a level where they must
 }
 
 std::size_t Project::moveTrack(std::size_t from, std::size_t to)
@@ -419,6 +430,7 @@ std::size_t Project::moveTrack(std::size_t from, std::size_t to)
         follow(c.track);
     for (AudioClip& c : audioClips_)
         follow(c.track);
+    normalizeTrackDepths();
     return to;
 }
 
@@ -432,6 +444,185 @@ void Project::setTrackName(std::size_t track, const std::string& name)
     t.name = t.named ? clean : "Track " + std::to_string(track + 1);
 }
 
+void Project::setTrackMuted(std::size_t track, bool muted)
+{
+    if (track < tracks_.size())
+        tracks_[track].muted = muted;
+}
+
+void Project::setTrackSolo(std::size_t track, bool solo)
+{
+    if (track < tracks_.size())
+        tracks_[track].solo = solo;
+}
+
+bool Project::trackAudible(std::size_t track) const
+{
+    if (track >= tracks_.size())
+        return false;
+    // Walk up the group: a muted or solo track counts for its sub-tracks.
+    bool solo = false;
+    for (std::optional<std::size_t> t = track; t; t = parentTrack(*t)) {
+        if (tracks_[*t].muted)
+            return false;
+        solo = solo || tracks_[*t].solo;
+    }
+    const bool anySolo
+        = std::any_of(tracks_.begin(), tracks_.end(), [](const PlaylistTrack& each) { return each.solo; });
+    return !anySolo || solo;
+}
+
+void Project::setTrackColor(std::size_t track, std::optional<std::uint32_t> color)
+{
+    if (track < tracks_.size())
+        tracks_[track].color = color ? std::optional<std::uint32_t>(*color & 0xffffffu) : std::nullopt;
+}
+
+void Project::setTrackHeight(std::size_t track, int height)
+{
+    if (track < tracks_.size())
+        tracks_[track].height = std::clamp(height, PlaylistTrack::kMinHeight, PlaylistTrack::kMaxHeight);
+}
+
+void Project::setTrackCollapsed(std::size_t track, bool collapsed)
+{
+    if (track < tracks_.size())
+        tracks_[track].collapsed = collapsed;
+}
+
+bool Project::canIndentTrack(std::size_t track) const
+{
+    if (track == 0 || track >= tracks_.size())
+        return false;
+    // Deeper than the track above, it already is that track's sub-track.
+    if (tracks_[track].depth > tracks_[track - 1].depth)
+        return false;
+    for (std::size_t t = track; t < subTreeEnd(track); ++t)
+        if (tracks_[t].depth + 1 > PlaylistTrack::kMaxDepth)
+            return false;
+    return true;
+}
+
+bool Project::indentTrack(std::size_t track)
+{
+    if (!canIndentTrack(track))
+        return false;
+    const std::size_t end = subTreeEnd(track);
+    for (std::size_t t = track; t < end; ++t)
+        ++tracks_[t].depth;
+    return true;
+}
+
+bool Project::outdentTrack(std::size_t track)
+{
+    if (track >= tracks_.size() || tracks_[track].depth == 0)
+        return false;
+    const std::size_t end = subTreeEnd(track);
+    for (std::size_t t = track; t < end; ++t)
+        --tracks_[t].depth;
+    return true;
+}
+
+std::optional<std::size_t> Project::parentTrack(std::size_t track) const
+{
+    if (track >= tracks_.size())
+        return std::nullopt;
+    const int depth = tracks_[track].depth;
+    for (std::size_t t = track; t-- > 0;)
+        if (tracks_[t].depth < depth)
+            return t;
+    return std::nullopt;
+}
+
+bool Project::hasSubTracks(std::size_t track) const
+{
+    return track + 1 < tracks_.size() && tracks_[track + 1].depth > tracks_[track].depth;
+}
+
+std::size_t Project::subTreeEnd(std::size_t track) const
+{
+    if (track >= tracks_.size())
+        return tracks_.size();
+    std::size_t end = track + 1;
+    while (end < tracks_.size() && tracks_[end].depth > tracks_[track].depth)
+        ++end;
+    return end;
+}
+
+bool Project::trackVisible(std::size_t track) const
+{
+    if (track >= tracks_.size())
+        return false;
+    for (std::optional<std::size_t> t = parentTrack(track); t; t = parentTrack(*t))
+        if (tracks_[*t].collapsed)
+            return false;
+    return true;
+}
+
+std::optional<Project::GroupSwap> Project::groupSwap(std::size_t track, bool down) const
+{
+    if (track >= tracks_.size())
+        return std::nullopt;
+    const int depth = tracks_[track].depth;
+    if (down) {
+        const std::size_t middle = subTreeEnd(track);
+        if (middle >= tracks_.size() || tracks_[middle].depth != depth)
+            return std::nullopt;
+        return GroupSwap{track, middle, subTreeEnd(middle)};
+    }
+    // Above: skip the sub-tracks of the group before this one.
+    std::size_t above = track;
+    while (above > 0 && tracks_[above - 1].depth > depth)
+        --above;
+    if (above == 0 || tracks_[above - 1].depth != depth)
+        return std::nullopt;
+    return GroupSwap{above - 1, track, subTreeEnd(track)};
+}
+
+std::optional<std::size_t> Project::moveTrackGroup(std::size_t track, bool down)
+{
+    const auto swap = groupSwap(track, down);
+    if (!swap)
+        return std::nullopt;
+    std::vector<std::size_t> order(tracks_.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+        order[i] = i;
+    std::rotate(order.begin() + static_cast<std::ptrdiff_t>(swap->first),
+        order.begin() + static_cast<std::ptrdiff_t>(swap->middle),
+        order.begin() + static_cast<std::ptrdiff_t>(swap->last));
+    reorderTracks(order);
+    return down ? swap->first + (swap->last - swap->middle) : swap->first;
+}
+
+void Project::reorderTracks(const std::vector<std::size_t>& order)
+{
+    std::vector<PlaylistTrack> tracks;
+    std::vector<int> newIndex(tracks_.size());
+    tracks.reserve(order.size());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        newIndex[order[i]] = static_cast<int>(i);
+        tracks.push_back(std::move(tracks_[order[i]]));
+    }
+    tracks_ = std::move(tracks);
+    for (std::size_t t = 0; t < tracks_.size(); ++t)
+        if (!tracks_[t].named)
+            tracks_[t].name = "Track " + std::to_string(t + 1);
+    for (Clip& c : clips_)
+        c.track = newIndex[static_cast<std::size_t>(c.track)];
+    for (AudioClip& c : audioClips_)
+        c.track = newIndex[static_cast<std::size_t>(c.track)];
+}
+
+void Project::normalizeTrackDepths()
+{
+    // The outline stays valid: the first track is at the top level and no
+    // track is more than one level deeper than the track above it.
+    for (std::size_t t = 0; t < tracks_.size(); ++t) {
+        const int most = t == 0 ? 0 : tracks_[t - 1].depth + 1;
+        tracks_[t].depth = std::clamp(tracks_[t].depth, 0, std::min(most, PlaylistTrack::kMaxDepth));
+    }
+}
+
 std::size_t Project::clipsOnTrack(std::size_t track) const
 {
     const auto on = [track](const auto& c) { return c.track == static_cast<int>(track); };
@@ -443,6 +634,11 @@ AudioClip Project::clamped(AudioClip clip) const
 {
     clip.track = std::clamp(clip.track, 0, static_cast<int>(tracks_.size()) - 1);
     clip.start = std::max(0, clip.start);
+    clip.offset = std::max(0, clip.offset);
+    clip.length = std::max(0, clip.length);
+    // A tempo outside the range (or NaN) is no tempo: the clip is not fitted.
+    if (!(clip.sourceBpm >= kMinSourceBpm && clip.sourceBpm <= kMaxSourceBpm))
+        clip.sourceBpm = 0.0;
     return clip;
 }
 

@@ -4,15 +4,19 @@
 
 #include "audio/AudioController.hpp"
 #include "audio/MixerAudio.hpp"
+#include "audio/TempoDetector.hpp"
+#include "audio/TimeStretch.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/NoteNames.hpp"
 #include "core/PositionFormat.hpp"
 #include "core/ProcessMemory.hpp"
 #include "core/Scales.hpp"
+#include "ui/AudioDecoder.hpp"
 #include "ui/DeviceScanner.hpp"
 #include "ui/Theme.hpp"
 #include "ui/browser/BrowserPanel.hpp"
 #include "ui/browser/SamplePreviewer.hpp"
+#include "ui/browser/SampleWaveform.hpp"
 #include "ui/channelrack/ChannelRackView.hpp"
 #include "ui/dialogs/SettingsDialog/AudioSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp"
@@ -32,6 +36,7 @@
 #include "ui/widgets/PatternSelector/PatternSelector.hpp"
 #include "ui/widgets/PerformanceMeter/PerformanceMeter.hpp"
 #include "ui/widgets/PerformanceOverlay/PerformanceOverlay.hpp"
+#include "ui/widgets/ToolGroup/ToolGroup.hpp"
 #include "ui/widgets/TransportBar/TransportBar.hpp"
 
 #if defined(Q_OS_MACOS)
@@ -44,13 +49,16 @@
 
 #include <vloom/engine/core/Version.hpp>
 #include <vloom/engine/sample/SampleBuffer.hpp>
+#include <vloom/engine/sample/SampleLoader.hpp>
 
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QInputDialog>
@@ -61,6 +69,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScreen>
@@ -68,9 +77,11 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QShowEvent>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QThread>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -83,6 +94,30 @@
 #include <string>
 
 namespace vloomdaw {
+
+namespace {
+
+/// A combo box that refills itself just before its list opens.
+class ClipSourceBox : public QComboBox {
+public:
+    ClipSourceBox(std::function<void()> refill, QWidget* parent)
+        : QComboBox(parent)
+        , refill_(std::move(refill))
+    {
+    }
+
+    void showPopup() override
+    {
+        if (refill_)
+            refill_();
+        QComboBox::showPopup();
+    }
+
+private:
+    std::function<void()> refill_;
+};
+
+} // namespace
 
 namespace {
 constexpr qreal kMinRefreshHz = 30.0; ///< UI refresh follows the screen,
@@ -127,6 +162,29 @@ MainWindow::MainWindow(AudioController& audio, QWidget* parent)
     , mixer_(kMixerInserts)
 {
     setWindowTitle(QStringLiteral("VloomDAW"));
+    // Audio clips fitted to the tempo by stretching: their copies, made once
+    // the tempo has settled.
+    stretchTimer_ = new QTimer(this);
+    stretchTimer_->setSingleShot(true);
+    stretchTimer_->setInterval(300);
+    connect(stretchTimer_, &QTimer::timeout, this, &MainWindow::makeStretchedSamples);
+    rackAudio_.setStretchProvider(
+        [this](const std::string& path, double ratio) { return stretchedSample(path, ratio); });
+    // MP3, FLAC, Ogg and AIFF reach the engine as WAV copies decoded once.
+    rackAudio_.setSourceResolver([this](const std::string& path, double sampleRate, std::string* error) {
+        const QString file = QString::fromStdString(path);
+        if (needsDecoding(file)) {
+            statusBar()->showMessage(tr("Decoding %1…").arg(QFileInfo(file).fileName()));
+            statusBar()->repaint(); // shown while the decoding blocks
+        }
+        QString why;
+        const QString wav = playableWav(file, sampleRate, &why);
+        if (needsDecoding(file))
+            statusBar()->clearMessage();
+        if (wav.isEmpty() && error != nullptr)
+            *error = why.toStdString();
+        return wav.toStdString();
+    });
     setMinimumSize(800, 480);
     resize(1280, 720);
 
@@ -159,6 +217,12 @@ MainWindow::MainWindow(AudioController& audio, QWidget* parent)
 
 MainWindow::~MainWindow()
 {
+    // A load under way finishes first; its result, queued to this window,
+    // is dropped with it.
+    if (loaderThread_ != nullptr) {
+        loaderThread_->quit();
+        loaderThread_->wait();
+    }
     // Detached windows are top-level and unparented; a docked panel is back
     // under this window, so only what is still hosted goes with them.
     for (DetachablePage& d : detachable_)
@@ -412,6 +476,7 @@ void MainWindow::selectPattern(std::size_t pattern)
     channelRack_->setPattern(currentPattern_);
     pianoRoll_->setTarget(currentPattern_, currentChannel_);
     playlist_->setCurrentPattern(currentPattern_);
+    rebuildClipSources();
     updatePanelContexts();
     syncChannelRack(); // the engine plays the current pattern
 }
@@ -516,6 +581,8 @@ void MainWindow::removePlaylistTrack(std::size_t track)
         return;
     project_.removeTrack(track);
     playlist_->refresh();
+    if (songMode_) // its clips stop; removing the only solo track lets the others play
+        syncChannelRack();
     statusBar()->showMessage(tr("“%1” deleted.").arg(name), 3000);
 }
 
@@ -545,6 +612,266 @@ const ClipAudio* MainWindow::clipAudio(const std::string& path)
     return clipAudio_.emplace(path, std::move(info)).first->second.get();
 }
 
+void MainWindow::loadSampleThen(const QString& path, std::function<void()> then)
+{
+    const std::string file = QDir::cleanPath(path).toStdString();
+    const double rate = audio_.sampleRate();
+    if (rate <= 0.0 || rackAudio_.hasSample(file, rate)) {
+        then(); // loaded already, or no device: nothing to wait for
+        return;
+    }
+    startLoader();
+    ++loading_;
+    const QString name = QFileInfo(path).fileName();
+    statusBar()->showMessage(tr("Loading %1…").arg(name));
+    QMetaObject::invokeMethod(
+        loader_,
+        [this, file, rate, name, then = std::move(then)] {
+            // Loader thread: decode (MP3 and others) and resample.
+            std::string error;
+            std::shared_ptr<const vloom::SampleBuffer> sample;
+            try {
+                QString why;
+                const QString wav = playableWav(QString::fromStdString(file), rate, &why);
+                if (wav.isEmpty())
+                    error = why.toStdString();
+                else
+                    sample = vloom::loadSample(wav.toStdString(), rate, &error);
+            } catch (const std::exception&) {
+                error = "not enough memory to load it";
+            }
+            QMetaObject::invokeMethod(
+                this,
+                [this, file, rate, name, sample, error, then] {
+                    --loading_;
+                    if (loading_ == 0)
+                        statusBar()->clearMessage();
+                    if (sample == nullptr) {
+                        statusBar()->showMessage(
+                            tr("Could not load %1: %2").arg(name, QString::fromStdString(error)), 8000);
+                        return;
+                    }
+                    rackAudio_.store(file, sample, rate);
+                    then();
+                },
+                Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
+
+void MainWindow::startLoader()
+{
+    if (loaderThread_ != nullptr)
+        return;
+    loaderThread_ = new QThread(this);
+    loaderThread_->setObjectName(QStringLiteral("SampleLoader"));
+    loader_ = new QObject;
+    loader_->moveToThread(loaderThread_);
+    connect(loaderThread_, &QThread::finished, loader_, &QObject::deleteLater);
+    loaderThread_->start();
+}
+
+void MainWindow::detectTempoThen(const std::string& path, std::function<void(double bpm)> then)
+{
+    if (const auto found = detectedTempo_.find(path); found != detectedTempo_.end()) {
+        then(found->second);
+        return;
+    }
+    const auto sample = rackAudio_.sample(path); // loaded already: the clip plays it
+    if (sample == nullptr) {
+        then(0.0);
+        return;
+    }
+    startLoader();
+    statusBar()->showMessage(
+        tr("Detecting the tempo of %1…").arg(QFileInfo(QString::fromStdString(path)).fileName()));
+    QMetaObject::invokeMethod(
+        loader_,
+        [this, path, sample, then = std::move(then)] {
+            const double bpm = detectTempo(*sample).bpm; // loader thread
+            QMetaObject::invokeMethod(
+                this,
+                [this, path, bpm, then] {
+                    statusBar()->clearMessage();
+                    detectedTempo_[path] = bpm;
+                    then(bpm);
+                },
+                Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
+
+std::shared_ptr<const vloom::SampleBuffer> MainWindow::stretchedSample(const std::string& path, double ratio)
+{
+    const StretchKey key{path, std::llround(ratio * 10000.0)};
+    stretchUsed_[key] = true;
+    if (const auto found = stretched_.find(key); found != stretched_.end())
+        return found->second;
+    // Made once the tempo has settled: a tempo drag must not start a stretch
+    // per step. The clip plays resampled meanwhile.
+    stretchWanted_.emplace(key, false);
+    stretchTimer_->start();
+    return nullptr;
+}
+
+void MainWindow::makeStretchedSamples()
+{
+    for (auto& [key, making] : stretchWanted_) {
+        if (making || !stretchUsed_.contains(key))
+            continue; // under way, or no clip needs it any more
+        const auto sample = rackAudio_.sample(key.first);
+        if (sample == nullptr)
+            continue;
+        making = true;
+        startLoader();
+        ++loading_;
+        statusBar()->showMessage(
+            tr("Stretching %1 to the tempo…").arg(QFileInfo(QString::fromStdString(key.first)).fileName()));
+        QMetaObject::invokeMethod(
+            loader_,
+            [this, key, sample] {
+                auto stretched
+                    = timeStretch(*sample, static_cast<double>(key.second) / 10000.0); // loader thread
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, key, stretched] {
+                        if (--loading_ == 0)
+                            statusBar()->clearMessage();
+                        stretchWanted_.erase(key);
+                        if (stretched == nullptr)
+                            return; // too short or out of range: it stays resampled
+                        stretched_[key] = stretched;
+                        syncChannelRack(); // the clip now plays its stretched copy
+                    },
+                    Qt::QueuedConnection);
+            },
+            Qt::QueuedConnection);
+    }
+    std::erase_if(stretchWanted_,
+        [this](const auto& entry) { return !entry.second && !stretchUsed_.contains(entry.first); });
+}
+
+void MainWindow::showAudioClipMenu(std::size_t index, const QPoint& globalPos)
+{
+    if (index >= project_.audioClips().size())
+        return;
+    const AudioClip clip = project_.audioClips()[index];
+    QMenu menu(this);
+    QMenu* fit = menu.addMenu(tr("Fit to Tempo"));
+    auto* modes = new QActionGroup(fit);
+    const auto mode = [&](const QString& text, AudioClip::Fit value) {
+        QAction* action = fit->addAction(text, this, [this, index, value] { setAudioClipFit(index, value); });
+        action->setCheckable(true);
+        action->setChecked(clip.fit == value);
+        modes->addAction(action);
+    };
+    mode(tr("Off"), AudioClip::Fit::Off);
+    mode(tr("Stretch (keep the pitch)"), AudioClip::Fit::Stretch);
+    mode(tr("Resample (the pitch follows)"), AudioClip::Fit::Resample);
+    menu.addSeparator();
+    menu.addAction(clip.sourceBpm > 0.0
+                ? tr("Tempo of the sample: %1 BPM").arg(QString::number(clip.sourceBpm, 'f', 2))
+                : tr("Tempo of the sample: not known yet"))
+        ->setEnabled(false);
+    menu.addAction(tr("Detect Tempo"), this, [this, index] {
+        if (index >= project_.audioClips().size())
+            return;
+        const std::size_t channel = project_.audioClips()[index].channel;
+        if (channel >= project_.channels().size())
+            return;
+        const std::string path = project_.channels()[channel].samplePath;
+        detectedTempo_.erase(path); // measure again
+        detectTempoThen(path, [this, index, channel](double bpm) {
+            if (index >= project_.audioClips().size() || project_.audioClips()[index].channel != channel)
+                return; // the clip changed meanwhile
+            if (bpm <= 0.0) {
+                statusBar()->showMessage(tr("No steady beat found: set the tempo by hand."), 6000);
+                return;
+            }
+            setAudioClipTempo(index, bpm);
+            statusBar()->showMessage(
+                tr("Tempo of the sample: %1 BPM").arg(QString::number(bpm, 'f', 2)), 4000);
+        });
+    });
+    menu.addAction(tr("Set Tempo…"), this, [this, index] {
+        if (index >= project_.audioClips().size())
+            return;
+        bool ok = false;
+        const double current = project_.audioClips()[index].sourceBpm;
+        const double bpm = QInputDialog::getDouble(this, tr("Tempo of the Sample"), tr("BPM:"),
+            current > 0.0 ? current : transport_->tempo(), Project::kMinSourceBpm, Project::kMaxSourceBpm, 2,
+            &ok);
+        if (ok)
+            setAudioClipTempo(index, bpm);
+    });
+    menu.exec(globalPos);
+}
+
+void MainWindow::setAudioClipTempo(std::size_t index, double bpm)
+{
+    if (index >= project_.audioClips().size())
+        return;
+    AudioClip clip = project_.audioClips()[index];
+    // Offset and length count in the tempo the sample is read at: when that
+    // changes, they scale so they cover the same part of the sample.
+    const double before = clip.fitted() ? clip.sourceBpm : transport_->tempo();
+    clip.sourceBpm = bpm;
+    const double after = clip.fitted() ? clip.sourceBpm : transport_->tempo();
+    const auto rescale = [&](int ticks) {
+        return static_cast<int>(std::lround(ticks * after / before / kTicksPerStep)) * kTicksPerStep;
+    };
+    clip.offset = rescale(clip.offset);
+    clip.length = rescale(clip.length);
+    project_.setAudioClip(index, clip);
+    playlist_->refresh();
+    if (songMode_)
+        syncChannelRack();
+}
+
+void MainWindow::setAudioClipFit(std::size_t index, AudioClip::Fit fit)
+{
+    if (index >= project_.audioClips().size())
+        return;
+    const AudioClip clip = project_.audioClips()[index];
+    const auto apply = [this, index](AudioClip::Fit mode) {
+        if (index >= project_.audioClips().size())
+            return;
+        AudioClip changed = project_.audioClips()[index];
+        const double before = changed.fitted() ? changed.sourceBpm : transport_->tempo();
+        changed.fit = mode;
+        const double after = changed.fitted() ? changed.sourceBpm : transport_->tempo();
+        const auto rescale = [&](int ticks) {
+            return static_cast<int>(std::lround(ticks * after / before / kTicksPerStep)) * kTicksPerStep;
+        };
+        changed.offset = rescale(changed.offset);
+        changed.length = rescale(changed.length);
+        project_.setAudioClip(index, changed);
+        playlist_->refresh();
+        if (songMode_)
+            syncChannelRack();
+    };
+    if (fit == AudioClip::Fit::Off || clip.sourceBpm > 0.0 || clip.channel >= project_.channels().size()) {
+        apply(fit);
+        return;
+    }
+    // No tempo yet: measure it first.
+    const std::size_t channel = clip.channel;
+    detectTempoThen(project_.channels()[channel].samplePath, [this, index, channel, fit, apply](double bpm) {
+        if (index >= project_.audioClips().size() || project_.audioClips()[index].channel != channel)
+            return;
+        if (bpm <= 0.0) {
+            statusBar()->showMessage(
+                tr("No steady beat found: set the tempo with Set Tempo…, then fit the clip."), 8000);
+            return;
+        }
+        AudioClip withTempo = project_.audioClips()[index];
+        withTempo.sourceBpm = bpm; // not fitted yet: offset and length keep their meaning
+        project_.setAudioClip(index, withTempo);
+        apply(fit);
+        statusBar()->showMessage(tr("Fitted from %1 BPM").arg(QString::number(bpm, 'f', 2)), 4000);
+    });
+}
+
 void MainWindow::dropAudio(const QString& path, int track, int start)
 {
     if (track >= static_cast<int>(project_.tracks().size())) {
@@ -571,6 +898,9 @@ void MainWindow::dropAudio(const QString& path, int track, int start)
     }
     project_.addAudioClip(AudioClip{channel, track, start});
     playlist_->refresh();
+    // As in FL Studio: Draw and Paint now place this file too.
+    playlist_->setSource(PlaylistView::ClipSource{true, channel});
+    rebuildClipSources();
     selectChannel(channel);
     if (!songMode_) {
         // The playlist only plays in song mode: switch, or Play would stay silent.
@@ -1009,6 +1339,13 @@ QWidget* MainWindow::createMixer()
     connect(mixerPanel_, &MixerPanel::addInsertRequested, this, &MainWindow::addMixerInsert);
     connect(mixerPanel_, &MixerPanel::removeInsertRequested, this, &MainWindow::removeMixerInsert);
     connect(mixerPanel_, &MixerPanel::renameRequested, this, &MainWindow::renameMixerInsert);
+    connect(mixerPanel_, &MixerPanel::colorChanged, this,
+        [this](std::size_t track, std::optional<std::uint32_t> color) {
+            if (track >= mixer_.size())
+                return;
+            mixer_.setColor(track, color);
+            mixerPanel_->setTrackColor(track, mixer_.track(track).color);
+        });
     connect(mixerPanel_, &MixerPanel::moveInsertRequested, this, [this](std::size_t from, std::size_t to) {
         if (from == MixerModel::kMaster || to == MixerModel::kMaster || from >= mixer_.size()
             || to >= mixer_.size())
@@ -1162,9 +1499,15 @@ void MainWindow::createCentralArea()
             previewer_->play(path);
     });
     connect(browser_, &BrowserPanel::previewStopRequested, previewer_, &SamplePreviewer::stop);
+    connect(browser_, &BrowserPanel::fileShown, previewer_, &SamplePreviewer::show);
     connect(previewer_, &SamplePreviewer::failed, this, [this](const QString& path, const QString& error) {
+        browser_->waveform()->setFailed(path, error);
         statusBar()->showMessage(tr("Cannot preview %1: %2").arg(QFileInfo(path).fileName(), error), 6000);
     });
+    // The preview strip under the browser: waveform, play / stop.
+    connect(previewer_, &SamplePreviewer::loaded, browser_->waveform(), &SampleWaveform::setWaveform);
+    connect(browser_->waveform(), &SampleWaveform::playRequested, previewer_, &SamplePreviewer::play);
+    connect(browser_->waveform(), &SampleWaveform::stopRequested, previewer_, &SamplePreviewer::stop);
     activityBar_->addPage(Theme::icon(QStringLiteral("folder")), tr("Browser"));
 
     // Plugins: only what the user's last scan found; nothing scans on its own.
@@ -1245,6 +1588,7 @@ QWidget* MainWindow::createWorkspace()
         button->setIcon(Theme::icon(icon));
         button->setText(text);
         button->setToolButtonStyle(text.isEmpty() ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
+        button->setProperty("iconOnly", text.isEmpty()); // even padding (Theme)
         button->setToolTip(tip);
         button->setFocusPolicy(Qt::NoFocus);
         return button;
@@ -1255,8 +1599,8 @@ QWidget* MainWindow::createWorkspace()
         tr("Add a bar: %1 step pads more for every channel in this pattern").arg(kStepsPerBar));
     connect(removeBar, &QToolButton::clicked, this, [this] { changeBars(-1); });
     connect(addBar, &QToolButton::clicked, this, [this] { changeBars(1); });
-    channelRackFrame_->addHeaderWidget(removeBar);
-    channelRackFrame_->addHeaderWidget(addBar);
+    // "+ Bar" and "−" together, like the playlist's "+ Track" and "−".
+    channelRackFrame_->addHeaderWidget(makePanelButtonGroup({addBar, removeBar}));
     channelRackFrame_->addHeaderWidget(addChannel);
     workspace_->addWidget(channelRackFrame_);
     connect(addChannel, &QToolButton::clicked, this, [this] {
@@ -1271,6 +1615,12 @@ QWidget* MainWindow::createWorkspace()
         channelRack_->update();
         syncChannelRack();
     });
+    connect(channelRack_, &ChannelRackView::channelColorChanged, this,
+        [this](std::size_t channel, std::optional<std::uint32_t> color) {
+            project_.setChannelColor(channel, color);
+            channelRack_->update();
+            pianoRoll_->viewport()->update(); // its notes take the channel's colour
+        });
     connect(channelRack_, &ChannelRackView::muteToggled, this, [this](std::size_t channel) {
         project_.setChannelMuted(channel, !project_.channels()[channel].muted);
         channelRack_->update();
@@ -1292,7 +1642,11 @@ QWidget* MainWindow::createWorkspace()
         syncChannelRack();
     });
     syncInsertNames();
-    connect(channelRack_, &ChannelRackView::sampleDropped, this, &MainWindow::assignSample);
+    // Long files take a while to decode and resample: off the UI thread.
+    connect(channelRack_, &ChannelRackView::sampleDropped, this,
+        [this](std::size_t channel, const QString& path) {
+            loadSampleThen(path, [this, channel, path] { assignSample(channel, path); });
+        });
     connect(channelRack_, &ChannelRackView::channelSelected, this, &MainWindow::selectChannel);
     connect(channelRack_, &ChannelRackView::addBarRequested, this, [this] { changeBars(1); });
     connect(channelRack_, &ChannelRackView::channelOpened, this, [this](std::size_t channel) {
@@ -1329,15 +1683,114 @@ QWidget* MainWindow::createWorkspace()
     playlist_ = new PlaylistView;
     playlist_->setProject(&project_);
     playlistFrame_ = new PanelFrame(tr("PLAYLIST"), playlist_, workspace_);
-    playlistFrame_->setContext(tr("Click to place the current pattern"));
+    playlistFrame_->setContext(tr("Click to place the chosen clip"));
     workspace_->addWidget(playlistFrame_);
     auto* removeTrack = headerButton(QStringLiteral("minus"), QString(), tr("Delete the last track"));
     auto* addTrack = headerButton(QStringLiteral("plus"), tr("Track"), tr("Add a track"));
     connect(removeTrack, &QToolButton::clicked, this,
         [this] { removePlaylistTrack(project_.tracks().size() - 1); });
     connect(addTrack, &QToolButton::clicked, this, &MainWindow::addPlaylistTrack);
-    playlistFrame_->addHeaderWidget(removeTrack);
-    playlistFrame_->addHeaderWidget(addTrack);
+    // Tools: what the left button does in the grid. Their keys work while the
+    // playlist has the focus (T is tap tempo, so Mute is M).
+    {
+        struct ToolInfo {
+            PlaylistView::Tool tool;
+            const char* icon;
+            QString name;
+            QKeySequence key;
+            QString context;
+        };
+        const ToolInfo tools[] = {
+            {PlaylistView::Tool::Draw, "tool-draw", tr("Draw"), QKeySequence(Qt::Key_P),
+                tr("Draw: click to place the clip chosen on the left, drag a clip to move it or its edge to "
+                   "trim "
+                   "it")},
+            {PlaylistView::Tool::Paint, "tool-paint", tr("Paint"), QKeySequence(Qt::Key_B),
+                tr("Paint: drag along a track to lay the chosen clip again and again")},
+            {PlaylistView::Tool::Delete, "tool-delete", tr("Delete"), QKeySequence(Qt::Key_D),
+                tr("Delete: click or drag over clips to delete them")},
+            {PlaylistView::Tool::Mute, "tool-mute", tr("Mute"), QKeySequence(Qt::Key_M),
+                tr("Mute: click or drag over clips to mute or unmute them")},
+            {PlaylistView::Tool::Slice, "tool-slice", tr("Slice"), QKeySequence(Qt::Key_C),
+                tr("Slice: click, or drag across tracks, to cut every clip the line crosses (Shift: step)")},
+            {PlaylistView::Tool::Select, "tool-select", tr("Select"), QKeySequence(Qt::Key_E),
+                tr("Select: drag a box (Ctrl adds), drag the selection to move it, Delete removes it")},
+            {PlaylistView::Tool::Zoom, "tool-zoom", tr("Zoom"), QKeySequence(Qt::Key_Z),
+                tr("Zoom: drag a range to fill the view, click to zoom in, right-click to zoom out")},
+            {PlaylistView::Tool::Playback, "tool-playback", tr("Playback"), QKeySequence(Qt::Key_Y),
+                tr("Playback: hold to play from there, drag to scrub")},
+        };
+        auto* group = new QActionGroup(playlistFrame_);
+        QList<QAction*> actions;
+        for (const ToolInfo& info : tools) {
+            auto* action
+                = new QAction(Theme::icon(QString::fromLatin1(info.icon)), info.name, playlistFrame_);
+            action->setCheckable(true);
+            action->setChecked(info.tool == PlaylistView::Tool::Draw);
+            action->setShortcut(info.key);
+            action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+            action->setToolTip(
+                QStringLiteral("%1 (%2)").arg(info.name, info.key.toString(QKeySequence::NativeText)));
+            playlistFrame_->addAction(action); // the key works while the playlist has the focus
+            group->addAction(action);
+            actions.append(action);
+            connect(action, &QAction::triggered, this, [this, tool = info.tool, context = info.context] {
+                playlist_->setTool(tool);
+                playlistFrame_->setContext(context);
+            });
+        }
+        // What Draw and Paint place: a pattern or a channel's audio clip. The
+        // list is filled afresh each time it opens, so it is never stale.
+        clipSource_ = new ClipSourceBox([this] { rebuildClipSources(); }, playlistFrame_);
+        clipSource_->setObjectName(QStringLiteral("clipSource"));
+        clipSource_->setToolTip(
+            tr("What Draw and Paint place: a pattern, or a channel's sample as an audio clip"));
+        clipSource_->setAccessibleName(tr("Clip to place"));
+        clipSource_->setFocusPolicy(Qt::NoFocus);
+        clipSource_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+        connect(clipSource_, &QComboBox::activated, this, [this](int row) {
+            const QVariant data = clipSource_->itemData(row);
+            if (!data.isValid())
+                return;
+            const auto index = static_cast<std::size_t>(data.toULongLong() & 0xffffffffULL);
+            const bool audio = (data.toULongLong() >> 32) != 0;
+            if (audio)
+                playlist_->setSource(PlaylistView::ClipSource{true, index});
+            else
+                selectPattern(index); // as in FL Studio: picking a pattern here makes it current
+        });
+        playlistFrame_->addHeaderWidget(clipSource_);
+
+        // What clips snap to while placed, moved, trimmed or cut.
+        auto* snap = new QComboBox(playlistFrame_);
+        snap->setObjectName(QStringLiteral("playlistSnap"));
+        snap->setFocusPolicy(Qt::NoFocus);
+        snap->setToolTip(tr("Snap: what clips line up to when placed, moved, trimmed or cut (Shift: steps)"));
+        snap->setAccessibleName(tr("Snap"));
+        snap->addItem(tr("Snap: Auto"), static_cast<int>(PlaylistView::Snap::Auto));
+        snap->addItem(tr("Snap: Bar"), static_cast<int>(PlaylistView::Snap::Bar));
+        snap->addItem(tr("Snap: Beat"), static_cast<int>(PlaylistView::Snap::Beat));
+        snap->addItem(tr("Snap: Step"), static_cast<int>(PlaylistView::Snap::Step));
+        connect(snap, &QComboBox::activated, this, [this, snap](int row) {
+            playlist_->setSnap(static_cast<PlaylistView::Snap>(snap->itemData(row).toInt()));
+        });
+        playlistFrame_->addHeaderWidget(snap);
+        rebuildClipSources();
+
+        // The tools side by side in one box; the tool in use is lit.
+        QList<QToolButton*> toolButtons;
+        for (QAction* action : actions) {
+            auto* button = new QToolButton;
+            button->setDefaultAction(action);
+            button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            button->setFocusPolicy(Qt::NoFocus);
+            toolButtons.append(button);
+        }
+        playlistFrame_->addHeaderWidget(makePanelButtonGroup(toolButtons));
+        playlistFrame_->setContext(tools[0].context);
+    }
+    // "+ Track" and "−" side by side in a box of their own.
+    playlistFrame_->addHeaderWidget(makePanelButtonGroup({addTrack, removeTrack}));
     connect(playlist_, &PlaylistView::trackRenameRequested, this, &MainWindow::renamePlaylistTrack);
     connect(playlist_, &PlaylistView::trackNameEdited, this, [this](std::size_t track, const QString& name) {
         if (track >= project_.tracks().size())
@@ -1346,11 +1799,18 @@ QWidget* MainWindow::createWorkspace()
         playlist_->refresh();
     });
     connect(playlist_, &PlaylistView::trackRemoveRequested, this, &MainWindow::removePlaylistTrack);
-    connect(playlist_, &PlaylistView::trackMoveRequested, this, [this](std::size_t from, std::size_t to) {
-        if (from >= project_.tracks().size() || to >= project_.tracks().size())
-            return;
-        project_.moveTrack(from, to);
-        playlist_->viewport()->update();
+    connect(playlist_, &PlaylistView::trackColorChanged, this,
+        [this](std::size_t track, std::optional<std::uint32_t> color) {
+            project_.setTrackColor(track, color);
+            playlist_->viewport()->update();
+        });
+    connect(playlist_, &PlaylistView::trackHeightChanged, this, [this](std::size_t track, int height) {
+        project_.setTrackHeight(track, height);
+        playlist_->refresh();
+    });
+    connect(playlist_, &PlaylistView::trackCollapseToggled, this, [this](std::size_t track, bool collapsed) {
+        project_.setTrackCollapsed(track, collapsed);
+        playlist_->refresh();
     });
     // Settings ids match the keys of the first release that had a detachable playlist.
     makeDetachable(detachable_[1], WorkspacePage::Playlist, playlistFrame_, tr("Playlist"), tr("playlist"),
@@ -1360,6 +1820,39 @@ QWidget* MainWindow::createWorkspace()
         if (songMode_)
             syncChannelRack();
     };
+    // Moving or regrouping tracks can change which ones play (mute and solo
+    // count for a whole group).
+    connect(
+        playlist_, &PlaylistView::trackMoveRequested, this, [this, songEdited](std::size_t track, bool down) {
+            if (project_.moveTrackGroup(track, down)) {
+                playlist_->refresh();
+                songEdited();
+            }
+        });
+    connect(playlist_, &PlaylistView::trackIndentRequested, this, [this, songEdited](std::size_t track) {
+        if (project_.indentTrack(track)) {
+            playlist_->refresh();
+            songEdited();
+        }
+    });
+    connect(playlist_, &PlaylistView::trackOutdentRequested, this, [this, songEdited](std::size_t track) {
+        if (project_.outdentTrack(track)) {
+            playlist_->refresh();
+            songEdited();
+        }
+    });
+    connect(
+        playlist_, &PlaylistView::trackMuteToggled, this, [this, songEdited](std::size_t track, bool muted) {
+            project_.setTrackMuted(track, muted);
+            playlist_->viewport()->update();
+            songEdited();
+        });
+    connect(
+        playlist_, &PlaylistView::trackSoloToggled, this, [this, songEdited](std::size_t track, bool solo) {
+            project_.setTrackSolo(track, solo);
+            playlist_->viewport()->update();
+            songEdited();
+        });
     connect(playlist_, &PlaylistView::clipAdded, this, [this, songEdited](Clip clip) {
         project_.addClip(clip);
         playlist_->viewport()->update();
@@ -1372,6 +1865,34 @@ QWidget* MainWindow::createWorkspace()
         playlist_->viewport()->update();
         songEdited();
     });
+    connect(playlist_, &PlaylistView::clipsChanged, this, [this, songEdited](const PlaylistClipEdit& edit) {
+        for (const auto& [index, clip] : edit.clips)
+            project_.setClip(index, clip);
+        for (const auto& [index, clip] : edit.audioClips)
+            project_.setAudioClip(index, clip);
+        playlist_->viewport()->update();
+        songEdited();
+    });
+    connect(playlist_, &PlaylistView::clipsRemoved, this,
+        [this, songEdited](const std::vector<std::size_t>& clips, const std::vector<std::size_t>& audio) {
+            // From the last: removing a clip moves the ones after it down.
+            for (auto it = clips.rbegin(); it != clips.rend(); ++it)
+                project_.removeClip(*it);
+            for (auto it = audio.rbegin(); it != audio.rend(); ++it)
+                project_.removeAudioClip(*it);
+            playlist_->refresh();
+            songEdited();
+        });
+    // Playback tool: song mode, play from the pointer while the button is held.
+    connect(playlist_, &PlaylistView::playbackRequested, this, [this](double tick) {
+        if (!songMode_)
+            transport_->songModeAction()->setChecked(true); // syncs through songModeChanged
+        auto& engine = audio_.engine();
+        engine.locate(tick);
+        if (!engine.isPlaying())
+            engine.play();
+    });
+    connect(playlist_, &PlaylistView::playbackReleased, this, [this] { audio_.engine().stop(); });
     connect(playlist_, &PlaylistView::clipRemoved, this, [this, songEdited](std::size_t index) {
         project_.removeClip(index);
         playlist_->refresh();
@@ -1379,7 +1900,15 @@ QWidget* MainWindow::createWorkspace()
     });
     playlist_->setTempo(transport_->tempo());
     playlist_->setAudioInfo([this](const std::string& path) { return clipAudio(path); });
-    connect(playlist_, &PlaylistView::audioDropped, this, &MainWindow::dropAudio);
+    connect(playlist_, &PlaylistView::sourcePicked, this, [this](PlaylistView::ClipSource source) {
+        if (source.audio)
+            rebuildClipSources(); // the box shows the playlist's new source
+        else
+            selectPattern(source.index); // its pattern becomes current, as in FL Studio
+    });
+    connect(playlist_, &PlaylistView::audioDropped, this, [this](const QString& path, int track, int start) {
+        loadSampleThen(path, [this, path, track, start] { dropAudio(path, track, start); });
+    });
     connect(playlist_, &PlaylistView::audioClipChanged, this,
         [this, songEdited](std::size_t index, AudioClip clip) {
             if (index < project_.audioClips().size() && project_.audioClips()[index] == clip)
@@ -1388,6 +1917,12 @@ QWidget* MainWindow::createWorkspace()
             playlist_->viewport()->update();
             songEdited();
         });
+    connect(playlist_, &PlaylistView::audioClipMenuRequested, this, &MainWindow::showAudioClipMenu);
+    connect(playlist_, &PlaylistView::audioClipAdded, this, [this, songEdited](AudioClip clip) {
+        project_.addAudioClip(std::move(clip));
+        playlist_->refresh();
+        songEdited();
+    });
     connect(playlist_, &PlaylistView::audioClipRemoved, this, [this, songEdited](std::size_t index) {
         project_.removeAudioClip(index);
         playlist_->refresh();
@@ -1784,6 +2319,7 @@ bool MainWindow::startDevice(int index, bool fallback)
 
     // Re-send UI state so the engine matches what the user sees.
     pendingTempo_.reset();
+    songLoopEnd_ = -1.0; // sent again on the next tick
     audio_.engine().setTempo(transport_->tempo());
     audio_.engine().setMetronomeEnabled(transport_->metronomeEnabled());
     updateMasterOutput();
@@ -1854,10 +2390,95 @@ void MainWindow::watchDevice()
     }
 }
 
+void MainWindow::rebuildClipSources()
+{
+    if (clipSource_ == nullptr)
+        return;
+    const QSignalBlocker block(clipSource_);
+    clipSource_->clear();
+    // Item data: the index, with bit 32 set for an audio clip.
+    const auto key = [](bool audio, std::size_t index) {
+        return QVariant::fromValue<qulonglong>(
+            (audio ? (1ULL << 32) : 0ULL) | static_cast<qulonglong>(index));
+    };
+    const auto swatch = [](const QColor& color) {
+        QPixmap pixmap(12, 12);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(color);
+        p.drawRoundedRect(QRectF(1, 1, 10, 10), 2, 2);
+        return QIcon(pixmap);
+    };
+    for (std::size_t i = 0; i < project_.patterns().size(); ++i)
+        clipSource_->addItem(swatch(Theme::patternColor(i)),
+            QString::fromStdString(project_.patterns()[i].name), key(false, i));
+    const QIcon audioIcon = Theme::icon(QStringLiteral("browser-file"));
+    bool separated = false;
+    for (std::size_t i = 0; i < project_.channels().size(); ++i) {
+        const Channel& channel = project_.channels()[i];
+        if (channel.samplePath.empty())
+            continue;
+        if (!separated) {
+            clipSource_->insertSeparator(clipSource_->count());
+            separated = true;
+        }
+        clipSource_->addItem(
+            audioIcon, tr("%1 (audio)").arg(QString::fromStdString(channel.name)), key(true, i));
+    }
+    const PlaylistView::ClipSource source = playlist_->source();
+    const int row = clipSource_->findData(key(source.audio, source.index));
+    clipSource_->setCurrentIndex(std::max(0, row));
+}
+
+int MainWindow::songEndTicks()
+{
+    long long end = 0;
+    for (const Clip& clip : project_.clips())
+        end = std::max<long long>(end, static_cast<long long>(clip.start) + project_.clipLength(clip));
+    for (const AudioClip& clip : project_.audioClips()) {
+        if (clip.channel >= project_.channels().size())
+            continue;
+        // As the playlist draws it: the part of the sample the clip plays.
+        const ClipAudio* info = clipAudio(project_.channels()[clip.channel].samplePath);
+        // A clip fitted to the tempo lasts its own beats, whatever the song's tempo.
+        const double tempo = clip.fitted() ? clip.sourceBpm : transport_->tempo();
+        const double whole = info->seconds * tempo / 60.0 * kTicksPerBeat;
+        double length = whole > 0.0 ? whole - clip.offset : kTicksPerBar;
+        if (clip.length > 0)
+            length = whole > 0.0 ? std::min<double>(clip.length, length) : clip.length;
+        end = std::max<long long>(end, clip.start + static_cast<long long>(std::ceil(std::max(0.0, length))));
+    }
+    const long long bars = (end + kTicksPerBar - 1) / kTicksPerBar;
+    return static_cast<int>(std::min<long long>(bars * kTicksPerBar, 1'000'000'000LL));
+}
+
+void MainWindow::applySongLoop()
+{
+    // Pattern mode loops the pattern itself; an empty song has nothing to loop.
+    const double end = songMode_ ? static_cast<double>(songEndTicks()) : 0.0;
+    if (end == songLoopEnd_)
+        return;
+    auto& engine = audio_.engine();
+    if ((end > 0.0 ? engine.setLoop(0.0, end) : engine.clearLoop()))
+        songLoopEnd_ = end; // else the queue was full: tried again next tick
+}
+
 void MainWindow::syncChannelRack()
 {
+    rackAudio_.setTempo(transport_->tempo());
+    fitTempo_ = transport_->tempo();
+    stretchUsed_.clear(); // filled again by the stretch provider during the sync
+    // Stretched copies no clip uses any more go, once there are several.
+    const auto pruneStretched = [this] {
+        if (stretched_.size() > 8)
+            std::erase_if(
+                stretched_, [this](const auto& entry) { return !stretchUsed_.contains(entry.first); });
+    };
     const auto errors
         = rackAudio_.sync(audio_.engine(), project_, currentPattern_, audio_.sampleRate(), songMode_);
+    pruneStretched();
     if (errors.empty())
         return;
     const auto& first = errors.front();
@@ -2044,6 +2665,21 @@ void MainWindow::refreshFromEngine()
         for (std::size_t i = 0; i < mixerPanel_->trackCount(); ++i)
             mixerPanel_->meter(i)->tick(dt);
     }
+
+    // Fitted audio clips follow the tempo: resampled at once, stretched
+    // copies once it settles (stretchedSample()).
+    if (transport_->tempo() != fitTempo_ && songMode_
+        && std::any_of(project_.audioClips().begin(), project_.audioClips().end(),
+            [](const AudioClip& clip) { return clip.fitted(); }))
+        syncChannelRack();
+
+    // Song mode: the song loops at its end (clips, tempo and mode may have changed).
+    if (running)
+        applySongLoop();
+
+    // The browser's preview strip: where the preview of its file is.
+    if (SampleWaveform* strip = browser_->waveform(); strip->isVisible())
+        strip->setPlaying(previewer_->playingPath() == strip->file() ? previewer_->playingSeconds() : -1.0);
 
     // A meter readable by eye: CPU about 4 times a second (every tick would
     // only flicker and repaint); memory changes slowly and costs a system

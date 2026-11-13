@@ -8,6 +8,7 @@
 #include <vloom/engine/sequencer/SequencerState.hpp>
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -47,6 +48,29 @@ public:
     /// waveforms. Uses the rate of the last sync().
     [[nodiscard]] std::shared_ptr<const vloom::SampleBuffer> sample(const std::string& path);
 
+    /// Whether the sample at `path` is loaded at `sampleRate` already.
+    [[nodiscard]] bool hasSample(const std::string& path, double sampleRate) const;
+    /// Takes a sample loaded elsewhere (on a background thread) at
+    /// `sampleRate` for `path`, so the next sync() does not load it again.
+    /// Ignored when the rack is at another rate.
+    void store(const std::string& path, std::shared_ptr<const vloom::SampleBuffer> sample, double sampleRate);
+
+    /// Turns a sample's path into the WAV file to load (e.g. a copy of an MP3
+    /// decoded at `sampleRate`, the rack's); empty with a reason on failure.
+    /// Without one, paths load as they are.
+    using SourceResolver
+        = std::function<std::string(const std::string& path, double sampleRate, std::string* error)>;
+    void setSourceResolver(SourceResolver resolver) { resolver_ = std::move(resolver); }
+
+    /// The song's tempo, for audio clips fitted to it (AudioClip::fit).
+    void setTempo(double bpm) { tempo_ = bpm > 0.0 ? bpm : tempo_; }
+    /// Gives an audio clip fitted by stretching its stretched sample: the
+    /// sample at `path` made `ratio` times as long, or null while it is not
+    /// ready (the clip then plays resampled meanwhile, its pitch following).
+    using StretchProvider
+        = std::function<std::shared_ptr<const vloom::SampleBuffer>(const std::string& path, double ratio)>;
+    void setStretchProvider(StretchProvider provider) { stretch_ = std::move(provider); }
+
     /// Forgets channels and samples, e.g. for a new project. Notes still
     /// ringing fade out once the next sync() publishes the new rack.
     void reset();
@@ -60,6 +84,9 @@ private:
     std::vector<std::shared_ptr<vloom::ChannelVoices>> voices_; ///< index = channel
     std::map<std::string, std::shared_ptr<const vloom::SampleBuffer>> samples_; ///< by path, at rate_
     std::map<std::string, std::string> failed_; ///< path -> error, at rate_
+    SourceResolver resolver_;
+    StretchProvider stretch_;
+    double tempo_ = 120.0;
     double rate_ = 0.0;
 };
 
