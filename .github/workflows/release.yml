@@ -1,0 +1,237 @@
+name: Release
+
+# Builds the installers:
+#   Windows: VloomDAW-<version>-windows-x64-setup.exe   (Inno Setup)
+#   macOS:   VloomDAW-<version>-macos-universal.dmg     (Apple silicon + Intel)
+#   Linux:   VloomDAW-<version>-linux-x86_64.AppImage
+#
+# - A tag v* (e.g. v0.2.0) builds them and opens a DRAFT GitHub Release with
+#   them and SHA256SUMS.txt; a maintainer reviews and publishes it.
+# - "Run workflow" (Actions tab) or a PR that changes packaging builds them
+#   as workflow artifacts only (kept 14 days).
+#
+# Not signed yet: Windows SmartScreen warns, and macOS needs right-click >
+# Open the first time (the app is ad-hoc signed so it runs on Apple silicon).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - packaging/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: package (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-2022 # has Inno Setup 6
+          - name: macos
+            os: macos-15
+          - name: linux
+            os: ubuntu-22.04 # an older glibc: the AppImage runs on more distributions
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout VloomDAW
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: VloomDAW
+          persist-credentials: false
+
+      - name: Read the pinned vloom-engine revision
+        id: engine
+        run: |
+          sha=$(sed -nE 's/^set\(VLOOM_ENGINE_GIT_TAG "([0-9a-f]{40})".*/\1/p' VloomDAW/cmake/Dependencies.cmake)
+          test -n "$sha" || { echo "::error::no 40-character VLOOM_ENGINE_GIT_TAG in cmake/Dependencies.cmake"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout vloom-engine
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: vloom-audio/vloom-engine
+          ref: ${{ steps.engine.outputs.sha }}
+          path: vloom-engine
+          persist-credentials: false
+
+      - name: Version
+        id: version
+        run: |
+          # A tag gives the version (v0.2.0 -> 0.2.0); otherwise the project's
+          # version plus the commit. Checked: it goes into file names.
+          base=$(sed -nE 's/^ *VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' VloomDAW/CMakeLists.txt | head -n1)
+          test -n "$base" || { echo "::error::no VERSION x.y.z in CMakeLists.txt"; exit 1; }
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            # The app reports the CMake VERSION: a tag that says otherwise would
+            # ship an installer named for one version holding another.
+            # (v0.2.0 and v0.2.0-rc1 both need VERSION 0.2.0.)
+            if [[ "${version%%-*}" != "$base" ]]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match VERSION $base in CMakeLists.txt"
+              exit 1
+            fi
+          else
+            version="${base}-dev.${GITHUB_SHA::7}"
+          fi
+          [[ "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || { echo "::error::unusable version '$version'"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Numbers only, for the Windows file version resource.
+          echo "numeric=$(grep -oE '^[0-9]+([.][0-9]+){0,3}' <<< "$version")" >> "$GITHUB_OUTPUT"
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: '6.10.3' # the same as CI (see ci.yml)
+          cache: true
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libasound2-dev \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 \
+            libegl1 libfontconfig1 libdbus-1-3
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cpm-cache
+          key: cpm-release-${{ runner.os }}-${{ hashFiles('VloomDAW/cmake/Dependencies.cmake', 'vloom-engine/cmake/Dependencies.cmake') }}
+
+      - name: Configure
+        working-directory: VloomDAW
+        env:
+          CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+        run: |
+          extra=()
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            # One app for Apple silicon and Intel; Qt 6.10 needs macOS 13.
+            extra+=(-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0)
+          elif [[ "$RUNNER_OS" == Linux ]]; then
+            extra+=(-DCMAKE_INSTALL_PREFIX=/usr)
+          fi
+          cmake --preset release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" "${extra[@]}"
+
+      - name: Build
+        working-directory: VloomDAW
+        env:
+          CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+        run: cmake --build --preset release --parallel 4
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUMERIC_VERSION: ${{ steps.version.outputs.numeric }}
+        run: |
+          cmake --install VloomDAW/build/release --config Release --prefix stage
+          windeployqt --release --no-translations --no-compiler-runtime stage/bin/VloomDAW.exe
+          # The MSVC runtime goes next to the app (app-local), so it runs on a
+          # PC without the VC++ Redistributable. windeployqt cannot find it
+          # outside a developer prompt: take it from Visual Studio directly.
+          vs="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' \
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)"
+          crt=$(ls -d "$(cygpath -u "$vs")"/VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT | sort -V | tail -n1)
+          test -d "$crt" || { echo "::error::MSVC runtime not found"; exit 1; }
+          cp "$crt"/*.dll stage/bin/
+          ls stage/bin/*.dll
+          iscc="$(command -v iscc || true)"
+          [[ -n "$iscc" ]] || iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          mkdir -p dist
+          # Inno Setup options take "-" as well as "/"; "-" keeps Git Bash from
+          # turning "/D..." into a path.
+          "$iscc" "-DAppVersion=$VERSION" "-DNumericVersion=$NUMERIC_VERSION" "-DStageDir=$(cygpath -w "$PWD/stage/bin")" \
+            "-DOutputDir=$(cygpath -w "$PWD/dist")" "$(cygpath -w "$PWD/VloomDAW/packaging/windows/VloomDAW.iss")"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cmake --install VloomDAW/build/release --prefix stage
+          macdeployqt stage/VloomDAW.app -always-overwrite
+          # Ad-hoc signature: unsigned code does not run on Apple silicon, and
+          # macdeployqt changed the binaries after the linker signed them.
+          codesign --force --deep --sign - stage/VloomDAW.app
+          codesign --verify --deep --strict stage/VloomDAW.app
+          mkdir -p dmg dist
+          cp -R stage/VloomDAW.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "VloomDAW $VERSION" -srcfolder dmg -ov -format UDZO \
+            "dist/VloomDAW-$VERSION-macos-universal.dmg"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          # The tools are AppImages themselves; this runs them without FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          DESTDIR="$PWD/AppDir" cmake --install VloomDAW/build/release
+          # Pinned releases, checked against their SHA-256 before they run.
+          mkdir -p tools dist
+          curl -fsSL -o tools/linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o tools/linuxdeploy-plugin-qt-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+          sha256sum -c - <<'SUMS'
+          c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  tools/linuxdeploy-x86_64.AppImage
+          15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724  tools/linuxdeploy-plugin-qt-x86_64.AppImage
+          SUMS
+          chmod +x tools/*.AppImage
+          export PATH="$PWD/tools:$PATH" QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export LDAI_OUTPUT="dist/VloomDAW-$VERSION-linux-x86_64.AppImage" OUTPUT="$LDAI_OUTPUT"
+          linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --executable AppDir/usr/bin/VloomDAW --executable AppDir/usr/bin/vloomdaw-plugin-probe \
+            --desktop-file VloomDAW/packaging/linux/vloomdaw.desktop \
+            --icon-file VloomDAW/resources/app/vloomdaw.png \
+            --plugin qt --output appimage
+          test -f "$LDAI_OUTPUT"
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: VloomDAW-${{ steps.version.outputs.version }}-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: draft release
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # creates the draft release
+    steps:
+      - name: Download the installers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: VloomDAW-*
+          merge-multiple: true
+          path: dist
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
+            --title "VloomDAW ${GITHUB_REF_NAME}" --generate-notes ./*

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=VloomDAW
+GenericName=Digital Audio Workstation
+Comment=Open-source pattern-based digital audio workstation
+Exec=VloomDAW
+Icon=vloomdaw
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+Keywords=DAW;music;audio;sequencer;
