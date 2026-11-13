@@ -2,10 +2,10 @@
 ; Copyright (C) 2026 Vloom Audio contributors
 ;
 ; Windows installer (Inno Setup 6). Built by .github/workflows/release.yml:
-;   iscc /DAppVersion=0.2.0 /DNumericVersion=0.2.0 /DStageDir=<windeployqt'd bin folder>
-;        /DOutputDir=<dir> VloomDAW.iss
+;   iscc -DAppVersion=0.2.0 -DNumericVersion=0.2.0 -DStageDir=<windeployqt'd bin folder>
+;        -DOutputDir=<dir> VloomDAW.iss
 ; StageDir holds VloomDAW.exe, vloomdaw-plugin-probe.exe, the Qt DLLs and
-; plugins and the MSVC runtime, as windeployqt left them.
+; plugins (windeployqt) and the MSVC runtime DLLs (app-local).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"

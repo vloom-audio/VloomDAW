@@ -74,10 +74,18 @@ jobs:
         run: |
           # A tag gives the version (v0.2.0 -> 0.2.0); otherwise the project's
           # version plus the commit. Checked: it goes into file names.
+          base=$(sed -nE 's/^ *VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' VloomDAW/CMakeLists.txt | head -n1)
+          test -n "$base" || { echo "::error::no VERSION x.y.z in CMakeLists.txt"; exit 1; }
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             version="${GITHUB_REF_NAME#v}"
+            # The app reports the CMake VERSION: a tag that says otherwise would
+            # ship an installer named for one version holding another.
+            # (v0.2.0 and v0.2.0-rc1 both need VERSION 0.2.0.)
+            if [[ "${version%%-*}" != "$base" ]]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match VERSION $base in CMakeLists.txt"
+              exit 1
+            fi
           else
-            base=$(sed -nE 's/^ *VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' VloomDAW/CMakeLists.txt | head -n1)
             version="${base}-dev.${GITHUB_SHA::7}"
           fi
           [[ "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || { echo "::error::unusable version '$version'"; exit 1; }
@@ -132,12 +140,23 @@ jobs:
           NUMERIC_VERSION: ${{ steps.version.outputs.numeric }}
         run: |
           cmake --install VloomDAW/build/release --config Release --prefix stage
-          windeployqt --release --no-translations --compiler-runtime stage/bin/VloomDAW.exe
+          windeployqt --release --no-translations --no-compiler-runtime stage/bin/VloomDAW.exe
+          # The MSVC runtime goes next to the app (app-local), so it runs on a
+          # PC without the VC++ Redistributable. windeployqt cannot find it
+          # outside a developer prompt: take it from Visual Studio directly.
+          vs="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' \
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)"
+          crt=$(ls -d "$(cygpath -u "$vs")"/VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT | sort -V | tail -n1)
+          test -d "$crt" || { echo "::error::MSVC runtime not found"; exit 1; }
+          cp "$crt"/*.dll stage/bin/
+          ls stage/bin/*.dll
           iscc="$(command -v iscc || true)"
           [[ -n "$iscc" ]] || iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           mkdir -p dist
-          "$iscc" "/DAppVersion=$VERSION" "/DNumericVersion=$NUMERIC_VERSION" "/DStageDir=$(cygpath -w "$PWD/stage/bin")" \
-            "/DOutputDir=$(cygpath -w "$PWD/dist")" VloomDAW/packaging/windows/VloomDAW.iss
+          # Inno Setup options take "-" as well as "/"; "-" keeps Git Bash from
+          # turning "/D..." into a path.
+          "$iscc" "-DAppVersion=$VERSION" "-DNumericVersion=$NUMERIC_VERSION" "-DStageDir=$(cygpath -w "$PWD/stage/bin")" \
+            "-DOutputDir=$(cygpath -w "$PWD/dist")" "$(cygpath -w "$PWD/VloomDAW/packaging/windows/VloomDAW.iss")"
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
