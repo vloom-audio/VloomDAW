@@ -2,10 +2,16 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
-#include <QList>
+#include "core/TransportLayout.hpp"
+
 #include <QToolBar>
 
+#include <vector>
+
 class QAction;
+class QEvent;
+class QFrame;
+class QToolButton;
 class QResizeEvent;
 class QShowEvent;
 
@@ -26,6 +32,12 @@ class ViewButtons;
 ///
 /// A pure view: it only emits what the user did and shows what it is told.
 /// It knows nothing about the engine; MainWindow connects the two.
+///
+/// Its groups are laid out by core/TransportLayout, not by QToolBar: the
+/// displays sit in the middle of the window, and when the window is too
+/// narrow the least important groups move into a drop-down behind a »
+/// button (CPU / RAM first, then pitch, tap / metronome, views, volume, key,
+/// patterns; play, tempo and position always stay).
 class TransportBar : public QToolBar {
     Q_OBJECT
 
@@ -81,12 +93,23 @@ signals:
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
-    void scheduleRecentre();
-    /// Sizes centreSpacer_ so the tempo and position displays sit in the
-    /// middle of the bar.
-    void recentre();
+    /// One group of controls and how it takes part in the layout.
+    struct Group {
+        QWidget* widget;
+        TransportItem::Zone zone;
+        int gapBefore;
+        int overflowRank;
+    };
+
+    void scheduleRelayout();
+    /// Places the groups for the current width; moves groups between the bar
+    /// and the drop-down.
+    void relayout();
+    void toggleOverflow();
+    void showOverflow();
 
     QAction* makeAction(
         const QString& iconName, const QString& text, const QString& tip, const QKeySequence& shortcut);
@@ -104,9 +127,12 @@ private:
     ViewButtons* viewButtons_ = nullptr;
     Knob* volumeKnob_ = nullptr;
     Knob* pitchKnob_ = nullptr;
-    QWidget* leadingSpace_ = nullptr;
-    QWidget* centreSpacer_ = nullptr;
-    QList<QWidget*> rightSide_; ///< widgets right of the displays, fixed size
+    std::vector<Group> groups_; ///< in bar order
+    QWidget* rowHolder_ = nullptr; ///< the only tool bar item: gives the bar its height
+    QToolButton* moreButton_ = nullptr; ///< » : opens overflow_
+    QFrame* overflow_ = nullptr; ///< drop-down with the groups that do not fit
+    int leadingSpace_ = 0; ///< room for the macOS window buttons
+    bool relayoutPending_ = false;
     TempoDisplay* tempoDisplay_ = nullptr;
     PositionDisplay* positionDisplay_ = nullptr;
     bool playing_ = false;

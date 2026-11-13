@@ -289,9 +289,13 @@ void MainWindow::createToolBars()
     connect(transport_->viewButtons(), &ViewButtons::viewRequested, this, &MainWindow::showView);
 
     // Transport and view keys (Space, F5-F9, …) also work while a detached
-    // mixer or playlist window has the focus.
-    for (QAction* action : transport_->findChildren<QAction*>())
+    // mixer or playlist window has the focus, and while their buttons sit in
+    // the transport's » drop-down (Qt ignores shortcuts of actions whose
+    // widgets are all hidden; the main window is always shown).
+    for (QAction* action : transport_->findChildren<QAction*>()) {
         action->setShortcutContext(Qt::ApplicationShortcut);
+        addAction(action);
+    }
     // The key is shown only for now; the piano roll will highlight its scale.
     const auto announceKey = [this] {
         const KeyDisplay* key = transport_->keyDisplay();

@@ -27,7 +27,8 @@ add_executable(vloomdaw_tests
     core/SampleFolderTests.cpp
     core/ScalesTests.cpp
     core/TapTempoTests.cpp
-    core/ThemePresetsTests.cpp)
+    core/ThemePresetsTests.cpp
+    core/TransportLayoutTests.cpp)
 
 target_link_libraries(vloomdaw_tests PRIVATE vloomdaw_core Catch2::Catch2WithMain)
 vloom_set_warnings(vloomdaw_tests)

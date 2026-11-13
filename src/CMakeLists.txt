@@ -27,6 +27,7 @@ target_sources(vloomdaw_core PRIVATE
     core/Scales.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
+    core/TransportLayout.cpp
 
     # audio — owns the engine and the hardware device
     audio/AudioController.cpp
