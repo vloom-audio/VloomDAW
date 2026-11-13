@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+class QLineEdit;
+
 namespace vloomdaw {
 
 /// What the playlist needs to draw an audio clip.
@@ -31,8 +33,8 @@ struct ClipAudio {
 /// make its pattern current. Ctrl+wheel zooms horizontally. Drop a WAV file
 /// (from the browser or the desktop) on a track for an audio clip; audio
 /// clips move and delete like pattern clips. Dropped below the last track,
-/// it asks for a new track. Double-click a
-/// track name to rename it; right-click it to rename or delete the track.
+/// it asks for a new track. Double-click a track name to rename it inline;
+/// right-click it to rename or delete the track.
 class PlaylistView : public QAbstractScrollArea {
     Q_OBJECT
 
@@ -62,6 +64,7 @@ signals:
     void audioClipChanged(std::size_t index, vloomdaw::AudioClip clip);
     void audioClipRemoved(std::size_t index);
     void trackRenameRequested(std::size_t track);
+    void trackNameEdited(std::size_t track, const QString& name);
     void trackRemoveRequested(std::size_t track);
     void trackMoveRequested(std::size_t from, std::size_t to);
 
@@ -74,6 +77,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void scrollContentsBy(int dx, int dy) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dragLeaveEvent(QDragLeaveEvent* event) override;
@@ -89,6 +93,7 @@ private:
     [[nodiscard]] int trackCount() const;
     /// The track whose name is at `pos`, or -1.
     [[nodiscard]] int headerTrackAt(const QPoint& pos) const;
+    [[nodiscard]] QRect trackNameRect(int track) const;
     [[nodiscard]] int yOfTrack(int track) const;
     /// A clip in the playlist: a pattern clip or an audio clip, by index.
     struct ClipRef {
@@ -106,6 +111,8 @@ private:
     [[nodiscard]] std::optional<std::pair<int, int>> dropTarget(const QPoint& pos) const;
     void updateScrollBars();
     void beginDrag(ClipRef clip, const QPoint& pos);
+    void startTrackNameEdit(int track);
+    void commitTrackNameEdit();
 
     const Project* project_ = nullptr;
     std::size_t currentPattern_ = 0;
@@ -121,6 +128,9 @@ private:
     AudioClip dragStartAudio_;
     double dragStartTick_ = 0.0;
     int dragStartTrack_ = 0;
+
+    QLineEdit* inlineEditor_ = nullptr;
+    int editingTrack_ = -1;
 };
 
 } // namespace vloomdaw

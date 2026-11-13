@@ -45,7 +45,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Playlist tracks: a new project starts with one track instead of 16; "+ Track"
   in the playlist header adds one (up to 500), "−"
   deletes the last, and a track name's right-click menu renames or deletes that
-  track (double-click the name to rename). Deleting a track with clips asks
+  track (double-click or right-click Rename… to rename inline; Enter confirms,
+  Escape cancels). Deleting a track with clips asks
   first; the clips on later tracks move up with their track.
 - Add and delete mixer inserts: "+ Insert" in the mixer header adds one at the
   end (up to 125, the engine's limit), "−" deletes the last, and a strip's
