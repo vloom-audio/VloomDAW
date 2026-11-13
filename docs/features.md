@@ -26,10 +26,11 @@ Everything VloomDAW has today, with how far each feature goes. The
 | Song position LCD | ✅ | Bar · beat · tick (960 PPQ), or click for min : sec . ms |
 | Master volume knob | ✅ | Drives the engine's master gain |
 | Pitch knob | ⏳ | M2: transposes instruments |
-| Pattern / song mode | ⏳ | `L`; the channel rack always loops the current pattern, song mode arrives with the playlist in M3 |
+| Pattern / song mode | ✅ | `L`: PAT loops the current pattern; SONG plays the playlist (pattern and audio clips) from the playhead, once — looping the song arrives in M3 |
 | Record arm | 🎨 | `R`; keeps the armed state only; audio input in M6 |
 | Key LCD (root note and scale) | ✅ | C .. B; major, minors, modes, pentatonics, blues, chromatic; shades the piano roll |
-| Pattern selector | ✅ | Add, pick and delete patterns; the channel rack plays the selected one |
+| Pattern selector | ✅ | Add, pick and delete patterns by name; the channel rack plays the selected one |
+| Patterns menu | ✅ / ⏳ | Find first / next empty (`Shift+F4`, `F4`, `Ctrl+F4` without naming), Rename (`F2`), Transpose, Insert one (`Shift+Ctrl+Ins`), Clone (`Shift+Ctrl+C`), Delete (`Shift+Ctrl+Del`, asks when the pattern is not empty), Move up / down (`Shift+Ctrl+Up / Down`), Split by channel. Colours and rendering to an audio clip arrive in M3 |
 | CPU and RAM meter | ✅ | Engine load and process memory |
 
 ## Song editors
@@ -40,19 +41,19 @@ the transport in all three editors.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Channel rack (`F6`) | ✅ | 16 step pads per channel: click or drag to paint, right-click to clear; mute light; add channels; double-click a name for its piano roll |
+| Channel rack (`F6`) | ✅ | 16 step pads per bar, 1-16 bars per pattern (+ after the last pad or + Bar / − in the header): click or drag to paint, right-click to clear; mute light; volume and pan knobs (drag, scroll, double-click to reset); add channels; double-click a name for its piano roll |
 | Samples on channels | ✅ | Drop a WAV file from the browser or the desktop on a channel (below the last one for a new channel); edits apply while playing without cutting notes; channels without a sample are dimmed |
 | Channel volume | ✅ | Knob per channel: drag (`Shift`: fine), scroll, double-click for 0 dB |
 | Channel routing | ✅ | Insert box per channel: click to pick a mixer insert, or scroll; `-` plays straight into the master |
 | Channel pan | ⏳ | M1.5: the engine supports it, no control in the rack yet |
 | Piano roll (`F7`) | 🎨 | Add, move, resize and delete notes; snap (`Alt`: off); `Ctrl+wheel` zoom; scale shading. Plays in M2 |
-| Playlist (`F5`) | 🎨 | 16 tracks; place, move (`Shift`: snap to beats) and delete pattern clips. Plays in M3 |
+| Playlist (`F5`) | 🎨 | One track in a new project, 1-500 with + Track / − in the header; double-click a track name to rename it, right-click to rename, move up / down or delete; place, move (`Shift`: snap to beats) and delete pattern clips; drop WAV files (browser or desktop) for audio clips with a waveform, below the last track for a new one; each plays through a channel of the channel rack (made for the file, or the one already playing it), so its volume, pan, mute and insert apply. Dropping one turns song mode on. Plays in song mode |
 
 ## Mixer
 
 | Feature | Status | Notes |
 |---|---|---|
-| Mixer panel (`F9`) | ✅ / 🎨 | Master and 16 insert tracks: pan, fader (unity at 80 %), dB readout, mute, solo |
+| Mixer panel (`F9`) | ✅ / 🎨 | Master and 16 insert tracks to start, 0-125 with + Insert / − in the header or Delete in a strip's right-click menu; double-click a name (or right-click, Rename…) to name an insert; right-click, Move Left / Right to reorder (channels follow their insert): pan, fader (unity at 80 %), dB readout, mute, solo |
 | Master track | ✅ | Gain, pan and mute drive the engine; the meter shows the real output |
 | Insert tracks | ✅ | Fader, pan, mute, solo and meter act on the channels routed to them |
 | Peak meters | ✅ | Stereo, with peak hold and a clip light |
@@ -73,8 +74,9 @@ the transport in all three editors.
 | Feature | Status | Notes |
 |---|---|---|
 | Sample browser | ✅ | Audio files (wav, aiff, flac, mp3, ogg) in your sample folders; add or remove folders; search by name (`Alt+F8`) |
+| Refresh | ✅ | ⟳ button, or `F5` in the list: reads the folder again; open folders stay open, the selection and scroll stay |
 | Drag samples onto the channel rack | ✅ | |
-| Preview samples | ⏳ | M1.5 |
+| Preview samples | ✅ | M1.5 |
 
 ## Windows and layout
 
@@ -87,7 +89,7 @@ the transport in all three editors.
 | macOS window | ✅ | Tool bar in the title bar row; full screen keeps the window buttons |
 | Detached panel windows | ✅ | No separate title bar on Windows or macOS: the panel header reads "VLOOM MIXER" etc., holds the window buttons and moves the window; named "VLOOM Mixer" etc. in the taskbar and the Dock |
 | Window size and position remembered | ✅ | Also each detached window and the open sidebar page |
-| Narrow windows | ✅ | Transport items that do not fit go behind a » button |
+| Narrow windows | ✅ | Transport groups that do not fit open from a » drop-down (CPU / RAM first, then pitch, tap / metronome, views, volume, key, patterns); the bar keeps one row and its shortcuts keep working |
 
 ## Settings and theme
 
@@ -109,6 +111,7 @@ the transport in all three editors.
 | Feature | Status | Notes |
 |---|---|---|
 | New project | ✅ | `Ctrl/Cmd+N`: stop, rewind, reset tempo |
+| Edit menu: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Select All | ⏳ | Menu and shortcuts exist (`Ctrl/Cmd+Z`, `Shift+Ctrl/Cmd+Z`, `Ctrl+Y` on Windows, …) and say when they arrive: undo at the start of M2, the rest with the M2 editing tools. Text fields keep their own keys |
 | Open, Open Recent, Save, Save As, Import, Export | ⏳ | Menu items and shortcuts exist; WAV export in M3, project files and import in M4 |
 
 ## Performance and diagnostics

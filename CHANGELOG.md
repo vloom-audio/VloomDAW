@@ -15,6 +15,67 @@ and the project uses [Semantic Versioning](https://semver.org/).
   of following the engine's `main`.
 
 ### Added
+- Pan knob for each channel in the channel rack, beside the volume knob: drag
+  (Shift: fine), scroll, double-click for the centre; the tooltip reads C,
+  L 35, R 100.
+- Browser refresh: the ⟳ button, or F5 while the browser's list has the
+  keyboard (F5 still opens the playlist elsewhere), reads the folder again.
+  Open folders stay open and the selection and scroll position stay; a search
+  runs again.
+- Reorder mixer inserts (right-click a strip, Move Left / Right) and playlist
+  tracks (right-click a track name, Move Up / Down). Settings, names and
+  clips go along; channels follow their insert.
+- Song mode plays the playlist: with SONG (`L`) on the transport, Play runs
+  through the pattern clips (each channel's steps of that pattern) and the
+  audio clips from the playhead; starting or jumping into the middle of an
+  audio clip plays it from there. PAT still loops the current pattern.
+- Audio clips in the playlist: drop a WAV file from the browser or the
+  desktop on a track (snapped to the bar; below the last track adds one). As
+  in FL Studio, the clip plays through a channel of the channel rack: a new
+  one named after the file, or the channel already playing it, so the
+  channel's volume, pan, mute and mixer insert apply. The clip shows the
+  channel's name and the waveform and is as long as the sound at the current
+  tempo; drag to move (Shift: beats), right-click to delete. Dropping one in
+  pattern mode turns song mode on, so Play is not silent.
+- Name mixer inserts: double-click an insert's name, or right-click its strip
+  and choose Rename…; an empty name gives back "Insert N". A long name is cut
+  with "…" on the strip and shown whole in its tooltip; the channel rack's
+  insert menu lists it as "3 · Drums". A named insert keeps its name when an
+  earlier one is deleted.
+- Playlist tracks: a new project starts with one track instead of 16; "+ Track"
+  in the playlist header adds one (up to 500), "−"
+  deletes the last, and a track name's right-click menu renames or deletes that
+  track (double-click the name to rename). Deleting a track with clips asks
+  first; the clips on later tracks move up with their track.
+- Add and delete mixer inserts: "+ Insert" in the mixer header adds one at the
+  end (up to 125, the engine's limit), "−" deletes the last, and a strip's
+  right-click menu deletes that insert. The inserts after a deleted one keep
+  their settings and take the numbers one lower; channels routed to it play
+  into the master (it asks first when there are some), and channels on later
+  inserts follow theirs. The channel rack's insert menu follows the mixer.
+- More step pads in the channel rack: the "+" after the last pad, or "+ Bar" in
+  the header, adds a bar of 16 pads to every channel of the current pattern (up
+  to 16 bars); "−" removes the last bar, asking first when it has steps on. Each
+  pattern keeps its own length, which its loop and its playlist clips follow,
+  and clone and split by channel keep it.
+- Sample preview in the browser: clicking a file plays it through the master
+  bus, even while the transport is stopped; clicking it again stops it, and so
+  does Esc or Stop. With Auto preview (the speaker button next to search,
+  remembered) the arrow keys play each file they reach. Files load on a worker
+  thread and the last 16 stay cached, so moving through a big folder never
+  stalls the UI; a file that cannot be read says why in the status bar.
+- Patterns menu (after Edit), as in FL Studio: find the first or next empty
+  pattern (Shift+F4, F4, Ctrl+F4 without naming), rename (F2), transpose every
+  note, insert one (Shift+Ctrl+Ins), clone (Shift+Ctrl+C), delete
+  (Shift+Ctrl+Del; asks first when the pattern has steps or notes, as there is no
+  undo yet), move up / down (Shift+Ctrl+Up / Down) and split by channel.
+  Playlist clips follow their pattern through every change. Colours and
+  rendering a pattern to an audio clip say they arrive in M3.
+- Edit menu between File and Options: Undo (Ctrl/Cmd+Z), Redo (Shift+Ctrl/Cmd+Z,
+  also Ctrl+Y on Windows), Cut, Copy, Paste, Duplicate, Delete and Select All with
+  their shortcuts. Like Open and Save, they say when they arrive (undo at the
+  start of milestone M2, the rest with the M2 editing tools); a focused text
+  field keeps its own copy, paste, undo and select-all keys.
 - Channel rack volume and routing: each channel has a volume knob (drag, Shift
   for fine, scroll, double-click for 0 dB) and an insert box; click it to send
   the channel to one of the mixer's 16 inserts ("-" plays straight into the
@@ -124,6 +185,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Window size and position are remembered between sessions
 
 ### Fixed
+- The pattern selector shows the project's pattern names: after deleting a
+  pattern it showed renumbered names that no longer matched the panel titles,
+  and deleting no longer renames the remaining patterns.
+- A narrow window no longer turns the transport bar into two rows with the
+  second one sometimes blank: groups that do not fit open from a » drop-down
+  instead, the bar keeps its height and the displays stay centred while there
+  is room. Shortcuts of the moved buttons (T, Ctrl/Cmd+M, F5-F9) keep working.
 - Opening a big folder in the sample browser no longer freezes the app: folders
   are read and sorted on a background thread and their rows added at once (a
   folder of 20 000 samples now shows in about 50 ms instead of hanging the
