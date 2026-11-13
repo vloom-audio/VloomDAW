@@ -24,6 +24,7 @@ struct AppSettings {
     // Browser
     QStringList browserFolders; ///< the user's sample folders
     QString browserFolder; ///< the one shown
+    bool browserAutoPreview = true; ///< play files as the arrow keys reach them
 
     // General
     PositionMode startPositionMode = PositionMode::BarsBeats;

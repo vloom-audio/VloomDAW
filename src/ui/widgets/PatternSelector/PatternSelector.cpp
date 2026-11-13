@@ -31,13 +31,11 @@ PatternSelector::PatternSelector(QSize iconSize, QWidget* parent)
     layout->setContentsMargins(3, 3, 3, 3);
     layout->setSpacing(2);
 
-    // Pattern actions are only ever appended, and only the last one is ever
-    // removed (never from inside its own triggered() signal).
     menu_ = new QMenu(this);
     group_ = new QActionGroup(menu_);
     separator_ = menu_->addSeparator();
-    menu_->addAction(tr("Add Pattern"), this, &PatternSelector::addPattern);
-    deleteAction_ = menu_->addAction(tr("Delete Pattern"), this, &PatternSelector::deleteCurrentPattern);
+    menu_->addAction(tr("Add Pattern"), this, &PatternSelector::addRequested);
+    deleteAction_ = menu_->addAction(tr("Delete Pattern"), this, &PatternSelector::deleteRequested);
 
     button_ = new QToolButton(this);
     button_->setObjectName(QStringLiteral("patternButton"));
@@ -45,106 +43,66 @@ PatternSelector::PatternSelector(QSize iconSize, QWidget* parent)
     button_->setPopupMode(QToolButton::InstantPopup);
     button_->setToolButtonStyle(Qt::ToolButtonTextOnly);
     button_->setFocusPolicy(Qt::NoFocus);
-    button_->setToolTip(tr("Current pattern"));
-    // Wide enough for "Pattern 999", so the bar does not shift as numbers grow.
-    button_->setMinimumWidth(
+    // Wide enough for "Pattern 999", so the bar does not shift as numbers
+    // grow; longer names are elided (the tool tip has them in full).
+    button_->setFixedWidth(
         QFontMetrics(button_->font()).horizontalAdvance(tr("Pattern %1").arg(kMaxPatterns)) + 34);
     layout->addWidget(button_);
 
-    const auto addIconButton = [&](const QString& icon, const QString& tip, auto slot) {
+    const auto addIconButton = [&](const QString& icon, const QString& tip, auto signal) {
         auto* b = new QToolButton(this);
         b->setIcon(Theme::icon(icon)); // themed; fades when disabled
         b->setIconSize(iconSize);
         b->setFocusPolicy(Qt::NoFocus);
         b->setToolTip(tip);
         b->setAccessibleName(tip); // icon only: screen readers need a name
-        connect(b, &QToolButton::clicked, this, slot);
+        connect(b, &QToolButton::clicked, this, signal);
         layout->addWidget(b);
         return b;
     };
-    addIconButton(QStringLiteral("plus"), tr("Add a pattern"), &PatternSelector::addPattern);
+    addIconButton(QStringLiteral("plus"), tr("Add a pattern"), &PatternSelector::addRequested);
     deleteButton_ = addIconButton(
-        QStringLiteral("minus"), tr("Delete the current pattern"), &PatternSelector::deleteCurrentPattern);
+        QStringLiteral("minus"), tr("Delete the current pattern"), &PatternSelector::deleteRequested);
 
-    appendAction(1);
-    sync();
+    setPatterns(names_, 0);
 }
 
-void PatternSelector::appendAction(int number)
+void PatternSelector::setPatterns(const QStringList& names, int current)
 {
-    auto* action = new QAction(tr("Pattern %1").arg(number), group_);
-    action->setCheckable(true);
-    menu_->insertAction(separator_, action);
-    connect(action, &QAction::triggered, this, [this, number] {
-        if (number == current_)
-            return;
-        current_ = number;
-        sync();
-        emit currentChanged(number);
-    });
-}
+    names_ = names.isEmpty() ? QStringList{QStringLiteral("Pattern 1")} : names;
+    current_ = std::clamp(current, 0, static_cast<int>(names_.size()) - 1);
 
-void PatternSelector::setCurrent(int number)
-{
-    number = std::clamp(number, 1, count_);
-    if (number == current_)
-        return;
-    current_ = number;
-    sync();
-}
-
-void PatternSelector::addPattern()
-{
-    if (count_ >= kMaxPatterns)
-        return;
-    ++count_;
-    appendAction(count_);
-    current_ = count_;
-    sync();
-    emit currentChanged(current_);
-}
-
-void PatternSelector::deleteCurrentPattern()
-{
-    if (count_ <= 1)
-        return;
-    const int deleted = current_;
-    // Names are just numbers, so dropping the last action renumbers the rest.
-    QAction* last = group_->actions().constLast();
-    group_->removeAction(last);
-    menu_->removeAction(last);
-    last->deleteLater();
-    --count_;
-    current_ = std::max(1, deleted - 1);
-    sync();
-    emit patternDeleted(deleted);
-    emit currentChanged(current_);
-}
-
-void PatternSelector::reset()
-{
-    // Drop every pattern but the first (deleteLater: never inside a signal
-    // of the action being removed).
-    const auto actions = group_->actions();
-    for (qsizetype i = 1; i < actions.size(); ++i) {
-        group_->removeAction(actions[i]);
-        menu_->removeAction(actions[i]);
-        actions[i]->deleteLater();
+    // Rebuilt every time: renames and moves change any row. Old actions go
+    // with deleteLater, as this can run inside one's triggered() signal.
+    for (QAction* old : group_->actions()) {
+        group_->removeAction(old);
+        menu_->removeAction(old);
+        old->deleteLater();
     }
-    count_ = 1;
-    current_ = 1;
+    for (int i = 0; i < names_.size(); ++i) {
+        auto* action = new QAction(names_[i], group_);
+        action->setCheckable(true);
+        menu_->insertAction(separator_, action);
+        connect(action, &QAction::triggered, this, [this, i] {
+            if (i != current_)
+                emit patternPicked(i);
+        });
+    }
     sync();
 }
 
 void PatternSelector::sync()
 {
-    button_->setText(tr("Pattern %1").arg(current_));
+    const QString name = names_[current_];
+    button_->setText(button_->fontMetrics().elidedText(name, Qt::ElideRight, button_->width() - 34));
+    button_->setToolTip(tr("Current pattern: %1").arg(name));
     const auto actions = group_->actions();
-    if (current_ >= 1 && current_ <= actions.size())
-        actions[current_ - 1]->setChecked(true);
-    deleteButton_->setEnabled(count_ > 1);
-    deleteAction_->setEnabled(count_ > 1);
-    deleteAction_->setText(tr("Delete Pattern %1").arg(current_));
+    if (current_ < actions.size())
+        actions[current_]->setChecked(true);
+    const bool canDelete = names_.size() > 1;
+    deleteButton_->setEnabled(canDelete);
+    deleteAction_->setEnabled(canDelete);
+    deleteAction_->setText(tr("Delete %1").arg(name));
 }
 
 } // namespace vloomdaw

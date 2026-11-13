@@ -4,6 +4,8 @@
 
 namespace vloomdaw {
 
+static_assert(MixerModel::kMaxInserts == static_cast<std::size_t>(vloom::kMaxInserts));
+
 std::unique_ptr<const vloom::MixerState> engineMixerState(const MixerModel& mixer)
 {
     auto state = std::make_unique<vloom::MixerState>();

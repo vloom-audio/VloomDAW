@@ -4,6 +4,7 @@
 
 #include "core/SampleFolder.hpp"
 #include "ui/FilePaths.hpp"
+#include "ui/browser/BrowserRoles.hpp"
 
 #include <QMimeData>
 #include <QThread>
@@ -107,6 +108,10 @@ QVariant SampleTreeModel::data(const QModelIndex& index, int role) const
             return {};
         return node->kind == Kind::Folder ? folderIcon_ : fileIcon_;
     case Qt::ToolTipRole:
+        return node->kind == Kind::Note ? QVariant() : QVariant(node->path);
+    case kSampleFileRole:
+        return node->kind == Kind::File ? QVariant(node->path) : QVariant();
+    case kItemPathRole:
         return node->kind == Kind::Note ? QVariant() : QVariant(node->path);
     default:
         return {};

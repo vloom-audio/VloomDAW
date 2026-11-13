@@ -24,6 +24,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -49,6 +50,7 @@ class DeviceScanner;
 class AudioController;
 class ActivityBar;
 class BrowserPanel;
+class SamplePreviewer;
 class ChannelRackView;
 class MixerPanel;
 class DetachButton;
@@ -57,6 +59,7 @@ class PanelFrame;
 class PerformanceOverlay;
 class PianoRollView;
 class PlaylistView;
+struct ClipAudio;
 class PluginManagerDialog;
 class PluginsPanel;
 class TransportBar;
@@ -106,6 +109,35 @@ private:
     void updatePanelContexts();
     /// Re-reads the project into every editor (after a structural change).
     void refreshEditors();
+
+    // ---- patterns (the Patterns menu and the pattern selector)
+    /// The selector shows the project's pattern names and the current one.
+    void syncPatternSelector();
+    /// After patterns were added, removed or reordered: editors, selector and
+    /// engine follow, with `select` current.
+    void patternsChanged(std::size_t select);
+    /// False (and a status message) when `more` patterns would pass the limit.
+    bool roomForPatterns(std::size_t more);
+    void findEmptyPattern(bool fromStart, bool askName);
+    void renameCurrentPattern();
+    void transposeCurrentPattern();
+    void insertPattern();
+    void cloneCurrentPattern();
+    void deleteCurrentPattern();
+    void moveCurrentPattern(int by);
+    void splitCurrentPatternByChannel();
+    /// Adds (+1) or removes (-1) a bar of step pads in the current pattern.
+    void changeBars(int bars);
+    void addMixerInsert();
+    void removeMixerInsert(std::size_t track);
+    void renameMixerInsert(std::size_t track);
+    void addPlaylistTrack();
+    void removePlaylistTrack(std::size_t track);
+    void renamePlaylistTrack(std::size_t track);
+    void dropAudio(const QString& path, int track, int start);
+    [[nodiscard]] const ClipAudio* clipAudio(const std::string& path);
+    /// The channel rack's insert menu follows the mixer.
+    void syncInsertNames();
     void setPerformanceOverlayVisible(bool visible);
     void placePerformanceOverlay();
     void showSidePanel(int index);
@@ -188,6 +220,9 @@ private:
     MixerModel mixer_;
     Project project_;
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
+    bool songMode_ = false; ///< the engine plays the playlist instead of looping the pattern
+    /// Length and waveform of the playlist's audio files, by path.
+    std::map<std::string, std::shared_ptr<const ClipAudio>> clipAudio_;
     std::size_t currentPattern_ = 0;
     std::size_t currentChannel_ = 0;
 
@@ -198,6 +233,7 @@ private:
     QSplitter* splitter_ = nullptr;
     QStackedWidget* sidePanels_ = nullptr;
     BrowserPanel* browser_ = nullptr;
+    SamplePreviewer* previewer_ = nullptr; ///< plays the browser's files
     PluginsPanel* pluginsPanel_ = nullptr;
     PluginManagerDialog* pluginManager_ = nullptr; ///< created on first use
     PluginStore pluginStore_;

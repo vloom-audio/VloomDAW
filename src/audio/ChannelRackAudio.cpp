@@ -10,8 +10,38 @@
 
 namespace vloomdaw {
 
+std::shared_ptr<const vloom::SampleBuffer> ChannelRackAudio::load(
+    const std::string& path, std::size_t owner, std::vector<LoadError>* errors)
+{
+    if (path.empty() || rate_ <= 0.0 || failed_.contains(path))
+        return nullptr;
+    if (const auto found = samples_.find(path); found != samples_.end())
+        return found->second;
+    std::string error;
+    std::shared_ptr<const vloom::SampleBuffer> sample;
+    try {
+        sample = vloom::loadSample(path, rate_, &error);
+    } catch (const std::exception&) {
+        // Out of memory or a file system error: report, keep running.
+        error = "not enough memory to load it";
+    }
+    if (!sample) {
+        failed_.emplace(path, error);
+        if (errors != nullptr)
+            errors->push_back({owner, path, error});
+        return nullptr;
+    }
+    samples_.emplace(path, sample);
+    return sample;
+}
+
+std::shared_ptr<const vloom::SampleBuffer> ChannelRackAudio::sample(const std::string& path)
+{
+    return load(path, kAudioClip, nullptr);
+}
+
 std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
-    vloom::Engine& engine, const Project& project, std::size_t pattern, double sampleRate)
+    vloom::Engine& engine, const Project& project, std::size_t pattern, double sampleRate, bool song)
 {
     std::vector<LoadError> errors;
     if (sampleRate <= 0.0 || pattern >= project.patterns().size())
@@ -44,33 +74,36 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
         if (c < p.channels.size())
             for (const bool on : p.channels[c].steps)
                 out.steps.push_back(on ? 1 : 0);
-
-        const std::string& path = channel.samplePath;
-        if (!path.empty() && !failed_.contains(path)) {
-            auto found = samples_.find(path);
-            if (found == samples_.end()) {
-                std::string error;
-                std::shared_ptr<const vloom::SampleBuffer> sample;
-                try {
-                    sample = vloom::loadSample(path, sampleRate, &error);
-                } catch (const std::exception&) {
-                    // Out of memory or a file system error: report, keep running.
-                    error = "not enough memory to load it";
-                }
-                if (sample)
-                    found = samples_.emplace(path, std::move(sample)).first;
-                else {
-                    failed_.emplace(path, error);
-                    errors.push_back({c, path, error});
-                }
-            }
-            if (found != samples_.end())
-                out.sample = found->second;
-        }
+        out.sample = load(channel.samplePath, c, &errors);
         state->channels.push_back(std::move(out));
     }
-    // Drop samples no channel uses any more. A note still playing one keeps
-    // it alive through the engine's old state until it ends (ADR 0005).
+
+    // Song mode: the playlist. Every pattern's steps (clips refer to them by
+    // index), the pattern clips and the audio clips, in steps.
+    state->song = song;
+    if (song) {
+        state->patterns.reserve(project.patterns().size());
+        for (const Pattern& each : project.patterns()) {
+            vloom::SongPattern rows;
+            rows.steps.reserve(each.channels.size());
+            for (const ChannelPattern& cp : each.channels) {
+                auto& row = rows.steps.emplace_back();
+                row.reserve(cp.steps.size());
+                for (const bool on : cp.steps)
+                    row.push_back(on ? 1 : 0);
+            }
+            state->patterns.push_back(std::move(rows));
+        }
+        for (const Clip& clip : project.clips())
+            state->patternClips.push_back({static_cast<int>(clip.pattern), clip.start / kTicksPerStep,
+                project.clipLength(clip) / kTicksPerStep});
+        // Audio clips play their channel's sample through the channel.
+        for (const AudioClip& clip : project.audioClips())
+            state->audioClips.push_back({static_cast<int>(clip.channel), clip.start / kTicksPerStep});
+    }
+
+    // Drop samples nothing uses any more. A note still playing one keeps it
+    // alive through the engine's old state until it ends (ADR 0005).
     std::erase_if(samples_, [&](const auto& entry) {
         for (const Channel& channel : channels)
             if (channel.samplePath == entry.first)

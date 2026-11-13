@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@ namespace vloomdaw {
 /// One mixer track's settings.
 struct MixerTrack {
     std::string name;
+    bool named = false; ///< the user named it; otherwise "Insert N", following its number
     double fader = 0.8; ///< 0..1, see faderToGain(); 0.8 is unity
     double pan = 0.0; ///< -1 left .. +1 right
     bool muted = false;
@@ -25,12 +27,32 @@ struct MixerTrack {
 class MixerModel {
 public:
     static constexpr std::size_t kMaster = 0;
+    /// Most inserts: as many as the engine routes (vloom::kMaxInserts).
+    static constexpr std::size_t kMaxInserts = 125;
+    /// Longest insert name, in bytes (UTF-8).
+    static constexpr std::size_t kMaxNameLength = 64;
 
     /// A master plus `insertCount` inserts named "Insert 1".. "Insert N".
     explicit MixerModel(std::size_t insertCount);
 
     [[nodiscard]] std::size_t size() const { return tracks_.size(); }
     [[nodiscard]] const MixerTrack& track(std::size_t index) const { return tracks_.at(index); }
+    [[nodiscard]] std::size_t insertCount() const { return tracks_.size() - 1; }
+
+    /// Appends an insert named "Insert N"; its index, or nullopt when there
+    /// are kMaxInserts already.
+    std::optional<std::size_t> addInsert();
+    /// Removes insert `index` (never the master); the inserts after it move
+    /// down one and are named after their new number. False if out of range.
+    bool removeInsert(std::size_t index);
+    /// Names insert `index` (UTF-8; trimmed, cut to kMaxNameLength without
+    /// splitting a character). A blank name gives back "Insert N". The master
+    /// keeps its name.
+    void setName(std::size_t index, const std::string& name);
+    /// Moves insert `from` to position `to` (both clamped to the inserts;
+    /// never the master). Settings go with it; unnamed inserts take their new
+    /// number. Returns the new position.
+    std::size_t moveInsert(std::size_t from, std::size_t to);
 
     // Setters clamp their value and ignore out-of-range indices and NaN.
     void setFader(std::size_t index, double position);

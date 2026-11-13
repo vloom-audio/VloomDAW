@@ -7,6 +7,7 @@
 #include "ui/widgets/Knob/Knob.hpp"
 #include "ui/widgets/LevelMeter/LevelMeter.hpp"
 
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QStyle>
@@ -43,11 +44,13 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     layout->setContentsMargins(5, 6, 5, 6);
     layout->setSpacing(6);
 
-    auto* nameLabel = new QLabel(name, this);
-    nameLabel->setObjectName(QStringLiteral("stripName"));
-    nameLabel->setAlignment(Qt::AlignCenter);
-    nameLabel->setToolTip(name);
-    layout->addWidget(nameLabel);
+    name_ = new QLabel(this);
+    name_->setObjectName(QStringLiteral("stripName"));
+    name_->setAlignment(Qt::AlignCenter);
+    layout->addWidget(name_);
+    // Takes the strip's width whatever the text: a long name is cut, not widening it.
+    name_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    name_->installEventFilter(this); // re-cut on resize / font; inserts: double-click to rename
 
     pan_ = new Knob(tr("PAN"), -100.0, 100.0, 0.0, this);
     pan_->setDescription(tr("Pan"));
@@ -88,18 +91,65 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
         buttons->addWidget(b);
         return b;
     };
-    auto* mute = addToggle(QStringLiteral("M"), QStringLiteral("muteButton"), tr("Mute %1").arg(name));
-    connect(mute, &QToolButton::toggled, this, &MixerStrip::muteToggled);
+    mute_ = addToggle(QStringLiteral("M"), QStringLiteral("muteButton"), QString());
+    connect(mute_, &QToolButton::toggled, this, &MixerStrip::muteToggled);
     if (kind == Kind::Insert) {
-        auto* solo = addToggle(QStringLiteral("S"), QStringLiteral("soloButton"), tr("Solo %1").arg(name));
-        connect(solo, &QToolButton::toggled, this, &MixerStrip::soloToggled);
+        solo_ = addToggle(QStringLiteral("S"), QStringLiteral("soloButton"), QString());
+        connect(solo_, &QToolButton::toggled, this, &MixerStrip::soloToggled);
     }
     layout->addLayout(buttons);
 
-    auto* numberLabel = new QLabel(number, this);
-    numberLabel->setObjectName(QStringLiteral("stripNumber"));
-    numberLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(numberLabel);
+    number_ = new QLabel(this);
+    number_->setObjectName(QStringLiteral("stripNumber"));
+    number_->setAlignment(Qt::AlignCenter);
+    layout->addWidget(number_);
+    setLabel(name, number);
+}
+
+bool MixerStrip::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == name_) {
+        switch (event->type()) {
+        case QEvent::MouseButtonDblClick:
+            if (solo_ != nullptr) { // inserts only
+                emit renameRequested();
+                return true;
+            }
+            break;
+        case QEvent::Resize:
+        case QEvent::FontChange:
+        case QEvent::StyleChange:
+        case QEvent::Polish:
+            elideName();
+            break;
+        default:
+            break;
+        }
+    }
+    return QFrame::eventFilter(watched, event);
+}
+
+void MixerStrip::elideName()
+{
+    const QString shown
+        = name_->fontMetrics().elidedText(fullName_, Qt::ElideRight, name_->contentsRect().width());
+    if (shown != name_->text())
+        name_->setText(shown);
+}
+
+void MixerStrip::setLabel(const QString& name, const QString& number)
+{
+    // The strip is narrow: a long name is cut with "…"; the tooltip has it all.
+    fullName_ = name;
+    elideName();
+    name_->setToolTip(solo_ != nullptr ? tr("%1\nDouble-click to rename").arg(name) : name);
+    number_->setText(number);
+    mute_->setToolTip(tr("Mute %1").arg(name));
+    mute_->setAccessibleName(mute_->toolTip());
+    if (solo_ != nullptr) {
+        solo_->setToolTip(tr("Solo %1").arg(name));
+        solo_->setAccessibleName(solo_->toolTip());
+    }
 }
 
 void MixerStrip::showDb(double position)

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/widgets/TransportBar/TransportBar.hpp"
 
+#include "core/TransportLayout.hpp"
 #include "ui/Theme.hpp"
 #include "ui/widgets/KeyDisplay/KeyDisplay.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
@@ -13,10 +14,13 @@
 #include "ui/widgets/ViewButtons/ViewButtons.hpp"
 
 #include <QAction>
+#include <QEvent>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
 #include <QLayout>
+#include <QScreen>
 #include <QTimer>
 #include <QToolButton>
 
@@ -35,18 +39,6 @@ QIcon icon(const QString& name) { return Theme::icon(name); }
 QString tipWithShortcut(const QString& text, const QKeySequence& shortcut)
 {
     return QStringLiteral("%1 (%2)").arg(text, shortcut.toString(QKeySequence::NativeText));
-}
-
-/// Fixed-width gap, or a stretching one when `width` is negative.
-QWidget* spacer(QWidget* parent, int width)
-{
-    auto* w = new QWidget(parent);
-    if (width < 0)
-        w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    else
-        w->setFixedWidth(width);
-    w->setAttribute(Qt::WA_TransparentForMouseEvents);
-    return w;
 }
 
 } // namespace
@@ -106,46 +98,27 @@ TransportBar::TransportBar(QWidget* parent)
     });
 
     // Layout: [ PAT ▶ ■ ● ] [ Pattern 1 ▾ + − ]  ...  [ BPM | SIG ][ ROOT | SCALE ][ BAR · BEAT · TICK ]  ...
-    //         [ CPU | RAM ] VOL PITCH [ TAP 🎵 ] [ views ]
-    leadingSpace_ = spacer(this, 0);
-    addWidget(leadingSpace_);
-
+    //         [ CPU | RAM ] VOL PITCH [ TAP 🎵 ] [ views ] [ » ]
+    //
+    // The groups are children of the bar but not tool bar items: relayout()
+    // places them itself (core/TransportLayout), so the displays stay centred
+    // and groups that do not fit go into a drop-down behind our own » button.
+    // Qt's own » expanded the bar into a second row, pushing the workspace
+    // down, and that row was sometimes left blank.
     QFrame* playGroup
         = makeToolGroup(this, {songModeAction_, playAction_, stopAction_, recordAction_}, iconSize());
     const auto playButtons = playGroup->findChildren<QToolButton*>();
     playButtons.at(0)->setObjectName(QStringLiteral("modeButton"));
     playButtons.at(1)->setObjectName(QStringLiteral("playButton"));
     playButtons.at(3)->setObjectName(QStringLiteral("recordButton"));
-    addWidget(playGroup);
-    addWidget(spacer(this, kGroupSpacing));
     patternSelector_ = new PatternSelector(iconSize(), this);
-    addWidget(patternSelector_);
-    addWidget(spacer(this, kGroupSpacing));
-    // Sized by recentre() so the displays sit in the middle of the window,
-    // not just between the uneven groups either side of them.
-    centreSpacer_ = spacer(this, 0);
-    addWidget(centreSpacer_);
 
     tempoDisplay_ = new TempoDisplay(this);
     connect(tempoDisplay_, &TempoDisplay::tempoChanged, this, &TransportBar::tempoChanged);
-    addWidget(tempoDisplay_);
-    addWidget(spacer(this, 4));
     keyDisplay_ = new KeyDisplay(this);
-    addWidget(keyDisplay_);
-    addWidget(spacer(this, 4));
     positionDisplay_ = new PositionDisplay(this);
-    addWidget(positionDisplay_);
-    addWidget(spacer(this, -1)); // takes what is left, so the right groups sit at the end
 
-    // Everything right of the displays, measured by recentre().
-    const auto addRight = [this](QWidget* w) {
-        addWidget(w);
-        rightSide_.append(w);
-    };
-    addRight(spacer(this, kGroupSpacing));
     performanceMeter_ = new PerformanceMeter(this);
-    addRight(performanceMeter_);
-    addRight(spacer(this, kGroupSpacing));
 
     // Volume 0..125 %, unity at 100 % (MainWindow maps it to a gain).
     volumeKnob_ = new Knob(tr("VOL"), 0.0, 125.0, 100.0, this);
@@ -158,8 +131,6 @@ TransportBar::TransportBar(QWidget* parent)
         return QStringLiteral("%1% (%2)").arg(QString::number(percent, 'f', 0), db);
     });
     connect(volumeKnob_, &Knob::valueChanged, this, &TransportBar::masterVolumeChanged);
-    addRight(volumeKnob_);
-    addRight(spacer(this, 2));
 
     pitchKnob_ = new Knob(tr("PITCH"), -12.0, 12.0, 0.0, this);
     pitchKnob_->setDescription(tr("Master pitch"));
@@ -168,16 +139,59 @@ TransportBar::TransportBar(QWidget* parent)
             .arg(semitones > 0.0 ? QStringLiteral("+") : QString(), QString::number(semitones, 'f', 1));
     });
     connect(pitchKnob_, &Knob::valueChanged, this, &TransportBar::masterPitchChanged);
-    addRight(pitchKnob_);
-    addRight(spacer(this, kGroupSpacing));
 
     QFrame* toolsGroup = makeToolGroup(this, {tapAction_, metronomeAction_}, iconSize());
     toolsGroup->findChildren<QToolButton*>().constFirst()->setObjectName(QStringLiteral("tapButton"));
-    addRight(toolsGroup);
-    addRight(spacer(this, kGroupSpacing));
 
     viewButtons_ = new ViewButtons(iconSize(), this);
-    addRight(viewButtons_);
+
+    // Order on the bar; overflow ranks: higher moves into the drop-down first.
+    using Zone = TransportItem::Zone;
+    groups_ = {
+        {playGroup, Zone::Left, 0, 0},
+        {patternSelector_, Zone::Left, kGroupSpacing, 1},
+        {tempoDisplay_, Zone::Centre, 0, 0},
+        {keyDisplay_, Zone::Centre, 4, 2},
+        {positionDisplay_, Zone::Centre, 4, 0},
+        {performanceMeter_, Zone::Right, 0, 7},
+        {volumeKnob_, Zone::Right, kGroupSpacing, 3},
+        {pitchKnob_, Zone::Right, 2, 6},
+        {toolsGroup, Zone::Right, kGroupSpacing, 5},
+        {viewButtons_, Zone::Right, kGroupSpacing, 4},
+    };
+
+    moreButton_ = new QToolButton(this);
+    moreButton_->setObjectName(QStringLiteral("transportMore"));
+    moreButton_->setIcon(icon(QStringLiteral("chevrons-right")));
+    moreButton_->setIconSize(QSize(16, 16));
+    moreButton_->setAutoRaise(true);
+    moreButton_->setFocusPolicy(Qt::NoFocus);
+    moreButton_->setToolTip(tr("More controls"));
+    moreButton_->setAccessibleName(tr("More transport controls"));
+    moreButton_->hide();
+    connect(moreButton_, &QToolButton::clicked, this, &TransportBar::toggleOverflow);
+
+    overflow_ = new QFrame(this, Qt::Popup);
+    overflow_->setObjectName(QStringLiteral("transportOverflow"));
+    // A press outside closes the drop-down and is not passed on, so pressing
+    // » while it is open closes it instead of reopening it.
+    overflow_->setAttribute(Qt::WA_NoMouseReplay);
+    auto* overflowLayout = new QHBoxLayout(overflow_);
+    overflowLayout->setContentsMargins(10, 8, 10, 8);
+    overflowLayout->setSpacing(kGroupSpacing);
+
+    // The one real tool bar item: gives the bar its height, ignores the
+    // mouse (so empty bar space still moves the window) and never overflows.
+    int rowHeight = 0;
+    for (const Group& group : groups_)
+        rowHeight = std::max(rowHeight, group.widget->sizeHint().height());
+    rowHolder_ = new QWidget(this);
+    rowHolder_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    rowHolder_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    rowHolder_->setFixedHeight(rowHeight);
+    rowHolder_->setMinimumWidth(0);
+    addWidget(rowHolder_);
+    rowHolder_->lower(); // the groups paint and take clicks above it
 }
 
 QAction* TransportBar::makeAction(
@@ -191,47 +205,119 @@ QAction* TransportBar::makeAction(
 
 void TransportBar::setLeadingSpace(int pixels)
 {
-    leadingSpace_->setFixedWidth(pixels);
-    scheduleRecentre();
+    leadingSpace_ = std::max(0, pixels);
+    scheduleRelayout();
 }
 
 void TransportBar::resizeEvent(QResizeEvent* event)
 {
     QToolBar::resizeEvent(event);
-    scheduleRecentre();
+    relayout(); // at once: the groups must not lag behind a window resize
 }
 
 void TransportBar::showEvent(QShowEvent* event)
 {
     QToolBar::showEvent(event);
-    scheduleRecentre();
+    scheduleRelayout();
 }
 
-void TransportBar::scheduleRecentre()
+bool TransportBar::event(QEvent* event)
 {
-    // After the layout has placed the widgets for the new size.
-    QTimer::singleShot(0, this, &TransportBar::recentre);
+    // A group's size hint changed (e.g. wider text): place everything again.
+    if (event->type() == QEvent::LayoutRequest)
+        scheduleRelayout();
+    return QToolBar::event(event);
 }
 
-void TransportBar::recentre()
+void TransportBar::scheduleRelayout()
 {
-    const auto widthOf = [](const QWidget* w) { return std::max(w->sizeHint().width(), w->minimumWidth()); };
+    if (relayoutPending_)
+        return;
+    relayoutPending_ = true;
+    QTimer::singleShot(0, this, [this] {
+        relayoutPending_ = false;
+        relayout();
+    });
+}
 
-    // Where the centre spacer starts: the left groups do not depend on it.
-    const int leftEnd = centreSpacer_->x();
-    const int displays = positionDisplay_->geometry().right() + 1 - tempoDisplay_->x();
+void TransportBar::relayout()
+{
+    const QMargins margins = layout() != nullptr ? layout()->contentsMargins() : QMargins();
+    const QRect area = rect().marginsRemoved(margins);
+    if (area.width() <= 0)
+        return;
 
-    int right = layout() != nullptr ? layout()->contentsMargins().right() : 0;
-    for (const QWidget* w : rightSide_)
-        right += widthOf(w);
+    std::vector<TransportItem> items;
+    items.reserve(groups_.size());
+    for (const Group& group : groups_)
+        items.push_back({group.widget->sizeHint().width(), group.gapBefore, group.zone, group.overflowRank});
+    const QSize more = moreButton_->sizeHint();
+    const TransportPlacement placement
+        = layoutTransport(items, area.left() + leadingSpace_, area.right() + 1, kGroupSpacing, more.width());
 
-    // Centre the displays in the bar; when the window is too narrow, give the
-    // right groups their room first (they then sit right after the displays).
-    const int wanted = (width() - displays) / 2 - leftEnd;
-    const int room = width() - leftEnd - displays - right;
-    const int gap = std::clamp(wanted, 0, std::max(0, room));
-    if (centreSpacer_->width() != gap)
-        centreSpacer_->setFixedWidth(gap);
+    bool overflowChanged = false;
+    for (std::size_t i = 0; i < groups_.size(); ++i) {
+        QWidget* widget = groups_[i].widget;
+        const bool inOverflow = placement.overflowed[i];
+        if (inOverflow != (widget->parentWidget() == overflow_)) {
+            overflowChanged = true;
+            widget->setParent(inOverflow ? static_cast<QWidget*>(overflow_) : this);
+        }
+        if (inOverflow)
+            continue;
+        const QSize hint = widget->sizeHint();
+        widget->setGeometry(
+            placement.x[i], area.top() + (area.height() - hint.height()) / 2, hint.width(), hint.height());
+        widget->show();
+    }
+
+    moreButton_->setVisible(placement.showMoreButton);
+    if (placement.showMoreButton) {
+        moreButton_->setGeometry(placement.moreButtonX, area.top() + (area.height() - more.height()) / 2,
+            more.width(), more.height());
+        moreButton_->raise();
+    }
+
+    if (overflowChanged) {
+        // The drop-down lists its groups in bar order.
+        auto* list = static_cast<QHBoxLayout*>(overflow_->layout());
+        while (list->count() > 0)
+            delete list->takeAt(0);
+        for (std::size_t i = 0; i < groups_.size(); ++i) {
+            if (!placement.overflowed[i])
+                continue;
+            list->addWidget(groups_[i].widget, 0, Qt::AlignVCenter);
+            groups_[i].widget->show();
+        }
+        if (!placement.showMoreButton)
+            overflow_->hide();
+        else if (overflow_->isVisible())
+            showOverflow(); // resize and re-anchor what is open
+    }
+}
+
+void TransportBar::toggleOverflow()
+{
+    if (overflow_->isVisible())
+        overflow_->hide();
+    else
+        showOverflow();
+}
+
+void TransportBar::showOverflow()
+{
+    overflow_->adjustSize();
+    // Below », right-aligned with it, kept on the screen.
+    QPoint at = moreButton_->mapToGlobal(QPoint(moreButton_->width(), moreButton_->height() + 4));
+    at.rx() -= overflow_->width();
+    if (const QScreen* screen = moreButton_->screen()) {
+        const QRect free = screen->availableGeometry();
+        at.setX(
+            std::clamp(at.x(), free.left(), std::max(free.left(), free.right() + 1 - overflow_->width())));
+        at.setY(std::min(at.y(), std::max(free.top(), free.bottom() + 1 - overflow_->height())));
+    }
+    overflow_->move(at);
+    overflow_->show();
 }
 
 double TransportBar::tempo() const { return tempoDisplay_->tempo(); }

@@ -12,6 +12,7 @@
 #include "ui/DeviceScanner.hpp"
 #include "ui/Theme.hpp"
 #include "ui/browser/BrowserPanel.hpp"
+#include "ui/browser/SamplePreviewer.hpp"
 #include "ui/channelrack/ChannelRackView.hpp"
 #include "ui/dialogs/SettingsDialog/AudioSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp"
@@ -42,6 +43,7 @@
 #endif
 
 #include <vloom/engine/core/Version.hpp>
+#include <vloom/engine/sample/SampleBuffer.hpp>
 
 #include <QActionGroup>
 #include <QApplication>
@@ -51,6 +53,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QInputDialog>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
@@ -62,6 +65,7 @@
 #include <QResizeEvent>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSettings>
 #include <QShowEvent>
 #include <QSplitter>
@@ -213,6 +217,80 @@ void MainWindow::createMenus()
     quit->setShortcut(QKeySequence::Quit);
 #endif
 
+    // Edit: in place now so the menu bar has its usual order and the keys are
+    // claimed; the commands arrive with undo (start of M2) and the editors'
+    // selection tools (M2). Text fields keep their own copy / paste / undo:
+    // a focused QLineEdit takes those keys before these actions see them.
+    auto* editMenu = menuBar()->addMenu(tr("&Edit"));
+    const auto notYetIn = [this](const QString& feature, const QString& when) {
+        return [this, feature, when] {
+            statusBar()->showMessage(tr("%1 is not available yet: it arrives %2.").arg(feature, when), 5000);
+        };
+    };
+    const QString withUndo = tr("at the start of milestone M2");
+    const QString withEditing = tr("with the editing tools in milestone M2");
+    const auto addEditAction = [&](const QString& text, const QList<QKeySequence>& shortcuts, auto&& slot) {
+        auto* action = editMenu->addAction(text, this, slot);
+        action->setShortcuts(shortcuts);
+        return action;
+    };
+    addEditAction(tr("&Undo"), {QKeySequence(Qt::CTRL | Qt::Key_Z)}, notYetIn(tr("Undo"), withUndo));
+#if defined(Q_OS_WIN)
+    // Windows apps also redo with Ctrl+Y.
+    const QList<QKeySequence> redoKeys{
+        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), QKeySequence(Qt::CTRL | Qt::Key_Y)};
+#else
+    const QList<QKeySequence> redoKeys{QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)};
+#endif
+    addEditAction(tr("&Redo"), redoKeys, notYetIn(tr("Redo"), withUndo));
+    editMenu->addSeparator();
+    addEditAction(tr("Cu&t"), {QKeySequence(Qt::CTRL | Qt::Key_X)}, notYetIn(tr("Cut"), withEditing));
+    addEditAction(tr("&Copy"), {QKeySequence(Qt::CTRL | Qt::Key_C)}, notYetIn(tr("Copy"), withEditing));
+    addEditAction(tr("&Paste"), {QKeySequence(Qt::CTRL | Qt::Key_V)}, notYetIn(tr("Paste"), withEditing));
+    addEditAction(
+        tr("&Duplicate"), {QKeySequence(Qt::CTRL | Qt::Key_D)}, notYetIn(tr("Duplicate"), withEditing));
+    addEditAction(tr("De&lete"), {QKeySequence(Qt::Key_Delete)}, notYetIn(tr("Delete"), withEditing));
+    editMenu->addSeparator();
+    addEditAction(
+        tr("Select &All"), {QKeySequence(Qt::CTRL | Qt::Key_A)}, notYetIn(tr("Select All"), withEditing));
+
+    // Patterns, as in FL Studio. Without undo yet, deleting a pattern that
+    // has steps or notes asks first.
+    auto* patternsMenu = menuBar()->addMenu(tr("&Patterns"));
+    const auto addPatternAction = [&](const QString& text, const QKeySequence& shortcut, auto&& slot) {
+        auto* action = patternsMenu->addAction(text, this, slot);
+        action->setShortcut(shortcut);
+        return action;
+    };
+    addPatternAction(tr("Find &first empty…"), QKeySequence(Qt::SHIFT | Qt::Key_F4),
+        [this] { findEmptyPattern(true, true); });
+    addPatternAction(
+        tr("Find &next empty…"), QKeySequence(Qt::Key_F4), [this] { findEmptyPattern(false, true); });
+    addPatternAction(tr("Find next empty (no naming)"), QKeySequence(Qt::CTRL | Qt::Key_F4),
+        [this] { findEmptyPattern(false, false); });
+    patternsMenu->addSeparator();
+    addPatternAction(tr("&Rename…"), QKeySequence(Qt::Key_F2), [this] { renameCurrentPattern(); });
+    const QString withColours = tr("with pattern colours in milestone M3");
+    addPatternAction(tr("Change &color…"), {}, notYetIn(tr("Pattern colours"), withColours));
+    addPatternAction(tr("Random color"), {}, notYetIn(tr("Pattern colours"), withColours));
+    addPatternAction(tr("&Transpose…"), {}, [this] { transposeCurrentPattern(); });
+    patternsMenu->addSeparator();
+    addPatternAction(
+        tr("&Insert one"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Insert), [this] { insertPattern(); });
+    addPatternAction(
+        tr("&Clone"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C), [this] { cloneCurrentPattern(); });
+    addPatternAction(tr("&Delete"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Delete),
+        [this] { deleteCurrentPattern(); });
+    patternsMenu->addSeparator();
+    addPatternAction(
+        tr("Move &up"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Up), [this] { moveCurrentPattern(-1); });
+    addPatternAction(tr("Move do&wn"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Down),
+        [this] { moveCurrentPattern(1); });
+    patternsMenu->addSeparator();
+    addPatternAction(tr("&Split by channel"), {}, [this] { splitCurrentPatternByChannel(); });
+    addPatternAction(tr("Render as audio clip…"), {},
+        notYetIn(tr("Rendering a pattern"), tr("with WAV export in milestone M3")));
+
     // No Transport menu: the tool bar buttons carry those shortcuts. Go to
     // Start has no button, so it is added to the window to keep Home working.
     addAction(transport_->rewindAction());
@@ -259,7 +337,10 @@ void MainWindow::createToolBars()
     connect(transport_, &TransportBar::rewindRequested, this, [this] { audio_.engine().locate(0.0); });
     // A BPM drag fires on every mouse move; keep only the latest value and let
     // refreshFromEngine() send it, so the engine's command queue never floods.
-    connect(transport_, &TransportBar::tempoChanged, this, [this](double bpm) { pendingTempo_ = bpm; });
+    connect(transport_, &TransportBar::tempoChanged, this, [this](double bpm) {
+        pendingTempo_ = bpm;
+        playlist_->setTempo(bpm); // audio clips' length in bars
+    });
     // The engine cannot record yet (no audio input): keep the armed state in
     // the button and say so, so the button is not silently dead.
     connect(transport_, &TransportBar::recordArmedChanged, this, [this](bool armed) {
@@ -280,18 +361,23 @@ void MainWindow::createToolBars()
             4000);
     });
     connect(transport_, &TransportBar::songModeChanged, this, [this](bool song) {
-        statusBar()->showMessage(song
-                ? tr("Song mode: the playlist arrives in milestone M3.")
-                : tr("Pattern mode: patterns arrive with the channel rack in milestone M1."),
+        songMode_ = song;
+        syncChannelRack();
+        statusBar()->showMessage(song ? tr("Song mode: Play runs through the playlist.")
+                                      : tr("Pattern mode: Play loops the current pattern."),
             4000);
     });
 
     connect(transport_->viewButtons(), &ViewButtons::viewRequested, this, &MainWindow::showView);
 
     // Transport and view keys (Space, F5-F9, …) also work while a detached
-    // mixer or playlist window has the focus.
-    for (QAction* action : transport_->findChildren<QAction*>())
+    // mixer or playlist window has the focus, and while their buttons sit in
+    // the transport's » drop-down (Qt ignores shortcuts of actions whose
+    // widgets are all hidden; the main window is always shown).
+    for (QAction* action : transport_->findChildren<QAction*>()) {
         action->setShortcutContext(Qt::ApplicationShortcut);
+        addAction(action);
+    }
     // The key is shown only for now; the piano roll will highlight its scale.
     const auto announceKey = [this] {
         const KeyDisplay* key = transport_->keyDisplay();
@@ -307,28 +393,232 @@ void MainWindow::createToolBars()
     connect(transport_->keyDisplay(), &KeyDisplay::rootNoteChanged, this, announceKey);
     connect(transport_->keyDisplay(), &KeyDisplay::scaleChanged, this, announceKey);
 
-    // Patterns: the selector numbers from 1, the project indexes from 0.
+    // Patterns: the selector shows the project's patterns; edits go through
+    // the same functions as the Patterns menu.
     PatternSelector* patterns = transport_->patternSelector();
-    connect(patterns, &PatternSelector::currentChanged, this, [this](int number) {
-        while (static_cast<int>(project_.patterns().size()) < number)
-            project_.addPattern(); // the selector added one
-        selectPattern(static_cast<std::size_t>(number - 1));
+    connect(patterns, &PatternSelector::patternPicked, this,
+        [this](int index) { selectPattern(static_cast<std::size_t>(index)); });
+    connect(patterns, &PatternSelector::addRequested, this, [this] {
+        if (roomForPatterns(1))
+            patternsChanged(project_.addPattern());
     });
-    connect(patterns, &PatternSelector::patternDeleted, this, [this](int number) {
-        project_.removePattern(static_cast<std::size_t>(number - 1));
-        refreshEditors();
-    });
+    connect(patterns, &PatternSelector::deleteRequested, this, &MainWindow::deleteCurrentPattern);
 }
 
 void MainWindow::selectPattern(std::size_t pattern)
 {
     currentPattern_ = std::min(pattern, project_.patterns().size() - 1);
-    transport_->patternSelector()->setCurrent(static_cast<int>(currentPattern_) + 1);
+    syncPatternSelector();
     channelRack_->setPattern(currentPattern_);
     pianoRoll_->setTarget(currentPattern_, currentChannel_);
     playlist_->setCurrentPattern(currentPattern_);
     updatePanelContexts();
     syncChannelRack(); // the engine plays the current pattern
+}
+
+void MainWindow::changeBars(int bars)
+{
+    const int steps = project_.stepCount(currentPattern_);
+    // Whole bars: a count that is not one rounds to the bar it is in.
+    const int target = bars > 0 ? (steps / kStepsPerBar + bars) * kStepsPerBar
+                                : ((steps - 1) / kStepsPerBar + bars + 1) * kStepsPerBar;
+    if (bars < 0 && (steps <= kStepsPerBar || target < kStepsPerBar)) {
+        statusBar()->showMessage(tr("A pattern has at least one bar of steps."), 4000);
+        return;
+    }
+    if (target > Project::kMaxSteps) {
+        statusBar()->showMessage(tr("A pattern can have up to %1 steps.").arg(Project::kMaxSteps), 4000);
+        return;
+    }
+    if (target < steps && project_.hasStepsFrom(currentPattern_, target)
+        && QMessageBox::question(this, tr("Remove Bar"),
+               tr("The last bar has steps that are on. Remove it anyway?") + QLatin1Char(' ')
+                   + tr("This cannot be undone yet."))
+            != QMessageBox::Yes)
+        return;
+    project_.setStepCount(currentPattern_, target);
+    patternsChanged(currentPattern_); // rack width, clip lengths, the engine's loop
+    const QString name = QString::fromStdString(project_.patterns()[currentPattern_].name);
+    const int barCount = (target + kStepsPerBar - 1) / kStepsPerBar;
+    statusBar()->showMessage(barCount == 1 ? tr("%1: %2 steps, 1 bar").arg(name).arg(target)
+                                           : tr("%1: %2 steps, %3 bars").arg(name).arg(target).arg(barCount),
+        3000);
+}
+
+void MainWindow::syncInsertNames()
+{
+    QStringList inserts{tr("Master")};
+    for (std::size_t i = 1; i < mixer_.size(); ++i) {
+        const MixerTrack& t = mixer_.track(i);
+        // A named insert keeps its number in front: channels are routed by it.
+        inserts << (t.named ? tr("%1 · %2").arg(i).arg(QString::fromStdString(t.name))
+                            : tr("Insert %1").arg(i));
+    }
+    channelRack_->setInsertNames(inserts);
+    channelRack_->update();
+}
+
+void MainWindow::addMixerInsert()
+{
+    if (!mixer_.addInsert()) {
+        statusBar()->showMessage(tr("The mixer has up to %1 inserts.").arg(MixerModel::kMaxInserts), 4000);
+        return;
+    }
+    mixerPanel_->addInsert();
+    syncInsertNames();
+    updateMixer();
+}
+
+void MainWindow::renameMixerInsert(std::size_t track)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+    const MixerTrack& t = mixer_.track(track);
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename Insert %1").arg(track),
+        tr("Name (leave empty for \u201CInsert %1\u201D):").arg(track), QLineEdit::Normal,
+        t.named ? QString::fromStdString(t.name) : QString(), &ok);
+    if (!ok)
+        return;
+    mixer_.setName(track, name.toStdString());
+    mixerPanel_->setTrackName(track, QString::fromStdString(mixer_.track(track).name));
+    syncInsertNames();
+}
+
+void MainWindow::addPlaylistTrack()
+{
+    const auto added = project_.addTrack();
+    if (!added) {
+        statusBar()->showMessage(
+            tr("The playlist has up to %1 tracks.").arg(Project::kMaxPlaylistTracks), 4000);
+        return;
+    }
+    playlist_->refresh();
+    playlist_->verticalScrollBar()->setValue(playlist_->verticalScrollBar()->maximum()); // show it
+}
+
+void MainWindow::removePlaylistTrack(std::size_t track)
+{
+    if (track >= project_.tracks().size())
+        return;
+    if (project_.tracks().size() <= 1) {
+        statusBar()->showMessage(tr("The playlist has at least one track."), 4000);
+        return;
+    }
+    const QString name = QString::fromStdString(project_.tracks()[track].name);
+    const std::size_t clips = project_.clipsOnTrack(track);
+    if (clips > 0
+        && QMessageBox::question(this, tr("Delete Track"),
+               (clips == 1 ? tr("“%1” has 1 clip.").arg(name) : tr("“%1” has %2 clips.").arg(name).arg(clips))
+                   + QLatin1Char(' ') + tr("Delete the track and its clips?") + QLatin1Char(' ')
+                   + tr("This cannot be undone yet."))
+            != QMessageBox::Yes)
+        return;
+    project_.removeTrack(track);
+    playlist_->refresh();
+    statusBar()->showMessage(tr("“%1” deleted.").arg(name), 3000);
+}
+
+const ClipAudio* MainWindow::clipAudio(const std::string& path)
+{
+    if (const auto found = clipAudio_.find(path); found != clipAudio_.end())
+        return found->second.get();
+    // First sight of this file: its length and a coarse waveform, once.
+    auto info = std::make_shared<ClipAudio>();
+    if (const auto sample = rackAudio_.sample(path); sample && sample->sampleRate() > 0.0) {
+        info->seconds = static_cast<double>(sample->frames()) / sample->sampleRate();
+        const auto perPeak
+            = std::max<std::int64_t>(1, static_cast<std::int64_t>(sample->sampleRate() / 200.0));
+        info->peakSeconds = static_cast<double>(perPeak) / sample->sampleRate();
+        info->peaks.reserve(static_cast<std::size_t>(sample->frames() / perPeak + 1));
+        for (std::int64_t from = 0; from < sample->frames(); from += perPeak) {
+            const std::int64_t to = std::min(sample->frames(), from + perPeak);
+            float peak = 0.0f;
+            for (int ch = 0; ch < sample->channels(); ++ch) {
+                const float* samples = sample->channel(ch);
+                for (std::int64_t i = from; i < to; ++i)
+                    peak = std::max(peak, std::abs(samples[i]));
+            }
+            info->peaks.push_back(peak);
+        }
+    }
+    return clipAudio_.emplace(path, std::move(info)).first->second.get();
+}
+
+void MainWindow::dropAudio(const QString& path, int track, int start)
+{
+    if (track >= static_cast<int>(project_.tracks().size())) {
+        // Below the last track: a new one, when there is room.
+        const auto added = project_.addTrack();
+        track = added ? static_cast<int>(*added) : static_cast<int>(project_.tracks().size()) - 1;
+    }
+    const std::string file = QDir::cleanPath(path).toStdString();
+    if (clipAudio(file)->seconds <= 0.0) {
+        clipAudio_.erase(file); // it may become readable: try again next time
+        statusBar()->showMessage(tr("Could not load %1.").arg(QFileInfo(path).fileName()), 6000);
+        playlist_->refresh();
+        return;
+    }
+    // As in FL Studio, the clip plays through a channel of the channel rack:
+    // the one already playing this file, or a new one named after it.
+    std::size_t channel = 0;
+    if (const auto existing = project_.channelWithSample(file)) {
+        channel = *existing;
+    } else {
+        channel = project_.addChannel(QFileInfo(path).completeBaseName().toStdString());
+        project_.setChannelSample(channel, file);
+        channelRack_->refresh();
+    }
+    project_.addAudioClip(AudioClip{channel, track, start});
+    playlist_->refresh();
+    selectChannel(channel);
+    if (!songMode_) {
+        // The playlist only plays in song mode: switch, or Play would stay silent.
+        transport_->songModeAction()->setChecked(true); // syncs through songModeChanged
+        statusBar()->showMessage(
+            tr("Song mode on: Play runs through the playlist (L for pattern mode)."), 5000);
+    } else {
+        syncChannelRack();
+    }
+}
+
+void MainWindow::renamePlaylistTrack(std::size_t track)
+{
+    if (track >= project_.tracks().size())
+        return;
+    const PlaylistTrack& t = project_.tracks()[track];
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename Track %1").arg(track + 1),
+        tr("Name (leave empty for “Track %1”):").arg(track + 1), QLineEdit::Normal,
+        t.named ? QString::fromStdString(t.name) : QString(), &ok);
+    if (!ok)
+        return;
+    project_.setTrackName(track, name.toStdString());
+    playlist_->viewport()->update();
+}
+
+void MainWindow::removeMixerInsert(std::size_t track)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+    const auto insert = static_cast<int>(track);
+    const auto routed = static_cast<std::size_t>(std::count_if(project_.channels().begin(),
+        project_.channels().end(), [insert](const Channel& c) { return c.insert == insert; }));
+    if (routed > 0
+        && QMessageBox::question(this, tr("Delete Insert"),
+               (routed == 1 ? tr("1 channel plays into Insert %1.").arg(track)
+                            : tr("%1 channels play into Insert %2.").arg(routed).arg(track))
+                   + QLatin1Char(' ') + tr("Delete it? They will play into the master.") + QLatin1Char(' ')
+                   + tr("This cannot be undone yet."))
+            != QMessageBox::Yes)
+        return;
+    project_.removeInsert(insert);
+    mixer_.removeInsert(track);
+    mixerPanel_->removeInsert(track);
+    syncInsertNames();
+    updateMixer();
+    syncChannelRack();
+    statusBar()->showMessage(tr("Insert %1 deleted.").arg(track), 3000);
 }
 
 void MainWindow::selectChannel(std::size_t channel)
@@ -345,6 +635,134 @@ void MainWindow::updatePanelContexts()
     const QString channel = QString::fromStdString(project_.channels()[currentChannel_].name);
     channelRackFrame_->setContext(pattern);
     pianoRollFrame_->setContext(QStringLiteral("%1  ·  %2").arg(pattern, channel));
+}
+
+void MainWindow::syncPatternSelector()
+{
+    QStringList names;
+    for (const Pattern& pattern : project_.patterns())
+        names << QString::fromStdString(pattern.name);
+    transport_->patternSelector()->setPatterns(names, static_cast<int>(currentPattern_));
+}
+
+void MainWindow::patternsChanged(std::size_t select)
+{
+    currentPattern_ = std::min(select, project_.patterns().size() - 1);
+    channelRack_->refresh();
+    pianoRoll_->refresh();
+    playlist_->refresh();
+    selectPattern(currentPattern_); // selector, editors' target, engine
+}
+
+bool MainWindow::roomForPatterns(std::size_t more)
+{
+    if (project_.patterns().size() + more <= Project::kMaxPatterns)
+        return true;
+    statusBar()->showMessage(tr("A project can have up to %1 patterns.").arg(Project::kMaxPatterns), 5000);
+    return false;
+}
+
+void MainWindow::findEmptyPattern(bool fromStart, bool askName)
+{
+    std::optional<std::size_t> found = project_.findEmptyPattern(fromStart ? 0 : currentPattern_ + 1);
+    if (!found) {
+        if (!roomForPatterns(1))
+            return;
+        found = project_.addPattern();
+    }
+    patternsChanged(*found);
+    if (askName)
+        renameCurrentPattern();
+}
+
+void MainWindow::renameCurrentPattern()
+{
+    const QString current = QString::fromStdString(project_.patterns()[currentPattern_].name);
+    bool ok = false;
+    const QString name
+        = QInputDialog::getText(this, tr("Rename Pattern"), tr("Name:"), QLineEdit::Normal, current, &ok)
+              .trimmed();
+    if (!ok || name.isEmpty() || name == current)
+        return;
+    project_.setPatternName(currentPattern_, name.left(64).toStdString());
+    patternsChanged(currentPattern_); // the selector, panel titles and playlist clips show it
+}
+
+void MainWindow::transposeCurrentPattern()
+{
+    if (project_.patterns()[currentPattern_].channels.empty())
+        return;
+    bool ok = false;
+    const int semitones = QInputDialog::getInt(this, tr("Transpose Pattern"),
+        tr("Semitones (every note of \u201C%1\u201D):")
+            .arg(QString::fromStdString(project_.patterns()[currentPattern_].name)),
+        0, -48, 48, 1, &ok);
+    if (!ok || semitones == 0)
+        return;
+    project_.transposePattern(currentPattern_, semitones);
+    patternsChanged(currentPattern_);
+}
+
+void MainWindow::insertPattern()
+{
+    if (roomForPatterns(1))
+        patternsChanged(project_.insertPattern(currentPattern_ + 1));
+}
+
+void MainWindow::cloneCurrentPattern()
+{
+    if (!roomForPatterns(1))
+        return;
+    if (const auto copy = project_.clonePattern(currentPattern_))
+        patternsChanged(*copy);
+}
+
+void MainWindow::deleteCurrentPattern()
+{
+    if (project_.patterns().size() <= 1)
+        return;
+    const QString name = QString::fromStdString(project_.patterns()[currentPattern_].name);
+    if (!project_.isPatternEmpty(currentPattern_)) {
+        const auto clips = std::count_if(project_.clips().begin(), project_.clips().end(),
+            [this](const Clip& c) { return c.pattern == currentPattern_; });
+        const QString detail = clips > 0
+            ? tr("Its steps, notes and %n playlist clip(s) are removed.", "", static_cast<int>(clips))
+            : tr("Its steps and notes are removed.");
+        if (QMessageBox::question(this, tr("Delete Pattern"),
+                tr("Delete \u201C%1\u201D?").arg(name) + QStringLiteral("\n\n") + detail + QLatin1Char(' ')
+                    + tr("This cannot be undone yet."))
+            != QMessageBox::Yes)
+            return;
+    }
+    project_.removePattern(currentPattern_);
+    patternsChanged(currentPattern_ > 0 ? currentPattern_ - 1 : 0);
+}
+
+void MainWindow::moveCurrentPattern(int by)
+{
+    const auto count = static_cast<long long>(project_.patterns().size());
+    const long long to = static_cast<long long>(currentPattern_) + by;
+    if (to < 0 || to >= count)
+        return;
+    patternsChanged(project_.movePattern(currentPattern_, static_cast<std::size_t>(to)));
+}
+
+void MainWindow::splitCurrentPatternByChannel()
+{
+    std::size_t used = 0;
+    for (const ChannelPattern& cp : project_.patterns()[currentPattern_].channels)
+        if (!cp.notes.empty() || std::find(cp.steps.begin(), cp.steps.end(), true) != cp.steps.end())
+            ++used;
+    if (used == 0) {
+        statusBar()->showMessage(tr("This pattern is empty: nothing to split."), 4000);
+        return;
+    }
+    if (!roomForPatterns(used))
+        return;
+    const auto parts = project_.splitPatternByChannel(currentPattern_);
+    patternsChanged(currentPattern_);
+    statusBar()->showMessage(
+        tr("Split into %n pattern(s), one per channel.", "", static_cast<int>(parts.size())), 4000);
 }
 
 void MainWindow::refreshEditors()
@@ -588,6 +1006,20 @@ QWidget* MainWindow::createMixer()
         mixer_.setMuted(track, muted);
         updateMixer();
     });
+    connect(mixerPanel_, &MixerPanel::addInsertRequested, this, &MainWindow::addMixerInsert);
+    connect(mixerPanel_, &MixerPanel::removeInsertRequested, this, &MainWindow::removeMixerInsert);
+    connect(mixerPanel_, &MixerPanel::renameRequested, this, &MainWindow::renameMixerInsert);
+    connect(mixerPanel_, &MixerPanel::moveInsertRequested, this, [this](std::size_t from, std::size_t to) {
+        if (from == MixerModel::kMaster || to == MixerModel::kMaster || from >= mixer_.size()
+            || to >= mixer_.size())
+            return;
+        mixer_.moveInsert(from, to);
+        project_.moveInsert(static_cast<int>(from), static_cast<int>(to));
+        mixerPanel_->moveInsert(from, to);
+        syncInsertNames();
+        updateMixer();
+        syncChannelRack(); // channels follow their insert
+    });
     connect(mixerPanel_, &MixerPanel::soloToggled, this, [this](std::size_t track, bool soloed) {
         mixer_.setSoloed(track, soloed);
         updateMixer();
@@ -714,6 +1146,25 @@ void MainWindow::createCentralArea()
             settings_.save();
         });
     sidePanels_->addWidget(browser_);
+
+    previewer_ = new SamplePreviewer(audio_.engine(), this);
+    previewer_->setSampleRate(audio_.sampleRate());
+    browser_->setAutoPreview(settings_.browserAutoPreview);
+    connect(browser_, &BrowserPanel::autoPreviewChanged, this, [this](bool on) {
+        settings_.browserAutoPreview = on;
+        settings_.save();
+    });
+    connect(browser_, &BrowserPanel::previewRequested, previewer_, &SamplePreviewer::play);
+    connect(browser_, &BrowserPanel::previewToggled, this, [this](const QString& path) {
+        if (previewer_->playingPath() == path)
+            previewer_->stop();
+        else
+            previewer_->play(path);
+    });
+    connect(browser_, &BrowserPanel::previewStopRequested, previewer_, &SamplePreviewer::stop);
+    connect(previewer_, &SamplePreviewer::failed, this, [this](const QString& path, const QString& error) {
+        statusBar()->showMessage(tr("Cannot preview %1: %2").arg(QFileInfo(path).fileName(), error), 6000);
+    });
     activityBar_->addPage(Theme::icon(QStringLiteral("folder")), tr("Browser"));
 
     // Plugins: only what the user's last scan found; nothing scans on its own.
@@ -788,6 +1239,24 @@ QWidget* MainWindow::createWorkspace()
     addChannel->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     addChannel->setToolTip(tr("Add a channel"));
     addChannel->setFocusPolicy(Qt::NoFocus);
+    const auto headerButton = [](const QString& icon, const QString& text, const QString& tip) {
+        auto* button = new QToolButton;
+        button->setObjectName(QStringLiteral("panelButton"));
+        button->setIcon(Theme::icon(icon));
+        button->setText(text);
+        button->setToolButtonStyle(text.isEmpty() ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
+        button->setToolTip(tip);
+        button->setFocusPolicy(Qt::NoFocus);
+        return button;
+    };
+    auto* removeBar = headerButton(
+        QStringLiteral("minus"), QString(), tr("Remove the last bar of steps from this pattern"));
+    auto* addBar = headerButton(QStringLiteral("plus"), tr("Bar"),
+        tr("Add a bar: %1 step pads more for every channel in this pattern").arg(kStepsPerBar));
+    connect(removeBar, &QToolButton::clicked, this, [this] { changeBars(-1); });
+    connect(addBar, &QToolButton::clicked, this, [this] { changeBars(1); });
+    channelRackFrame_->addHeaderWidget(removeBar);
+    channelRackFrame_->addHeaderWidget(addBar);
     channelRackFrame_->addHeaderWidget(addChannel);
     workspace_->addWidget(channelRackFrame_);
     connect(addChannel, &QToolButton::clicked, this, [this] {
@@ -812,19 +1281,20 @@ QWidget* MainWindow::createWorkspace()
         channelRack_->update();
         syncChannelRack();
     });
+    connect(channelRack_, &ChannelRackView::panChanged, this, [this](std::size_t channel, double pan) {
+        project_.setChannelPan(channel, pan);
+        channelRack_->update();
+        syncChannelRack();
+    });
     connect(channelRack_, &ChannelRackView::insertChanged, this, [this](std::size_t channel, int insert) {
         project_.setChannelInsert(channel, insert);
         channelRack_->update();
         syncChannelRack();
     });
-    {
-        QStringList inserts{tr("Master")};
-        for (std::size_t i = 1; i < mixer_.size(); ++i)
-            inserts << tr("Insert %1").arg(i);
-        channelRack_->setInsertNames(inserts);
-    }
+    syncInsertNames();
     connect(channelRack_, &ChannelRackView::sampleDropped, this, &MainWindow::assignSample);
     connect(channelRack_, &ChannelRackView::channelSelected, this, &MainWindow::selectChannel);
+    connect(channelRack_, &ChannelRackView::addBarRequested, this, [this] { changeBars(1); });
     connect(channelRack_, &ChannelRackView::channelOpened, this, [this](std::size_t channel) {
         selectChannel(channel);
         showWorkspace(WorkspacePage::PianoRoll);
@@ -861,20 +1331,61 @@ QWidget* MainWindow::createWorkspace()
     playlistFrame_ = new PanelFrame(tr("PLAYLIST"), playlist_, workspace_);
     playlistFrame_->setContext(tr("Click to place the current pattern"));
     workspace_->addWidget(playlistFrame_);
+    auto* removeTrack = headerButton(QStringLiteral("minus"), QString(), tr("Delete the last track"));
+    auto* addTrack = headerButton(QStringLiteral("plus"), tr("Track"), tr("Add a track"));
+    connect(removeTrack, &QToolButton::clicked, this,
+        [this] { removePlaylistTrack(project_.tracks().size() - 1); });
+    connect(addTrack, &QToolButton::clicked, this, &MainWindow::addPlaylistTrack);
+    playlistFrame_->addHeaderWidget(removeTrack);
+    playlistFrame_->addHeaderWidget(addTrack);
+    connect(playlist_, &PlaylistView::trackRenameRequested, this, &MainWindow::renamePlaylistTrack);
+    connect(playlist_, &PlaylistView::trackRemoveRequested, this, &MainWindow::removePlaylistTrack);
+    connect(playlist_, &PlaylistView::trackMoveRequested, this, [this](std::size_t from, std::size_t to) {
+        if (from >= project_.tracks().size() || to >= project_.tracks().size())
+            return;
+        project_.moveTrack(from, to);
+        playlist_->viewport()->update();
+    });
     // Settings ids match the keys of the first release that had a detachable playlist.
     makeDetachable(detachable_[1], WorkspacePage::Playlist, playlistFrame_, tr("Playlist"), tr("playlist"),
         QStringLiteral("playlist"));
-    connect(playlist_, &PlaylistView::clipAdded, this, [this](Clip clip) {
+    // Song mode plays what the playlist holds: every edit goes to the engine.
+    const auto songEdited = [this] {
+        if (songMode_)
+            syncChannelRack();
+    };
+    connect(playlist_, &PlaylistView::clipAdded, this, [this, songEdited](Clip clip) {
         project_.addClip(clip);
         playlist_->viewport()->update();
+        songEdited();
     });
-    connect(playlist_, &PlaylistView::clipChanged, this, [this](std::size_t index, Clip clip) {
+    connect(playlist_, &PlaylistView::clipChanged, this, [this, songEdited](std::size_t index, Clip clip) {
+        if (index < project_.clips().size() && project_.clips()[index] == clip)
+            return; // the drag has not reached the next grid line
         project_.setClip(index, clip);
         playlist_->viewport()->update();
+        songEdited();
     });
-    connect(playlist_, &PlaylistView::clipRemoved, this, [this](std::size_t index) {
+    connect(playlist_, &PlaylistView::clipRemoved, this, [this, songEdited](std::size_t index) {
         project_.removeClip(index);
         playlist_->refresh();
+        songEdited();
+    });
+    playlist_->setTempo(transport_->tempo());
+    playlist_->setAudioInfo([this](const std::string& path) { return clipAudio(path); });
+    connect(playlist_, &PlaylistView::audioDropped, this, &MainWindow::dropAudio);
+    connect(playlist_, &PlaylistView::audioClipChanged, this,
+        [this, songEdited](std::size_t index, AudioClip clip) {
+            if (index < project_.audioClips().size() && project_.audioClips()[index] == clip)
+                return;
+            project_.setAudioClip(index, std::move(clip));
+            playlist_->viewport()->update();
+            songEdited();
+        });
+    connect(playlist_, &PlaylistView::audioClipRemoved, this, [this, songEdited](std::size_t index) {
+        project_.removeAudioClip(index);
+        playlist_->refresh();
+        songEdited();
     });
     connect(playlist_, &PlaylistView::patternPicked, this, &MainWindow::selectPattern);
 
@@ -1277,6 +1788,7 @@ bool MainWindow::startDevice(int index, bool fallback)
     audio_.engine().setMixerState(engineMixerState(mixer_));
 
     syncChannelRack(); // samples at the device's rate
+    previewer_->setSampleRate(audio_.sampleRate());
 
     const QString format = tr("%1 Hz  ·  %2 samples").arg(audio_.sampleRate()).arg(audio_.bufferFrames());
     deviceStatus_->setText(
@@ -1338,7 +1850,8 @@ void MainWindow::watchDevice()
 
 void MainWindow::syncChannelRack()
 {
-    const auto errors = rackAudio_.sync(audio_.engine(), project_, currentPattern_, audio_.sampleRate());
+    const auto errors
+        = rackAudio_.sync(audio_.engine(), project_, currentPattern_, audio_.sampleRate(), songMode_);
     if (errors.empty())
         return;
     const auto& first = errors.front();
@@ -1371,7 +1884,6 @@ void MainWindow::newProject()
     pianoRoll_->setKey(0, Scale::Major);
     project_ = Project{};
     rackAudio_.reset();
-    transport_->patternSelector()->reset();
     currentPattern_ = 0;
     currentChannel_ = 0;
     refreshEditors();
@@ -1512,15 +2024,17 @@ void MainWindow::refreshFromEngine()
     const bool running = audio_.isRunning();
     const float left = running ? engine.takeOutputPeak(0) : 0.0f;
     const float right = running ? engine.takeOutputPeak(1) : 0.0f;
-    std::array<std::array<float, 2>, kMixerInserts> insertPeaks{};
-    for (std::size_t i = 1; i <= insertPeaks.size() && i < mixer_.size(); ++i)
-        if (running)
-            insertPeaks[i - 1] = {
-                engine.takeInsertPeak(static_cast<int>(i), 0), engine.takeInsertPeak(static_cast<int>(i), 1)};
-    if (mixerPanel_->isVisible()) {
+    const bool showMeters = mixerPanel_->isVisible();
+    if (showMeters)
         mixerPanel_->meter(MixerModel::kMaster)->addPeaks(left, right);
-        for (std::size_t i = 1; i <= insertPeaks.size() && i < mixer_.size(); ++i)
-            mixerPanel_->meter(i)->addPeaks(insertPeaks[i - 1][0], insertPeaks[i - 1][1]);
+    for (std::size_t i = 1; i < mixer_.size() && i < mixerPanel_->trackCount(); ++i) {
+        const auto insert = static_cast<int>(i);
+        const float l = running ? engine.takeInsertPeak(insert, 0) : 0.0f;
+        const float r = running ? engine.takeInsertPeak(insert, 1) : 0.0f;
+        if (showMeters)
+            mixerPanel_->meter(i)->addPeaks(l, r);
+    }
+    if (showMeters) {
         for (std::size_t i = 0; i < mixerPanel_->trackCount(); ++i)
             mixerPanel_->meter(i)->tick(dt);
     }

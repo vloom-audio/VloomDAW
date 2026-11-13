@@ -4,6 +4,7 @@
 
 #include "core/SampleFolder.hpp"
 #include "ui/FilePaths.hpp"
+#include "ui/browser/BrowserRoles.hpp"
 
 #include <QMimeData>
 #include <QThread>
@@ -114,6 +115,8 @@ QVariant SearchResultsModel::data(const QModelIndex& index, int role) const
         if (note)
             return {};
         return row.folder.isEmpty() ? row.name : row.folder + QLatin1Char('/') + row.name;
+    case kSampleFileRole:
+        return note ? QVariant() : QVariant(row.path);
     default:
         return {};
     }

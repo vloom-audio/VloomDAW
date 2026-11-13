@@ -77,6 +77,10 @@ QToolBar {
 /* "More" button a tool bar shows when it is too narrow for everything. */
 QToolBarExtension { border: none; border-radius: 6px; padding: 4px; }
 QToolBarExtension:hover { background: @raised; }
+/* The transport's own » and the drop-down with the groups that do not fit. */
+QToolButton#transportMore { border: none; border-radius: 6px; padding: 4px; }
+QToolButton#transportMore:hover { background: @raised; }
+QFrame#transportOverflow { background: @panel; border: 1px solid @border; border-radius: 8px; }
 
 /* Rounded groups of buttons on the tool bar. */
 QFrame#toolGroup {

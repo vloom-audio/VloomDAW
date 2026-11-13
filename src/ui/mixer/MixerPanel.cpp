@@ -9,7 +9,10 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QMenu>
 #include <QScrollArea>
+#include <QScrollBar>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -35,6 +38,25 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
     title->setObjectName(QStringLiteral("panelTitle"));
     header_->addWidget(title);
     header_->addStretch();
+    const auto headerButton = [headerBox](const QString& icon, const QString& text, const QString& tip) {
+        auto* button = new QToolButton(headerBox);
+        button->setObjectName(QStringLiteral("panelButton"));
+        button->setIcon(Theme::icon(icon));
+        button->setText(text);
+        button->setToolButtonStyle(text.isEmpty() ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
+        button->setToolTip(tip);
+        button->setFocusPolicy(Qt::NoFocus);
+        return button;
+    };
+    auto* removeInsert = headerButton(QStringLiteral("minus"), QString(), tr("Delete the last insert"));
+    connect(removeInsert, &QToolButton::clicked, this, [this] {
+        if (trackCount() > 1)
+            emit removeInsertRequested(trackCount() - 1);
+    });
+    header_->addWidget(removeInsert);
+    auto* addInsert = headerButton(QStringLiteral("plus"), tr("Insert"), tr("Add an insert"));
+    connect(addInsert, &QToolButton::clicked, this, &MixerPanel::addInsertRequested);
+    header_->addWidget(addInsert);
     detach_ = new DetachButton(tr("mixer"), headerBox);
     connect(detach_, &QToolButton::clicked, this, &MixerPanel::detachRequested);
     header_->addWidget(detach_);
@@ -54,41 +76,135 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
     body->setSpacing(8);
 
     auto* master = new MixerStrip(MixerStrip::Kind::Master, tr("Master"), tr("M"), this);
-    connectStrip(master, 0);
+    connectStrip(master);
     strips_.append(master);
     body->addWidget(master);
 
-    auto* inserts = new QWidget;
-    inserts->setObjectName(QStringLiteral("mixerInserts"));
-    auto* row = new QHBoxLayout(inserts);
-    row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(2);
+    inserts_ = new QWidget;
+    inserts_->setObjectName(QStringLiteral("mixerInserts"));
+    insertRow_ = new QHBoxLayout(inserts_);
+    insertRow_->setContentsMargins(0, 0, 0, 0);
+    insertRow_->setSpacing(2);
     for (std::size_t i = 1; i <= insertCount; ++i) {
-        auto* strip
-            = new MixerStrip(MixerStrip::Kind::Insert, tr("Insert %1").arg(i), QString::number(i), inserts);
-        connectStrip(strip, i);
+        MixerStrip* strip = makeInsertStrip(i);
         strips_.append(strip);
-        row->addWidget(strip);
+        insertRow_->addWidget(strip);
     }
-    row->addStretch();
+    insertRow_->addStretch();
 
-    auto* scroll = new QScrollArea(this);
-    scroll->setObjectName(QStringLiteral("mixerScroll"));
-    scroll->setWidget(inserts);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    body->addWidget(scroll, 1);
+    scroll_ = new QScrollArea(this);
+    scroll_->setObjectName(QStringLiteral("mixerScroll"));
+    scroll_->setWidget(inserts_);
+    scroll_->setWidgetResizable(true);
+    scroll_->setFrameShape(QFrame::NoFrame);
+    scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    body->addWidget(scroll_, 1);
 
     layout->addLayout(body, 1);
 }
 
-void MixerPanel::connectStrip(MixerStrip* strip, std::size_t track)
+MixerStrip* MixerPanel::makeInsertStrip(std::size_t track)
 {
-    connect(strip, &MixerStrip::faderChanged, this, [this, track](double p) { emit faderChanged(track, p); });
-    connect(strip, &MixerStrip::panChanged, this, [this, track](double p) { emit panChanged(track, p); });
-    connect(strip, &MixerStrip::muteToggled, this, [this, track](bool on) { emit muteToggled(track, on); });
-    connect(strip, &MixerStrip::soloToggled, this, [this, track](bool on) { emit soloToggled(track, on); });
+    auto* strip = new MixerStrip(
+        MixerStrip::Kind::Insert, tr("Insert %1").arg(track), QString::number(track), inserts_);
+    connectStrip(strip);
+    strip->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(strip, &QWidget::customContextMenuRequested, this, [this, strip](const QPoint& at) {
+        const auto index = static_cast<std::size_t>(strips_.indexOf(strip));
+        QMenu menu(this);
+        menu.addAction(tr("Rename…"), this, [this, index] { emit renameRequested(index); });
+        menu.addSeparator();
+        menu.addAction(tr("Move Left"), this, [this, index] { emit moveInsertRequested(index, index - 1); })
+            ->setEnabled(index > 1);
+        menu.addAction(tr("Move Right"), this, [this, index] { emit moveInsertRequested(index, index + 1); })
+            ->setEnabled(index + 1 < trackCount());
+        menu.addSeparator();
+        menu.addAction(
+            tr("Delete Insert %1").arg(index), this, [this, index] { emit removeInsertRequested(index); });
+        menu.exec(strip->mapToGlobal(at));
+    });
+    return strip;
+}
+
+void MixerPanel::connectStrip(MixerStrip* strip)
+{
+    // The track is looked up when the strip emits: deleting an insert
+    // renumbers the strips after it.
+    connect(strip, &MixerStrip::faderChanged, this, [this, strip](double p) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit faderChanged(static_cast<std::size_t>(i), p);
+    });
+    connect(strip, &MixerStrip::panChanged, this, [this, strip](double p) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit panChanged(static_cast<std::size_t>(i), p);
+    });
+    connect(strip, &MixerStrip::muteToggled, this, [this, strip](bool on) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit muteToggled(static_cast<std::size_t>(i), on);
+    });
+    connect(strip, &MixerStrip::soloToggled, this, [this, strip](bool on) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit soloToggled(static_cast<std::size_t>(i), on);
+    });
+    connect(strip, &MixerStrip::renameRequested, this, [this, strip] {
+        if (const auto i = strips_.indexOf(strip); i > 0)
+            emit renameRequested(static_cast<std::size_t>(i));
+    });
+}
+
+void MixerPanel::addInsert()
+{
+    MixerStrip* strip = makeInsertStrip(trackCount());
+    strips_.append(strip);
+    insertRow_->insertWidget(insertRow_->count() - 1, strip); // before the stretch
+    // Show the new strip once the row has its new width.
+    QTimer::singleShot(0, this,
+        [this] { scroll_->horizontalScrollBar()->setValue(scroll_->horizontalScrollBar()->maximum()); });
+}
+
+void MixerPanel::removeInsert(std::size_t track)
+{
+    if (track == 0 || track >= trackCount())
+        return;
+    MixerStrip* strip = strips_.takeAt(static_cast<qsizetype>(track));
+    insertRow_->removeWidget(strip);
+    strip->hide();
+    strip->deleteLater(); // not now: its context menu may be what asked
+    if (track < static_cast<std::size_t>(names_.size()))
+        names_.removeAt(static_cast<qsizetype>(track));
+    for (std::size_t i = track; i < trackCount(); ++i) {
+        const QString name = names_.value(static_cast<qsizetype>(i));
+        strips_[static_cast<qsizetype>(i)]->setLabel(
+            name.isEmpty() ? tr("Insert %1").arg(i) : name, QString::number(i));
+    }
+}
+
+void MixerPanel::moveInsert(std::size_t from, std::size_t to)
+{
+    if (from == 0 || to == 0 || from >= trackCount() || to >= trackCount() || from == to)
+        return;
+    MixerStrip* strip = strips_.takeAt(static_cast<qsizetype>(from));
+    strips_.insert(static_cast<qsizetype>(to), strip);
+    insertRow_->removeWidget(strip);
+    insertRow_->insertWidget(static_cast<int>(to) - 1, strip); // the row holds inserts only (and a stretch)
+    while (static_cast<std::size_t>(names_.size()) < trackCount())
+        names_.append(QString());
+    names_.move(static_cast<qsizetype>(from), static_cast<qsizetype>(to));
+    for (std::size_t i = 1; i < trackCount(); ++i) {
+        const QString name = names_.value(static_cast<qsizetype>(i));
+        strips_[static_cast<qsizetype>(i)]->setLabel(
+            name.isEmpty() ? tr("Insert %1").arg(i) : name, QString::number(i));
+    }
+}
+
+void MixerPanel::setTrackName(std::size_t track, const QString& name)
+{
+    if (track == 0 || track >= trackCount())
+        return;
+    while (static_cast<std::size_t>(names_.size()) <= track)
+        names_.append(QString());
+    names_[static_cast<qsizetype>(track)] = name == tr("Insert %1").arg(track) ? QString() : name;
+    strips_[static_cast<qsizetype>(track)]->setLabel(name, QString::number(track));
 }
 
 LevelMeter* MixerPanel::meter(std::size_t track) const

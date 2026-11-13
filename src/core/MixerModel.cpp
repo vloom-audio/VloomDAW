@@ -3,6 +3,7 @@
 #include "core/MixerModel.hpp"
 
 #include "core/Decibels.hpp"
+#include "core/Names.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +16,52 @@ MixerModel::MixerModel(std::size_t insertCount)
     tracks_[kMaster].name = "Master";
     for (std::size_t i = 1; i < tracks_.size(); ++i)
         tracks_[i].name = "Insert " + std::to_string(i);
+}
+
+std::optional<std::size_t> MixerModel::addInsert()
+{
+    if (insertCount() >= kMaxInserts)
+        return std::nullopt;
+    MixerTrack& added = tracks_.emplace_back();
+    added.name = "Insert " + std::to_string(tracks_.size() - 1);
+    return tracks_.size() - 1;
+}
+
+bool MixerModel::removeInsert(std::size_t index)
+{
+    if (index == kMaster || !valid(index))
+        return false;
+    tracks_.erase(tracks_.begin() + static_cast<std::ptrdiff_t>(index));
+    for (std::size_t i = index; i < tracks_.size(); ++i)
+        if (!tracks_[i].named)
+            tracks_[i].name = "Insert " + std::to_string(i);
+    return true;
+}
+
+std::size_t MixerModel::moveInsert(std::size_t from, std::size_t to)
+{
+    if (from == kMaster || !valid(from))
+        return from;
+    to = std::clamp<std::size_t>(to, 1, tracks_.size() - 1);
+    if (from == to)
+        return to;
+    MixerTrack moved = std::move(tracks_[from]);
+    tracks_.erase(tracks_.begin() + static_cast<std::ptrdiff_t>(from));
+    tracks_.insert(tracks_.begin() + static_cast<std::ptrdiff_t>(to), std::move(moved));
+    for (std::size_t i = 1; i < tracks_.size(); ++i)
+        if (!tracks_[i].named)
+            tracks_[i].name = "Insert " + std::to_string(i);
+    return to;
+}
+
+void MixerModel::setName(std::size_t index, const std::string& name)
+{
+    if (index == kMaster || !valid(index))
+        return;
+    const std::string trimmed = cleanName(name, kMaxNameLength);
+    MixerTrack& t = tracks_[index];
+    t.named = !trimmed.empty();
+    t.name = t.named ? trimmed : "Insert " + std::to_string(index);
 }
 
 void MixerModel::setFader(std::size_t index, double position)

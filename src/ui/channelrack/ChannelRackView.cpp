@@ -4,6 +4,7 @@
 
 #include "core/Decibels.hpp"
 #include "core/Project.hpp"
+#include "ui/DroppedFiles.hpp"
 #include "ui/Theme.hpp"
 
 #include <QDir>
@@ -31,36 +32,28 @@ constexpr int kLedX = 10;
 constexpr int kLedSize = 12;
 constexpr int kVolumeX = 30; ///< volume knob
 constexpr int kVolumeSize = 20;
-constexpr int kInsertX = kVolumeX + kVolumeSize + 6; ///< mixer insert box
+constexpr int kPanX = kVolumeX + kVolumeSize + 4; ///< pan knob, the same size
+constexpr int kInsertX = kPanX + kVolumeSize + 6; ///< mixer insert box
 constexpr int kInsertWidth = 30;
 constexpr int kNameX = kInsertX + kInsertWidth + 8;
 constexpr double kVolumePerPixel = 0.005; ///< knob drag; Shift: a fifth of it
+constexpr double kPanPerPixel = 0.01; ///< the whole pan range in 200 pixels, like volume
+
+/// "C", "L 35", "R 100".
+QString panText(double pan)
+{
+    const int percent = static_cast<int>(std::lround(std::abs(pan) * 100.0));
+    if (percent == 0)
+        return QStringLiteral("C");
+    return QStringLiteral("%1 %2").arg(pan < 0 ? QLatin1Char('L') : QLatin1Char('R')).arg(percent);
+}
 constexpr int kNameWidth = 130;
 constexpr int kPadsX = kNameX + kNameWidth + 12;
 constexpr int kPadWidth = 24;
 constexpr int kPadGap = 3;
 constexpr int kGroupGap = 7; ///< extra space between groups of four steps
+constexpr int kBarGap = 10; ///< and more between bars
 constexpr int kPadInset = 4; ///< vertical inset of a pad in its row
-
-/// The first local .wav file in a drag, or "" (only WAV can be loaded).
-QString droppedWav(const QMimeData* mime)
-{
-    if (mime == nullptr || !mime->hasUrls())
-        return {};
-    for (const QUrl& url : mime->urls()) {
-        // Local files only: file://host/share/x.wav would make Windows open
-        // an SMB connection to that host (and send the user's NTLM hash).
-        if (!url.isLocalFile() || !url.host().isEmpty())
-            continue;
-        const QString path = url.toLocalFile();
-        if (path.startsWith(QLatin1String("//")) || path.startsWith(QLatin1String("\\\\")))
-            continue;
-        if (!path.isEmpty()
-            && QFileInfo(path).suffix().compare(QStringLiteral("wav"), Qt::CaseInsensitive) == 0)
-            return path;
-    }
-    return {};
-}
 
 } // namespace
 
@@ -81,7 +74,7 @@ void ChannelRackView::setProject(const Project* project)
 void ChannelRackView::setPattern(std::size_t pattern)
 {
     pattern_ = pattern;
-    update();
+    refresh(); // patterns can have different numbers of pads
 }
 
 void ChannelRackView::setSelectedChannel(std::size_t channel)
@@ -119,16 +112,28 @@ std::size_t ChannelRackView::channelCount() const
     return project_ != nullptr ? project_->channels().size() : 0;
 }
 
+int ChannelRackView::stepCount() const
+{
+    return project_ != nullptr ? project_->stepCount(pattern_) : kStepsPerBar;
+}
+
+QRect ChannelRackView::addBarRect(std::size_t channel) const
+{
+    const QRect last = padRect(channel, stepCount() - 1);
+    return {last.right() + 1 + kGroupGap, last.top(), kPadWidth, last.height()};
+}
+
 QSize ChannelRackView::sizeHint() const
 {
-    const QRect last = padRect(0, kStepsPerBar - 1);
+    const QRect last = addBarRect(0);
     // One spare row: dropping a file there adds a channel.
     return {last.right() + 16, kTop + static_cast<int>(channelCount() + 1) * kRowHeight + kTop};
 }
 
 QRect ChannelRackView::padRect(std::size_t channel, int step) const
 {
-    const int x = kPadsX + step * (kPadWidth + kPadGap) + (step / 4) * kGroupGap;
+    const int x
+        = kPadsX + step * (kPadWidth + kPadGap) + (step / 4) * kGroupGap + (step / kStepsPerBar) * kBarGap;
     const int y = kTop + static_cast<int>(channel) * kRowHeight + kPadInset;
     return {x, y, kPadWidth, kRowHeight - 2 * kPadInset};
 }
@@ -143,13 +148,26 @@ ChannelRackView::Hit ChannelRackView::hitAt(const QPoint& pos) const
         return {Part::Mute, channel, -1};
     if (pos.x() >= kVolumeX - 2 && pos.x() < kVolumeX + kVolumeSize + 2)
         return {Part::Volume, channel, -1};
+    if (pos.x() >= kPanX && pos.x() < kPanX + kVolumeSize + 2)
+        return {Part::Pan, channel, -1};
     if (pos.x() >= kInsertX && pos.x() < kInsertX + kInsertWidth)
         return {Part::Insert, channel, -1};
     if (pos.x() >= kNameX && pos.x() < kNameX + kNameWidth)
         return {Part::Name, channel, -1};
-    for (int s = 0; s < kStepsPerBar; ++s)
-        if (padRect(channel, s).adjusted(-1, -kPadInset, 1, kPadInset).contains(pos))
+    if (pos.x() < kPadsX - 1)
+        return {};
+    // Pads are evenly spaced within a group of four: find the one under x.
+    const int steps = stepCount();
+    for (int s = 0; s < steps; ++s) {
+        const QRect pad = padRect(channel, s).adjusted(-1, -kPadInset, 1, kPadInset);
+        if (pad.contains(pos))
             return {Part::Step, channel, s};
+        if (pad.left() > pos.x())
+            return {};
+    }
+    if (steps < Project::kMaxSteps
+        && addBarRect(channel).adjusted(-1, -kPadInset, 1, kPadInset).contains(pos))
+        return {Part::AddBar, channel, -1};
     return {};
 }
 
@@ -182,6 +200,18 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
         p.setPen(QPen(channel.muted ? c.textDim : c.accent, 2.5, Qt::SolidLine, Qt::RoundCap));
         p.drawArc(knob, kStart, static_cast<int>(kSpan * channel.volume));
 
+        // Pan knob: the same arc, lit from 12 o'clock towards the side.
+        const QRectF panKnob = knob.translated(kPanX - kVolumeX, 0);
+        constexpr int kNoon = 90 * 16;
+        p.setPen(QPen(c.border, 2.5, Qt::SolidLine, Qt::RoundCap));
+        p.drawArc(panKnob, kStart, kSpan);
+        p.setPen(QPen(channel.muted ? c.textDim : c.accent, 2.5, Qt::SolidLine, Qt::RoundCap));
+        const int panSpan = static_cast<int>(-channel.pan * 135 * 16); // right: clockwise (negative)
+        if (panSpan != 0)
+            p.drawArc(panKnob, kNoon, panSpan);
+        else
+            p.drawPoint(QPointF(panKnob.center().x(), panKnob.top()));
+
         // Mixer insert box: "-" for the master, else the insert number.
         const QRect insertRect(kInsertX, y + kPadInset + 3, kInsertWidth, kRowHeight - 2 * kPadInset - 6);
         p.setBrush(c.panel);
@@ -203,7 +233,8 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
                 QString::fromStdString(channel.name), Qt::ElideRight, nameRect.width() - 14));
 
         // Step pads: alternate groups of four are shaded differently.
-        for (int s = 0; s < kStepsPerBar; ++s) {
+        const int steps = stepCount();
+        for (int s = 0; s < steps; ++s) {
             const QRectF pad = QRectF(padRect(ch, s)).adjusted(0.5, 0.5, -0.5, -0.5);
             const bool on = project_->step(pattern_, ch, s);
             const bool evenGroup = (s / 4) % 2 == 0;
@@ -214,13 +245,22 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
             p.setPen(QPen(s == playStep_ ? c.text : c.border, s == playStep_ ? 1.5 : 1.0));
             p.drawRoundedRect(pad, 3, 3);
         }
+        if (steps < Project::kMaxSteps) {
+            // "+": one bar of pads more.
+            const QRectF add = QRectF(addBarRect(ch)).adjusted(0.5, 0.5, -0.5, -0.5);
+            QPen dashed(c.border, 1.0, Qt::DashLine);
+            p.setPen(dashed);
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(add, 3, 3);
+            p.setPen(c.textDim);
+            p.drawText(add, Qt::AlignCenter, QStringLiteral("+"));
+        }
     }
 
     // Drop target while a WAV file is dragged over.
     if (dropRow_ >= 0) {
         const int y = kTop + dropRow_ * kRowHeight;
-        const QRectF row(
-            kNameX - 2, y + 1, padRect(0, kStepsPerBar - 1).right() - kNameX + 4, kRowHeight - 2);
+        const QRectF row(kNameX - 2, y + 1, padRect(0, stepCount() - 1).right() - kNameX + 4, kRowHeight - 2);
         QPen pen(c.accent, 1.5);
         if (static_cast<std::size_t>(dropRow_) >= channelCount()) {
             pen.setStyle(Qt::DashLine);
@@ -288,11 +328,23 @@ bool ChannelRackView::event(QEvent* event)
                 this);
             return true;
         }
+        if (hit.part == Part::Pan) {
+            QToolTip::showText(help->globalPos(),
+                tr("Pan %1\nDrag or scroll; Shift: fine; double-click: centre")
+                    .arg(panText(project_->channels()[hit.channel].pan)),
+                this);
+            return true;
+        }
         if (hit.part == Part::Insert) {
             QToolTip::showText(help->globalPos(),
                 tr("Plays into: %1\nClick to choose a mixer insert, or scroll")
                     .arg(insertLabel(project_->channels()[hit.channel].insert)),
                 this);
+            return true;
+        }
+        if (hit.part == Part::AddBar) {
+            QToolTip::showText(help->globalPos(),
+                tr("Add a bar: %1 step pads more for every channel").arg(kStepsPerBar), this);
             return true;
         }
         if (hit.part == Part::Name) {
@@ -320,10 +372,15 @@ void ChannelRackView::mousePressEvent(QMouseEvent* event)
         emit muteToggled(hit.channel);
         return;
     }
-    if (event->button() == Qt::LeftButton && hit.part == Part::Volume) {
-        draggingVolume_ = true;
-        volumeChannel_ = hit.channel;
-        volumeAtPress_ = project_->channels()[hit.channel].volume;
+    if (event->button() == Qt::LeftButton && hit.part == Part::AddBar) {
+        emit addBarRequested();
+        return;
+    }
+    if (event->button() == Qt::LeftButton && (hit.part == Part::Volume || hit.part == Part::Pan)) {
+        draggedKnob_ = hit.part;
+        knobChannel_ = hit.channel;
+        const Channel& channel = project_->channels()[hit.channel];
+        knobAtPress_ = hit.part == Part::Volume ? channel.volume : channel.pan;
         pressY_ = event->position().y();
         return;
     }
@@ -347,12 +404,16 @@ void ChannelRackView::mousePressEvent(QMouseEvent* event)
 
 void ChannelRackView::mouseMoveEvent(QMouseEvent* event)
 {
-    if (draggingVolume_) {
-        const double perPixel
-            = event->modifiers().testFlag(Qt::ShiftModifier) ? kVolumePerPixel / 5 : kVolumePerPixel;
-        const double volume
-            = std::clamp(volumeAtPress_ + (pressY_ - event->position().y()) * perPixel, 0.0, 1.0);
-        emit volumeChanged(volumeChannel_, volume);
+    if (draggedKnob_ != Part::None) {
+        const bool pan = draggedKnob_ == Part::Pan;
+        double perPixel = pan ? kPanPerPixel : kVolumePerPixel;
+        if (event->modifiers().testFlag(Qt::ShiftModifier))
+            perPixel /= 5;
+        const double value = knobAtPress_ + (pressY_ - event->position().y()) * perPixel;
+        if (pan)
+            emit panChanged(knobChannel_, std::clamp(value, -1.0, 1.0));
+        else
+            emit volumeChanged(knobChannel_, std::clamp(value, 0.0, 1.0));
         return;
     }
     if (!painting_)
@@ -366,7 +427,7 @@ void ChannelRackView::mouseMoveEvent(QMouseEvent* event)
 
 void ChannelRackView::mouseReleaseEvent(QMouseEvent* /*event*/)
 {
-    draggingVolume_ = false;
+    draggedKnob_ = Part::None;
     painting_ = false;
     lastPaintedStep_ = -1;
 }
@@ -378,6 +439,8 @@ void ChannelRackView::mouseDoubleClickEvent(QMouseEvent* event)
         emit channelOpened(hit.channel);
     else if (event->button() == Qt::LeftButton && hit.part == Part::Volume)
         emit volumeChanged(hit.channel, kUnityFaderPosition);
+    else if (event->button() == Qt::LeftButton && hit.part == Part::Pan)
+        emit panChanged(hit.channel, 0.0);
     else
         mousePressEvent(event); // fast clicks on pads still toggle
 }
@@ -386,13 +449,16 @@ void ChannelRackView::wheelEvent(QWheelEvent* event)
 {
     const Hit hit = hitAt(event->position().toPoint());
     const int notches = event->angleDelta().y() / 120;
-    if (project_ == nullptr || notches == 0 || (hit.part != Part::Volume && hit.part != Part::Insert)) {
+    if (project_ == nullptr || notches == 0
+        || (hit.part != Part::Volume && hit.part != Part::Pan && hit.part != Part::Insert)) {
         event->ignore(); // let the rack scroll
         return;
     }
     const Channel& channel = project_->channels()[hit.channel];
     if (hit.part == Part::Volume) {
         emit volumeChanged(hit.channel, std::clamp(channel.volume + 0.02 * notches, 0.0, 1.0));
+    } else if (hit.part == Part::Pan) {
+        emit panChanged(hit.channel, std::clamp(channel.pan + 0.05 * notches, -1.0, 1.0));
     } else {
         const int last = static_cast<int>(insertNames_.size()) - 1;
         emit insertChanged(hit.channel, std::clamp(channel.insert + notches, 0, std::max(last, 0)));
