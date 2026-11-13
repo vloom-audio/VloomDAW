@@ -110,17 +110,17 @@ MixerStrip* MixerPanel::makeInsertStrip(std::size_t track)
     connectStrip(strip);
     strip->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(strip, &QWidget::customContextMenuRequested, this, [this, strip](const QPoint& at) {
-        const auto track = static_cast<std::size_t>(strips_.indexOf(strip));
+        const auto index = static_cast<std::size_t>(strips_.indexOf(strip));
         QMenu menu(this);
-        menu.addAction(tr("Rename…"), this, [this, track] { emit renameRequested(track); });
+        menu.addAction(tr("Rename…"), this, [this, index] { emit renameRequested(index); });
         menu.addSeparator();
-        menu.addAction(tr("Move Left"), this, [this, track] { emit moveInsertRequested(track, track - 1); })
-            ->setEnabled(track > 1);
-        menu.addAction(tr("Move Right"), this, [this, track] { emit moveInsertRequested(track, track + 1); })
-            ->setEnabled(track + 1 < trackCount());
+        menu.addAction(tr("Move Left"), this, [this, index] { emit moveInsertRequested(index, index - 1); })
+            ->setEnabled(index > 1);
+        menu.addAction(tr("Move Right"), this, [this, index] { emit moveInsertRequested(index, index + 1); })
+            ->setEnabled(index + 1 < trackCount());
         menu.addSeparator();
         menu.addAction(
-            tr("Delete Insert %1").arg(track), this, [this, track] { emit removeInsertRequested(track); });
+            tr("Delete Insert %1").arg(index), this, [this, index] { emit removeInsertRequested(index); });
         menu.exec(strip->mapToGlobal(at));
     });
     return strip;
