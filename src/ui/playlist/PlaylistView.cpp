@@ -9,6 +9,8 @@
 #include <QDragEnterEvent>
 #include <QFileInfo>
 #include <QHelpEvent>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -47,6 +49,13 @@ PlaylistView::PlaylistView(QWidget* parent)
     viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
     horizontalScrollBar()->setSingleStep(32);
     verticalScrollBar()->setSingleStep(kTrackHeight);
+
+    inlineEditor_ = new QLineEdit(viewport());
+    inlineEditor_->hide();
+    inlineEditor_->setObjectName(QStringLiteral("playlistTrackNameEditor"));
+    inlineEditor_->setMaxLength(static_cast<int>(Project::kMaxTrackNameLength));
+    inlineEditor_->installEventFilter(this);
+    connect(inlineEditor_, &QLineEdit::editingFinished, this, &PlaylistView::commitTrackNameEdit);
 }
 
 void PlaylistView::setProject(const Project* project)
@@ -109,6 +118,8 @@ void PlaylistView::setPlayhead(double tick)
 
 void PlaylistView::refresh()
 {
+    if (editingTrack_ >= 0 && inlineEditor_ != nullptr && inlineEditor_->isVisible())
+        inlineEditor_->setGeometry(trackNameRect(editingTrack_));
     updateScrollBars();
     viewport()->update();
 }
@@ -297,9 +308,16 @@ void PlaylistView::resizeEvent(QResizeEvent* event)
 {
     QAbstractScrollArea::resizeEvent(event);
     updateScrollBars();
+    if (editingTrack_ >= 0 && inlineEditor_->isVisible())
+        inlineEditor_->setGeometry(trackNameRect(editingTrack_));
 }
 
-void PlaylistView::scrollContentsBy(int /*dx*/, int /*dy*/) { viewport()->update(); }
+void PlaylistView::scrollContentsBy(int /*dx*/, int /*dy*/)
+{
+    if (editingTrack_ >= 0 && inlineEditor_->isVisible())
+        inlineEditor_->setGeometry(trackNameRect(editingTrack_));
+    viewport()->update();
+}
 
 void PlaylistView::paintEvent(QPaintEvent* event)
 {
@@ -386,12 +404,14 @@ void PlaylistView::paintEvent(QPaintEvent* event)
         const QRect h(0, yOfTrack(t), kHeaderWidth, kTrackHeight);
         if (!h.intersects(headers))
             continue;
-        const QRect text = h.adjusted(10, 0, -6, 0);
-        p.setPen(c.text);
-        p.drawText(text, Qt::AlignVCenter | Qt::AlignLeft,
-            p.fontMetrics().elidedText(
-                QString::fromStdString(project_->tracks()[static_cast<std::size_t>(t)].name), Qt::ElideRight,
-                text.width()));
+        if (t != editingTrack_ || inlineEditor_ == nullptr || !inlineEditor_->isVisible()) {
+            const QRect text = trackNameRect(t);
+            p.setPen(c.text);
+            p.drawText(text, Qt::AlignVCenter | Qt::AlignLeft,
+                p.fontMetrics().elidedText(
+                    QString::fromStdString(project_->tracks()[static_cast<std::size_t>(t)].name),
+                    Qt::ElideRight, text.width()));
+        }
         p.fillRect(QRect(0, h.bottom(), kHeaderWidth, 1), c.border);
     }
     p.restore();
@@ -445,13 +465,85 @@ int PlaylistView::headerTrackAt(const QPoint& pos) const
     return track >= 0 && track < trackCount() ? track : -1;
 }
 
+QRect PlaylistView::trackNameRect(int track) const
+{
+    const QRect h(0, yOfTrack(track), kHeaderWidth, kTrackHeight);
+    return h.adjusted(10, 0, -6, 0);
+}
+
+void PlaylistView::startTrackNameEdit(int track)
+{
+    if (project_ == nullptr || track < 0 || track >= trackCount())
+        return;
+    editingTrack_ = track;
+    const auto& t = project_->tracks()[static_cast<std::size_t>(track)];
+    const auto& c = Theme::colors();
+    inlineEditor_->setStyleSheet(QStringLiteral("QLineEdit#playlistTrackNameEditor {"
+                                                "  background-color: %1;"
+                                                "  color: %2;"
+                                                "  border: 1px solid %3;"
+                                                "  border-radius: 2px;"
+                                                "  padding: 1px 4px;"
+                                                "  font-size: 11px;"
+                                                "}")
+            .arg(c.base.name(), c.text.name(), c.accent.name()));
+    inlineEditor_->setMaxLength(static_cast<int>(Project::kMaxTrackNameLength));
+    inlineEditor_->setGeometry(trackNameRect(track));
+    inlineEditor_->setText(t.named ? QString::fromStdString(t.name) : QString());
+    inlineEditor_->setPlaceholderText(QString::fromStdString(t.name));
+    inlineEditor_->selectAll();
+    inlineEditor_->show();
+    inlineEditor_->setFocus();
+}
+
+void PlaylistView::commitTrackNameEdit()
+{
+    if (editingTrack_ < 0 || project_ == nullptr
+        || static_cast<std::size_t>(editingTrack_) >= project_->tracks().size()) {
+        if (inlineEditor_ != nullptr)
+            inlineEditor_->hide();
+        editingTrack_ = -1;
+        return;
+    }
+    const int track = editingTrack_;
+    editingTrack_ = -1;
+    const auto& t = project_->tracks()[static_cast<std::size_t>(track)];
+    const QString current = t.named ? QString::fromStdString(t.name) : QString();
+    const QString newName = inlineEditor_->text().trimmed();
+    inlineEditor_->hide();
+    if (newName != current)
+        emit trackNameEdited(static_cast<std::size_t>(track), newName);
+}
+
+bool PlaylistView::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == inlineEditor_ && event->type() == QEvent::KeyPress) {
+        const auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Escape) {
+            editingTrack_ = -1;
+            inlineEditor_->hide();
+            viewport()->update();
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+            commitTrackNameEdit();
+            return true;
+        }
+    }
+    return QAbstractScrollArea::eventFilter(watched, event);
+}
+
 void PlaylistView::mousePressEvent(QMouseEvent* event)
 {
     const QPoint pos = event->position().toPoint();
+    if (editingTrack_ >= 0 && inlineEditor_->isVisible()) {
+        if (!inlineEditor_->geometry().contains(pos))
+            commitTrackNameEdit();
+    }
     if (const int track = headerTrackAt(pos); track >= 0 && event->button() == Qt::RightButton) {
         QMenu menu(this);
         const auto t = static_cast<std::size_t>(track);
-        menu.addAction(tr("Rename…"), this, [this, t] { emit trackRenameRequested(t); });
+        menu.addAction(tr("Rename…"), this, [this, track] { startTrackNameEdit(track); });
         menu.addSeparator();
         menu.addAction(tr("Move Up"), this, [this, t] { emit trackMoveRequested(t, t - 1); })
             ->setEnabled(t > 0);
@@ -493,6 +585,10 @@ void PlaylistView::mouseMoveEvent(QMouseEvent* event)
 {
     const QPoint pos = event->position().toPoint();
     if (!dragging_) {
+        if (const int track = headerTrackAt(pos); track >= 0) {
+            viewport()->setCursor(trackNameRect(track).contains(pos) ? Qt::IBeamCursor : Qt::ArrowCursor);
+            return;
+        }
         viewport()->setCursor(clipAt(pos) ? Qt::OpenHandCursor : Qt::ArrowCursor);
         return;
     }
@@ -523,13 +619,14 @@ void PlaylistView::mouseReleaseEvent(QMouseEvent* /*event*/)
 
 void PlaylistView::mouseDoubleClickEvent(QMouseEvent* event)
 {
-    if (const int track = headerTrackAt(event->position().toPoint());
-        track >= 0 && event->button() == Qt::LeftButton) {
-        emit trackRenameRequested(static_cast<std::size_t>(track));
+    const QPoint pos = event->position().toPoint();
+    if (const int track = headerTrackAt(pos);
+        track >= 0 && event->button() == Qt::LeftButton && trackNameRect(track).contains(pos)) {
+        startTrackNameEdit(track);
         return;
     }
     if (event->button() == Qt::LeftButton)
-        if (const auto hit = clipAt(event->position().toPoint()); hit && !hit->audio && project_ != nullptr) {
+        if (const auto hit = clipAt(pos); hit && !hit->audio && project_ != nullptr) {
             emit patternPicked(project_->clips()[hit->index].pattern);
             return;
         }

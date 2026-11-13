@@ -594,7 +594,7 @@ void MainWindow::renamePlaylistTrack(std::size_t track)
     if (!ok)
         return;
     project_.setTrackName(track, name.toStdString());
-    playlist_->viewport()->update();
+    playlist_->refresh();
 }
 
 void MainWindow::removeMixerInsert(std::size_t track)
@@ -1339,6 +1339,12 @@ QWidget* MainWindow::createWorkspace()
     playlistFrame_->addHeaderWidget(removeTrack);
     playlistFrame_->addHeaderWidget(addTrack);
     connect(playlist_, &PlaylistView::trackRenameRequested, this, &MainWindow::renamePlaylistTrack);
+    connect(playlist_, &PlaylistView::trackNameEdited, this, [this](std::size_t track, const QString& name) {
+        if (track >= project_.tracks().size())
+            return;
+        project_.setTrackName(track, name.toStdString());
+        playlist_->refresh();
+    });
     connect(playlist_, &PlaylistView::trackRemoveRequested, this, &MainWindow::removePlaylistTrack);
     connect(playlist_, &PlaylistView::trackMoveRequested, this, [this](std::size_t from, std::size_t to) {
         if (from >= project_.tracks().size() || to >= project_.tracks().size())

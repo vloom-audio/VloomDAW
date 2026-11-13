@@ -387,6 +387,32 @@ TEST_CASE("Playlist tracks can be added, named and removed", "[project]")
     CHECK(p.clips()[0].track == 14); // clamped to the tracks there are
 }
 
+TEST_CASE("Untouched default playlist track names stay unnamed and renumber", "[project]")
+{
+    Project p;
+    p.addTrack();
+    p.addTrack(); // Track 1, Track 2, Track 3
+    REQUIRE(p.tracks().size() == 3);
+    CHECK_FALSE(p.tracks()[0].named);
+    CHECK_FALSE(p.tracks()[1].named);
+    CHECK_FALSE(p.tracks()[2].named);
+
+    // Setting whitespace or blank resets named to false and keeps the default name
+    p.setTrackName(1, "   ");
+    CHECK_FALSE(p.tracks()[1].named);
+    CHECK(p.tracks()[1].name == "Track 2");
+
+    // Named track keeps its name, while unnamed tracks renumber on move or removal
+    p.setTrackName(0, "Lead");
+    CHECK(p.tracks()[0].named);
+    CHECK(p.tracks()[0].name == "Lead");
+
+    p.removeTrack(1); // removes Track 2
+    CHECK(p.tracks()[0].name == "Lead");
+    CHECK(p.tracks()[1].name == "Track 2"); // was Track 3, renumbered because !named
+    CHECK_FALSE(p.tracks()[1].named);
+}
+
 TEST_CASE("The playlist keeps between one and the most tracks", "[project]")
 {
     Project p;
