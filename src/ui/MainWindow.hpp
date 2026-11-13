@@ -49,6 +49,7 @@ class DeviceScanner;
 class AudioController;
 class ActivityBar;
 class BrowserPanel;
+class SamplePreviewer;
 class ChannelRackView;
 class MixerPanel;
 class DetachButton;
@@ -198,6 +199,7 @@ private:
     QSplitter* splitter_ = nullptr;
     QStackedWidget* sidePanels_ = nullptr;
     BrowserPanel* browser_ = nullptr;
+    SamplePreviewer* previewer_ = nullptr; ///< plays the browser's files
     PluginsPanel* pluginsPanel_ = nullptr;
     PluginManagerDialog* pluginManager_ = nullptr; ///< created on first use
     PluginStore pluginStore_;

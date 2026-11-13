@@ -72,6 +72,11 @@ qt_add_library(vloomdaw_ui STATIC
     ui/FilePaths.hpp
     ui/browser/BrowserPanel.cpp
     ui/browser/BrowserPanel.hpp
+    ui/DroppedFiles.cpp
+    ui/DroppedFiles.hpp
+    ui/browser/BrowserRoles.hpp
+    ui/browser/SamplePreviewer.cpp
+    ui/browser/SamplePreviewer.hpp
     ui/browser/SampleTreeModel.cpp
     ui/browser/SampleTreeModel.hpp
     ui/browser/SearchResultsModel.cpp
@@ -180,6 +185,7 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/plug.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/plus.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/record.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/refresh.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/rewind.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/settings.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/sliders.svg

@@ -12,6 +12,7 @@
 #include "ui/DeviceScanner.hpp"
 #include "ui/Theme.hpp"
 #include "ui/browser/BrowserPanel.hpp"
+#include "ui/browser/SamplePreviewer.hpp"
 #include "ui/channelrack/ChannelRackView.hpp"
 #include "ui/dialogs/SettingsDialog/AudioSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp"
@@ -718,6 +719,25 @@ void MainWindow::createCentralArea()
             settings_.save();
         });
     sidePanels_->addWidget(browser_);
+
+    previewer_ = new SamplePreviewer(audio_.engine(), this);
+    previewer_->setSampleRate(audio_.sampleRate());
+    browser_->setAutoPreview(settings_.browserAutoPreview);
+    connect(browser_, &BrowserPanel::autoPreviewChanged, this, [this](bool on) {
+        settings_.browserAutoPreview = on;
+        settings_.save();
+    });
+    connect(browser_, &BrowserPanel::previewRequested, previewer_, &SamplePreviewer::play);
+    connect(browser_, &BrowserPanel::previewToggled, this, [this](const QString& path) {
+        if (previewer_->playingPath() == path)
+            previewer_->stop();
+        else
+            previewer_->play(path);
+    });
+    connect(browser_, &BrowserPanel::previewStopRequested, previewer_, &SamplePreviewer::stop);
+    connect(previewer_, &SamplePreviewer::failed, this, [this](const QString& path, const QString& error) {
+        statusBar()->showMessage(tr("Cannot preview %1: %2").arg(QFileInfo(path).fileName(), error), 6000);
+    });
     activityBar_->addPage(Theme::icon(QStringLiteral("folder")), tr("Browser"));
 
     // Plugins: only what the user's last scan found; nothing scans on its own.
@@ -1281,6 +1301,7 @@ bool MainWindow::startDevice(int index, bool fallback)
     audio_.engine().setMixerState(engineMixerState(mixer_));
 
     syncChannelRack(); // samples at the device's rate
+    previewer_->setSampleRate(audio_.sampleRate());
 
     const QString format = tr("%1 Hz  ·  %2 samples").arg(audio_.sampleRate()).arg(audio_.bufferFrames());
     deviceStatus_->setText(

@@ -3,6 +3,7 @@
 #include "ui/browser/BrowserPanel.hpp"
 
 #include "ui/Theme.hpp"
+#include "ui/browser/BrowserRoles.hpp"
 #include "ui/browser/SampleTreeModel.hpp"
 #include "ui/browser/SearchResultsModel.hpp"
 
@@ -12,14 +13,20 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
+#include <QItemSelectionModel>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMouseEvent>
+#include <QScrollBar>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include <vector>
 
 namespace vloomdaw {
 
@@ -75,6 +82,8 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     connect(addButton, &QToolButton::clicked, this, &BrowserPanel::addFolder);
     removeButton_ = smallButton(this, QStringLiteral("minus"), tr("Remove this folder from the list"));
     connect(removeButton_, &QToolButton::clicked, this, &BrowserPanel::removeFolder);
+    auto* refreshButton = smallButton(this, QStringLiteral("refresh"), tr("Refresh (F5)"));
+    connect(refreshButton, &QToolButton::clicked, this, &BrowserPanel::refresh);
 
     search_ = new QLineEdit(this);
     search_->setObjectName(QStringLiteral("browserSearch"));
@@ -89,6 +98,13 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     auto* leaveSearch
         = new QShortcut(QKeySequence(Qt::Key_Escape), search_, nullptr, nullptr, Qt::WidgetShortcut);
     connect(leaveSearch, &QShortcut::activated, search_, [this] { search_->clearFocus(); });
+
+    autoPreview_ = smallButton(this, QStringLiteral("speaker"),
+        tr("Auto preview: play each file as you move to it with the arrow keys"));
+    autoPreview_->setObjectName(QStringLiteral("autoPreview"));
+    autoPreview_->setCheckable(true);
+    autoPreview_->setChecked(true);
+    connect(autoPreview_, &QToolButton::toggled, this, &BrowserPanel::autoPreviewChanged);
 
     // Folders are read, and searched, on worker threads (SampleTreeModel,
     // SearchResultsModel): big sample libraries must not freeze the UI.
@@ -107,6 +123,9 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     results_->setModel(resultsModel_);
     results_->setRootIsDecorated(false);
     results_->hide();
+    watchForPreview(tree_);
+    watchForPreview(results_);
+    connect(model_, &QAbstractItemModel::rowsInserted, this, &BrowserPanel::restoreRows);
 
     emptyHint_ = new QLabel(tr("Add a folder with your samples using +."), this);
     emptyHint_->setObjectName(QStringLiteral("panelHint"));
@@ -123,13 +142,18 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     folderRow->addWidget(folders_, 1);
     folderRow->addWidget(addButton);
     folderRow->addWidget(removeButton_);
+    folderRow->addWidget(refreshButton);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(10, 10, 6, 6);
     layout->setSpacing(8);
     layout->addWidget(title);
     layout->addLayout(folderRow);
-    layout->addWidget(search_);
+    auto* searchRow = new QHBoxLayout;
+    searchRow->setSpacing(4);
+    searchRow->addWidget(search_, 1);
+    searchRow->addWidget(autoPreview_);
+    layout->addLayout(searchRow);
     layout->addWidget(tree_, 1);
     layout->addWidget(results_, 1);
     layout->addWidget(emptyHint_, 1);
@@ -150,8 +174,129 @@ void BrowserPanel::setFolders(const QStringList& folders, const QString& current
     showFolder(folders_->currentData().toString());
 }
 
+void BrowserPanel::setAutoPreview(bool on)
+{
+    const QSignalBlocker block(autoPreview_);
+    autoPreview_->setChecked(on);
+}
+
+bool BrowserPanel::autoPreview() const { return autoPreview_->isChecked(); }
+
+void BrowserPanel::watchForPreview(QAbstractItemView* view)
+{
+    // A file that becomes current plays: by a click always, by the arrow
+    // keys while Auto preview is on.
+    connect(view->selectionModel(), &QItemSelectionModel::currentChanged, this,
+        [this](const QModelIndex& current) {
+            const QString path = current.data(kSampleFileRole).toString();
+            if (path.isEmpty() || restoring_)
+                return;
+            if (mouseDown_ || autoPreview_->isChecked())
+                emit previewRequested(path);
+        });
+    // A click on the file that was already current does not change the
+    // current item: toggle it instead.
+    connect(view, &QAbstractItemView::clicked, this, [this](const QModelIndex& index) {
+        const QString path = index.data(kSampleFileRole).toString();
+        if (pressedOnCurrent_ && !path.isEmpty())
+            emit previewToggled(path);
+    });
+    view->viewport()->installEventFilter(this);
+    view->installEventFilter(this);
+}
+
+bool BrowserPanel::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::MouseButtonPress) {
+        // Seen before the view moves its current item to the press.
+        for (QAbstractItemView* view :
+            {static_cast<QAbstractItemView*>(tree_), static_cast<QAbstractItemView*>(results_)}) {
+            if (watched == view->viewport()) {
+                const auto* mouse = static_cast<QMouseEvent*>(event);
+                const QModelIndex hit = view->indexAt(mouse->position().toPoint());
+                pressedOnCurrent_ = hit.isValid() && hit == view->currentIndex();
+                mouseDown_ = true;
+            }
+        }
+    } else if (event->type() == QEvent::MouseButtonRelease) {
+        mouseDown_ = false;
+    } else if (event->type() == QEvent::ShortcutOverride && (watched == tree_ || watched == results_)
+        && static_cast<QKeyEvent*>(event)->key() == Qt::Key_F5) {
+        // F5 opens the playlist elsewhere; in the browser's lists it refreshes.
+        event->accept();
+        return true;
+    } else if (event->type() == QEvent::KeyPress && (watched == tree_ || watched == results_)
+        && static_cast<QKeyEvent*>(event)->key() == Qt::Key_F5) {
+        refresh();
+        return true;
+    } else if (event->type() == QEvent::KeyPress && (watched == tree_ || watched == results_)) {
+        mouseDown_ = false; // a drag can swallow the release
+        if (static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+            emit previewStopRequested();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void BrowserPanel::refresh()
+{
+    if (root_.isEmpty())
+        return;
+    if (results_->isVisible()) {
+        applySearch(); // the same words, read again
+        return;
+    }
+    // Note what is open, selected and scrolled to, read the folder again,
+    // then put it all back as the rows arrive (restoreRows()).
+    reopen_.clear();
+    std::vector<QModelIndex> folders{QModelIndex()};
+    while (!folders.empty()) {
+        const QModelIndex parent = folders.back();
+        folders.pop_back();
+        for (int row = 0; row < model_->rowCount(parent); ++row) {
+            const QModelIndex child = model_->index(row, 0, parent);
+            if (tree_->isExpanded(child)) {
+                reopen_ << child.data(kItemPathRole).toString();
+                folders.push_back(child);
+            }
+        }
+    }
+    reselect_ = tree_->currentIndex().data(kItemPathRole).toString();
+    rescroll_ = tree_->verticalScrollBar()->value();
+    model_->setRootPath(root_);
+}
+
+void BrowserPanel::restoreRows(const QModelIndex& parent, int first, int last)
+{
+    if (reopen_.isEmpty() && reselect_.isEmpty() && rescroll_ < 0)
+        return;
+    for (int row = first; row <= last; ++row) {
+        const QModelIndex child = model_->index(row, 0, parent);
+        const QString path = child.data(kItemPathRole).toString();
+        if (reopen_.removeOne(path))
+            tree_->expand(child); // reads it; its rows come back through here
+        if (!reselect_.isEmpty() && path == reselect_) {
+            reselect_.clear();
+            restoring_ = true; // putting the selection back is not a click
+            tree_->setCurrentIndex(child);
+            restoring_ = false;
+        }
+    }
+    if (rescroll_ >= 0) {
+        // The list grows as folders are read: go back as far as it allows each time.
+        QTimer::singleShot(
+            0, this, [this, target = rescroll_] { tree_->verticalScrollBar()->setValue(target); });
+        if (reopen_.isEmpty())
+            rescroll_ = -1;
+    }
+}
+
 void BrowserPanel::showFolder(const QString& path)
 {
+    reopen_.clear(); // a refresh in progress is for the old folder
+    reselect_.clear();
+    rescroll_ = -1;
     folders_->setToolTip(path);
     // With no folder, show a hint: an empty root path would list the whole disk.
     const bool hasFolder = !path.isEmpty();
