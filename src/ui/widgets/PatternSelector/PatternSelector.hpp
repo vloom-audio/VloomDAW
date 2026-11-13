@@ -3,6 +3,7 @@
 #pragma once
 
 #include <QFrame>
+#include <QStringList>
 
 class QAction;
 class QActionGroup;
@@ -12,47 +13,42 @@ class QToolButton;
 namespace vloomdaw {
 
 /// "[ Pattern 1 ▾ | + | − ]": picks the current pattern from a menu, adds
-/// and deletes patterns, like FL Studio's pattern selector. Patterns are
-/// numbered from 1; deleting one renumbers the ones after it. There is
-/// always at least one pattern.
+/// and deletes patterns, like FL Studio's pattern selector.
+///
+/// A pure view of the project's patterns: it shows the names and order it is
+/// given with setPatterns() and only emits what the user asked for; the
+/// project (through MainWindow) adds, deletes, renames and reorders them.
+/// Indices are 0-based, as in core/Project.
 class PatternSelector : public QFrame {
     Q_OBJECT
 
 public:
     explicit PatternSelector(QSize iconSize, QWidget* parent = nullptr);
 
+    /// Shows these patterns with `current` selected. Never emits.
+    void setPatterns(const QStringList& names, int current);
     [[nodiscard]] int current() const { return current_; }
-    [[nodiscard]] int count() const { return count_; }
-
-public slots:
-    /// Selects pattern `number` (clamped to 1..count) without emitting.
-    void setCurrent(int number);
-    /// Adds a pattern after the last one and selects it.
-    void addPattern();
-    /// Deletes the current pattern (not the last one left) and selects the
-    /// one before it.
-    void deleteCurrentPattern();
-    /// Back to a single "Pattern 1", without emitting (a new project).
-    void reset();
+    [[nodiscard]] int count() const { return static_cast<int>(names_.size()); }
 
 signals:
-    /// The user picked, added or deleted a pattern; `number` is now current.
-    void currentChanged(int number);
-    /// Pattern `number` was deleted; patterns after it moved down by one.
-    void patternDeleted(int number);
+    /// The user picked pattern `index` from the menu.
+    void patternPicked(int index);
+    /// The user asked for a new pattern (+ or the menu).
+    void addRequested();
+    /// The user asked to delete the current pattern (− or the menu).
+    void deleteRequested();
 
 private:
-    void appendAction(int number);
-    void sync(); ///< label, check mark and enabled state follow the model
+    void sync(); ///< label, check mark and enabled state follow names_ / current_
 
     QToolButton* button_ = nullptr;
     QToolButton* deleteButton_ = nullptr;
     QMenu* menu_ = nullptr;
-    QActionGroup* group_ = nullptr; ///< exclusive; action i is pattern i + 1
+    QActionGroup* group_ = nullptr; ///< exclusive; action i is pattern i
     QAction* separator_ = nullptr; ///< pattern actions go above it
     QAction* deleteAction_ = nullptr;
-    int count_ = 1;
-    int current_ = 1;
+    QStringList names_{QStringLiteral("Pattern 1")};
+    int current_ = 0;
 };
 
 } // namespace vloomdaw

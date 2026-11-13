@@ -164,3 +164,70 @@ TEST_CASE("A channel's volume and insert reach the engine", "[audio]")
     CHECK(engine.takeInsertPeak(2, 0) > 0.7f); // went through insert 2
     CHECK(engine.takeInsertPeak(1, 0) == 0.0f);
 }
+
+TEST_CASE("Song mode plays the playlist: pattern clips and audio clips, once", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.setStep(0, 0, 0, true); // pattern 1: a hit on its first step
+    project.addTrack();
+    project.addClip(Clip{0, 0, kTicksPerBar}); // bar 2
+    const auto clipChannel = project.addChannel("hit");
+    project.setChannelSample(clipChannel, samples.impulse);
+    project.addAudioClip(AudioClip{clipChannel, 1, 2 * kTicksPerBeat}); // beat 3
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    CHECK(rack.sync(engine, project, 0, kRate, true).empty());
+    engine.play();
+    const auto audio = render(engine, 5.0);
+    // Beat 3 (1 s) for the audio clip, bar 2 (2 s) for the pattern; no loop.
+    const std::vector<std::size_t> expected{8 * kStepFrames, 16 * kStepFrames};
+    CHECK(onsets(audio) == expected);
+}
+
+TEST_CASE("Pattern mode leaves the playlist alone", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.addAudioClip(AudioClip{0, 0, kTicksPerBeat});
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.sync(engine, project, 0, kRate, false);
+    engine.play();
+    CHECK(onsets(render(engine, 1.0)).empty());
+}
+
+TEST_CASE("An audio clip plays through its channel's volume and mute", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.addAudioClip(AudioClip{0, 0, 0});
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+
+    project.setChannelMuted(0, true);
+    rack.sync(engine, project, 0, kRate, true);
+    engine.play();
+    CHECK(onsets(render(engine, 0.2)).empty());
+}
+
+TEST_CASE("The playlist can load a sample for its waveform", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.sync(engine, project, 0, kRate, true);
+    CHECK(rack.sample((samples.folder / "missing.wav").string()) == nullptr);
+    const auto sample = rack.sample(samples.impulse);
+    REQUIRE(sample != nullptr);
+    CHECK(sample->frames() == 1);
+}

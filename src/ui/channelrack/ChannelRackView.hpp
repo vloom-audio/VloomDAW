@@ -12,10 +12,12 @@ namespace vloomdaw {
 class Project;
 
 /// The channel rack's rows: a mute light, a volume knob, the mixer insert,
-/// the channel name and 16 step pads per channel, for the current pattern.
+/// the channel name and the pattern's step pads per channel (16 per bar),
+/// for the current pattern. A "+" after the last pad asks for a bar more.
 /// Reads the Project; edits are emitted as signals for MainWindow to apply.
 ///
 /// Volume knob: drag up / down (Shift: fine), scroll, double-click for unity.
+/// Pan knob, beside it: the same, double-click for the centre.
 /// Insert box: click to pick the mixer insert the channel plays into, or
 /// scroll; "-" is the master.
 ///
@@ -52,8 +54,12 @@ signals:
     void sampleDropped(std::size_t channel, const QString& path);
     /// The volume knob moved: fader position 0..1 (0.8 = unity).
     void volumeChanged(std::size_t channel, double volume);
+    /// The pan knob moved: -1 left .. +1 right.
+    void panChanged(std::size_t channel, double pan);
     /// The channel was routed to mixer insert `insert` (0 = master).
     void insertChanged(std::size_t channel, int insert);
+    /// The user clicked the "+" after the last pad: one bar of pads more.
+    void addBarRequested();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -69,7 +75,7 @@ protected:
     bool event(QEvent* event) override;
 
 private:
-    enum class Part { None, Mute, Volume, Insert, Name, Step };
+    enum class Part { None, Mute, Volume, Pan, Insert, Name, Step, AddBar };
     struct Hit {
         Part part = Part::None;
         std::size_t channel = 0;
@@ -78,6 +84,9 @@ private:
     [[nodiscard]] Hit hitAt(const QPoint& pos) const;
     [[nodiscard]] QRect padRect(std::size_t channel, int step) const;
     [[nodiscard]] std::size_t channelCount() const;
+    [[nodiscard]] int stepCount() const;
+    /// The "+" cell after the last pad of `channel`'s row.
+    [[nodiscard]] QRect addBarRect(std::size_t channel) const;
     /// Channel row at y, or channelCount() below the last row.
     [[nodiscard]] std::size_t dropRowAt(int y) const;
     void setDropRow(int row);
@@ -92,10 +101,10 @@ private:
 
     QStringList insertNames_{QStringLiteral("Master")};
 
-    // Volume knob drag.
-    bool draggingVolume_ = false;
-    std::size_t volumeChannel_ = 0;
-    double volumeAtPress_ = 0.0;
+    // Volume or pan knob drag.
+    Part draggedKnob_ = Part::None; ///< Volume, Pan or None
+    std::size_t knobChannel_ = 0;
+    double knobAtPress_ = 0.0;
     double pressY_ = 0.0;
 
     // Paint-drag along one row.

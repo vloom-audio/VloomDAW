@@ -17,6 +17,7 @@ target_sources(vloomdaw_core PRIVATE
     core/DeviceWatch.cpp
     core/FrameStats.cpp
     core/MixerModel.cpp
+    core/Names.cpp
     core/NoteNames.cpp
     core/PluginMetadata.cpp
     core/PluginScanner.cpp
