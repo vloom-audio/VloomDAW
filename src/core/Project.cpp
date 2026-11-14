@@ -51,6 +51,12 @@ void Project::setChannelColor(std::size_t channel, std::optional<std::uint32_t> 
         channels_[channel].color = color ? std::optional<std::uint32_t>(*color & 0xffffffu) : std::nullopt;
 }
 
+void Project::setChannelInstrument(std::size_t channel, std::optional<PluginSlot> instrument)
+{
+    if (channel < channels_.size())
+        channels_[channel].instrument = std::move(instrument);
+}
+
 void Project::setChannelName(std::size_t channel, const std::string& name)
 {
     if (channel < channels_.size())

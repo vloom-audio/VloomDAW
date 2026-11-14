@@ -54,6 +54,29 @@ std::size_t MixerModel::moveInsert(std::size_t from, std::size_t to)
     return to;
 }
 
+bool MixerModel::addEffect(std::size_t index, PluginSlot effect)
+{
+    if (!valid(index) || tracks_[index].effects.size() >= kMaxEffects)
+        return false;
+    tracks_[index].effects.push_back(std::move(effect));
+    return true;
+}
+
+bool MixerModel::removeEffect(std::size_t index, std::size_t slot)
+{
+    if (!valid(index) || slot >= tracks_[index].effects.size())
+        return false;
+    auto& effects = tracks_[index].effects;
+    effects.erase(effects.begin() + static_cast<std::ptrdiff_t>(slot));
+    return true;
+}
+
+void MixerModel::setEffectBypassed(std::size_t index, std::size_t slot, bool bypassed)
+{
+    if (valid(index) && slot < tracks_[index].effects.size())
+        tracks_[index].effects[slot].bypassed = bypassed;
+}
+
 void MixerModel::setName(std::size_t index, const std::string& name)
 {
     if (index == kMaster || !valid(index))

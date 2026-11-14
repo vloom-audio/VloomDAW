@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "audio/PluginHost.hpp"
 #include "core/Project.hpp"
 
 #include <vloom/engine/Engine.hpp>
@@ -70,6 +71,8 @@ public:
     using StretchProvider
         = std::function<std::shared_ptr<const vloom::SampleBuffer>(const std::string& path, double ratio)>;
     void setStretchProvider(StretchProvider provider) { stretch_ = std::move(provider); }
+    /// Finds the loaded instrument plugins of channels (Channel::instrument).
+    void setPluginResolver(PluginResolver resolver) { plugins_ = std::move(resolver); }
 
     /// Forgets channels and samples, e.g. for a new project. Notes still
     /// ringing fade out once the next sync() publishes the new rack.
@@ -86,6 +89,7 @@ private:
     std::map<std::string, std::string> failed_; ///< path -> error, at rate_
     SourceResolver resolver_;
     StretchProvider stretch_;
+    PluginResolver plugins_;
     double tempo_ = 120.0;
     double rate_ = 0.0;
 };

@@ -36,7 +36,8 @@ target_sources(vloomdaw_core PRIVATE
     audio/FileDecoder.cpp
     audio/TempoDetector.cpp
     audio/TimeStretch.cpp
-    audio/MixerAudio.cpp)
+    audio/MixerAudio.cpp
+    audio/PluginHost.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vloomdaw_core PUBLIC vloom::engine PRIVATE vloomdaw::ffmpeg signalsmith-stretch)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
@@ -109,6 +110,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/pianoroll/PianoRollView.hpp
     ui/playlist/PlaylistView.cpp
     ui/playlist/PlaylistView.hpp
+    ui/plugins/PluginDrag.cpp
+    ui/plugins/PluginDrag.hpp
+    ui/plugins/PluginEditorWindow.cpp
+    ui/plugins/PluginEditorWindow.hpp
     ui/plugins/PluginManagerDialog.cpp
     ui/plugins/PluginManagerDialog.hpp
     ui/plugins/PluginProber.cpp

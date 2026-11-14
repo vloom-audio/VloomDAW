@@ -162,6 +162,20 @@ void MixerPanel::connectStrip(MixerStrip* strip)
         if (const auto i = strips_.indexOf(strip); i > 0)
             emit renameRequested(static_cast<std::size_t>(i));
     });
+    connect(strip, &MixerStrip::effectsMenuRequested, this, [this, strip](const QPoint& at) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit effectsMenuRequested(static_cast<std::size_t>(i), at);
+    });
+    connect(strip, &MixerStrip::pluginDropped, this, [this, strip](std::size_t plugin) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit pluginDropped(static_cast<std::size_t>(i), plugin);
+    });
+}
+
+void MixerPanel::setEffectCount(std::size_t track, std::size_t count)
+{
+    if (track < static_cast<std::size_t>(strips_.size()))
+        strips_[static_cast<qsizetype>(track)]->setEffectCount(count);
 }
 
 void MixerPanel::addInsert()

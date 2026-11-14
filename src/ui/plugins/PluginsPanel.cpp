@@ -4,6 +4,7 @@
 
 #include "core/PluginMetadata.hpp"
 #include "ui/Theme.hpp"
+#include "ui/plugins/PluginDrag.hpp"
 #include "ui/plugins/PluginStore.hpp"
 
 #include <QComboBox>
@@ -34,6 +35,25 @@ constexpr QLatin1StringView kGroupByKey{"plugins/groupBy"};
 constexpr int kIndexRole = Qt::UserRole + 1; ///< index into plugins_, on plugin rows only
 
 QString utf8(const std::string& text) { return QString::fromStdString(text); }
+
+/// The plugin list: plugin rows drag out as plugins (PluginDrag), to drop
+/// on a mixer insert or the channel rack.
+class PluginTree : public QTreeWidget {
+public:
+    using QTreeWidget::QTreeWidget;
+
+protected:
+    [[nodiscard]] QStringList mimeTypes() const override
+    {
+        return {QStringLiteral("application/x-vloomdaw-plugin")};
+    }
+    [[nodiscard]] QMimeData* mimeData(const QList<QTreeWidgetItem*>& items) const override
+    {
+        if (items.size() != 1 || !items.front()->data(0, kIndexRole).isValid())
+            return nullptr; // a group row
+        return pluginMimeData(static_cast<std::size_t>(items.front()->data(0, kIndexRole).toULongLong()));
+    }
+};
 
 /// Category groups in the browser's order, vendors A-Z with "Unknown" last.
 int groupRank(PluginsPanel::GroupBy by, const QString& group)
@@ -89,7 +109,9 @@ PluginsPanel::PluginsPanel(QWidget* parent)
         = new QShortcut(QKeySequence(Qt::Key_Escape), search_, nullptr, nullptr, Qt::WidgetShortcut);
     connect(leaveSearch, &QShortcut::activated, search_, [this] { search_->clearFocus(); });
 
-    tree_ = new QTreeWidget(this);
+    tree_ = new PluginTree(this);
+    tree_->setDragEnabled(true);
+    tree_->setDragDropMode(QAbstractItemView::DragOnly);
     tree_->setObjectName(QStringLiteral("browserTree"));
     tree_->setHeaderHidden(true);
     tree_->setColumnCount(2); // name, format tag
@@ -278,6 +300,9 @@ void PluginsPanel::showContextMenu(const QPoint& pos)
     const QString currentType = utf8(effectiveInstrumentType(plugin));
 
     QMenu menu(this);
+    menu.addAction(tr("Add to Channel Rack"), this, [this, index] { emit addToRackRequested(index); });
+    menu.addAction(tr("Add to Mixer…"), this, [this, index] { emit addToMixerRequested(index); });
+    menu.addSeparator();
     QMenu* setMenu = menu.addMenu(tr("Set category"));
     for (const std::string& category : pluginCategories()) {
         if (category == "Uncategorized")

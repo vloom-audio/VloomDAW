@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "core/PluginSlot.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -19,6 +21,9 @@ struct MixerTrack {
     bool muted = false;
     bool soloed = false;
     std::optional<std::uint32_t> color{}; ///< 0xRRGGBB chosen by the user; none: no colour
+    /// The track's effect chain, in processing order (the master's runs on
+    /// the mix of everything, before its volume and pan).
+    std::vector<PluginSlot> effects{};
 };
 
 /// The mixer: track 0 is the master, tracks 1..N are inserts, as in FL
@@ -31,6 +36,8 @@ public:
     static constexpr std::size_t kMaster = 0;
     /// Most inserts: as many as the engine routes (vloom::kMaxInserts).
     static constexpr std::size_t kMaxInserts = 125;
+    /// Most effects on one insert.
+    static constexpr std::size_t kMaxEffects = 10;
     /// Longest insert name, in bytes (UTF-8).
     static constexpr std::size_t kMaxNameLength = 64;
 
@@ -63,6 +70,14 @@ public:
     void setSoloed(std::size_t index, bool soloed);
     /// The track's colour, 0xRRGGBB (higher bits dropped); nullopt: none.
     void setColor(std::size_t index, std::optional<std::uint32_t> color);
+
+    /// Appends `effect` to track `index`'s chain (the master's too). False
+    /// for an index out of range or a full chain (kMaxEffects).
+    bool addEffect(std::size_t index, PluginSlot effect);
+    /// Removes effect `slot` of insert `index`; false if there is none.
+    bool removeEffect(std::size_t index, std::size_t slot);
+    /// Bypasses (or un-bypasses) effect `slot` of insert `index`.
+    void setEffectBypassed(std::size_t index, std::size_t slot, bool bypassed);
 
     /// True while any insert is soloed.
     [[nodiscard]] bool anySoloed() const;

@@ -47,6 +47,8 @@ public:
 
 public slots:
     void setSilenced(std::size_t track, bool silenced);
+    /// Shows insert `track`'s effect count on its FX button.
+    void setEffectCount(std::size_t track, std::size_t count);
     /// Shows "dock" instead of "detach" on the header button.
     void setDetached(bool detached);
 
@@ -70,6 +72,10 @@ signals:
     void moveInsertRequested(std::size_t from, std::size_t to);
     /// The user picked a colour for track `track` (0 = master); nullopt: none.
     void colorChanged(std::size_t track, std::optional<std::uint32_t> color);
+    /// Track `track`'s FX button was clicked (the master's too): show its effects at `globalPos`.
+    void effectsMenuRequested(std::size_t track, const QPoint& globalPos);
+    /// Plugin `plugin` (an index into the plugin store) was dropped on track `track` (0: the master).
+    void pluginDropped(std::size_t track, std::size_t plugin);
 
 private:
     void connectStrip(MixerStrip* strip);

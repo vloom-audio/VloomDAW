@@ -95,6 +95,13 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
             for (const bool on : p.channels[c].steps)
                 out.steps.push_back(on ? 1 : 0);
         out.sample = load(channel.samplePath, c, &errors);
+        if (channel.instrument && plugins_) {
+            if (auto plugin = plugins_(channel.instrument->instance)) {
+                plugin->setBypassed(channel.instrument->bypassed);
+                out.instrument = vloom::Instrument::Plugin;
+                out.plugin = std::move(plugin);
+            }
+        }
         state->channels.push_back(std::move(out));
     }
 

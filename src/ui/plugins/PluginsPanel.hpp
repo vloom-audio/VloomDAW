@@ -42,6 +42,11 @@ signals:
     /// plugins); empty category = back to the plugin's own. `instrumentType`
     /// is set only for "Instrument".
     void userCategoryChosen(std::size_t index, const QString& category, const QString& instrumentType);
+    /// Plugin `index` (into the store's plugins) should play as a new
+    /// channel (an instrument) or go on a mixer track (an effect). Plugins
+    /// can also be dragged onto the channel rack or a mixer strip.
+    void addToRackRequested(std::size_t index);
+    void addToMixerRequested(std::size_t index);
 
 private:
     void rebuild();
