@@ -5,6 +5,7 @@
 #include "ui/Theme.hpp"
 #include "ui/browser/BrowserRoles.hpp"
 #include "ui/browser/SampleTreeModel.hpp"
+#include "ui/browser/SampleWaveform.hpp"
 #include "ui/browser/SearchResultsModel.hpp"
 
 #include <QComboBox>
@@ -157,6 +158,9 @@ BrowserPanel::BrowserPanel(QWidget* parent)
     layout->addWidget(tree_, 1);
     layout->addWidget(results_, 1);
     layout->addWidget(emptyHint_, 1);
+    // The selected file's waveform and a play button, under the list.
+    waveform_ = new SampleWaveform(this);
+    layout->addWidget(waveform_);
     showFolder(QString());
 }
 
@@ -191,8 +195,11 @@ void BrowserPanel::watchForPreview(QAbstractItemView* view)
             const QString path = current.data(kSampleFileRole).toString();
             if (path.isEmpty() || restoring_)
                 return;
+            waveform_->setFile(path);
             if (mouseDown_ || autoPreview_->isChecked())
                 emit previewRequested(path);
+            else
+                emit fileShown(path);
         });
     // A click on the file that was already current does not change the
     // current item: toggle it instead.

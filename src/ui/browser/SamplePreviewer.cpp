@@ -2,11 +2,15 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/browser/SamplePreviewer.hpp"
 
+#include "ui/AudioDecoder.hpp"
+
 #include <vloom/engine/Engine.hpp>
 #include <vloom/engine/sample/SampleLoader.hpp>
 
 #include <QThread>
 
+#include <algorithm>
+#include <cmath>
 #include <exception>
 #include <string>
 
@@ -39,43 +43,92 @@ void SamplePreviewer::setSampleRate(double sampleRate)
     stop();
 }
 
-void SamplePreviewer::play(const QString& path)
+namespace {
+
+/// The largest absolute sample of each of `points` slices of `sample`, all
+/// channels: a waveform to draw.
+std::vector<float> waveformOf(const vloom::SampleBuffer& sample, std::size_t points)
 {
-    const std::uint64_t request = request_.fetch_add(1) + 1;
-    requested_ = path;
-    if (auto sample = cached(path)) {
-        start(path, sample);
+    const std::int64_t frames = sample.frames();
+    std::vector<float> out;
+    if (frames <= 0)
+        return out;
+    const auto count
+        = static_cast<std::size_t>(std::min<std::int64_t>(frames, static_cast<std::int64_t>(points)));
+    out.assign(count, 0.0f);
+    for (int ch = 0; ch < sample.channels(); ++ch) {
+        const float* data = sample.channel(ch);
+        for (std::size_t p = 0; p < count; ++p) {
+            const auto from = static_cast<std::int64_t>(p) * frames / static_cast<std::int64_t>(count);
+            const auto to = static_cast<std::int64_t>(p + 1) * frames / static_cast<std::int64_t>(count);
+            float peak = out[p];
+            for (std::int64_t i = from; i < to; ++i)
+                peak = std::max(peak, std::abs(data[i]));
+            out[p] = std::min(peak, 1.0f);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+void SamplePreviewer::play(const QString& path) { fetch(path, true); }
+
+void SamplePreviewer::show(const QString& path) { fetch(path, false); }
+
+void SamplePreviewer::fetch(const QString& path, bool andPlay)
+{
+    const std::uint64_t request = andPlay ? request_.fetch_add(1) + 1 : 0;
+    const std::uint64_t showRequest = showRequest_.fetch_add(1) + 1;
+    if (andPlay)
+        requested_ = path;
+    if (const Entry* entry = cached(path)) {
+        const Entry found = *entry; // start() may not keep the list as it is
+        if (andPlay)
+            start(path, found.sample);
+        emit loaded(
+            path, found.waveform, static_cast<double>(found.sample->frames()) / found.sample->sampleRate());
         return;
     }
-    const std::string utf8 = path.toStdString();
     const double rate = sampleRate_;
     QMetaObject::invokeMethod(
         loader_,
-        [this, request, path, utf8, rate] {
+        [this, request, showRequest, andPlay, path, rate] {
             // Worker thread. `this` outlives it: the destructor joins the thread.
-            if (request != request_)
-                return; // a newer request came in while this one waited
+            const bool playWanted = andPlay && request == request_;
+            if (!playWanted && showRequest != showRequest_)
+                return; // newer requests came in while this one waited
             std::string error;
-            std::shared_ptr<const vloom::SampleBuffer> sample;
+            Entry entry{path, nullptr, nullptr};
             try {
-                sample = vloom::loadSample(utf8, rate, &error);
+                // MP3 and the other non-WAV types: their decoded copy.
+                QString decodeError;
+                const QString source = playableWav(path, rate, &decodeError);
+                if (source.isEmpty())
+                    error = decodeError.toStdString();
+                else
+                    entry.sample = vloom::loadSample(source.toStdString(), rate, &error);
+                if (entry.sample != nullptr)
+                    entry.waveform = std::make_shared<const std::vector<float>>(
+                        waveformOf(*entry.sample, kWaveformPoints));
             } catch (const std::exception&) {
+                entry.sample = nullptr;
                 error = "not enough memory to load it";
             }
             QMetaObject::invokeMethod(
                 this,
-                [this, request, path, sample, error] {
-                    if (!sample) {
-                        if (request == request_) {
-                            // The previous file must not go on as if it were this one.
-                            stop();
-                            emit failed(path, QString::fromStdString(error));
-                        }
+                [this, request, andPlay, entry, error] {
+                    if (entry.sample == nullptr || entry.waveform == nullptr) {
+                        if (andPlay && request == request_)
+                            stop(); // the previous file must not go on as if it were this one
+                        emit failed(entry.path, QString::fromStdString(error));
                         return;
                     }
-                    remember(path, sample);
-                    if (request == request_)
-                        start(path, sample);
+                    remember(entry);
+                    if (andPlay && request == request_)
+                        start(entry.path, entry.sample);
+                    emit loaded(entry.path, entry.waveform,
+                        static_cast<double>(entry.sample->frames()) / entry.sample->sampleRate());
                 },
                 Qt::QueuedConnection);
         },
@@ -85,6 +138,7 @@ void SamplePreviewer::play(const QString& path)
 void SamplePreviewer::start(const QString& path, const std::shared_ptr<const vloom::SampleBuffer>& sample)
 {
     requested_ = path;
+    started_.start();
     engine_.previewSample(sample);
 }
 
@@ -97,22 +151,29 @@ void SamplePreviewer::stop()
 
 QString SamplePreviewer::playingPath() const { return engine_.isPreviewPlaying() ? requested_ : QString(); }
 
-std::shared_ptr<const vloom::SampleBuffer> SamplePreviewer::cached(const QString& path)
+double SamplePreviewer::playingSeconds() const
+{
+    if (!engine_.isPreviewPlaying() || requested_.isEmpty() || !started_.isValid())
+        return -1.0;
+    return static_cast<double>(started_.nsecsElapsed()) / 1e9;
+}
+
+const SamplePreviewer::Entry* SamplePreviewer::cached(const QString& path)
 {
     for (auto it = cache_.begin(); it != cache_.end(); ++it) {
-        if (it->first == path) {
+        if (it->path == path) {
             cache_.splice(cache_.begin(), cache_, it); // most recent first
-            return cache_.front().second;
+            return &cache_.front();
         }
     }
     return nullptr;
 }
 
-void SamplePreviewer::remember(const QString& path, std::shared_ptr<const vloom::SampleBuffer> sample)
+void SamplePreviewer::remember(Entry entry)
 {
-    if (cached(path))
+    if (cached(entry.path) != nullptr)
         return;
-    cache_.emplace_front(path, std::move(sample));
+    cache_.push_front(std::move(entry));
     while (cache_.size() > kCacheSize)
         cache_.pop_back();
 }

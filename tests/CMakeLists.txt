@@ -10,6 +10,8 @@ CPMAddPackage(
 # Test files mirror src/: tests/<module>/<Name>Tests.cpp
 add_executable(vloomdaw_tests
     audio/ChannelRackAudioTests.cpp
+    audio/FileDecoderTests.cpp
+    audio/TempoTests.cpp
     audio/MixerAudioTests.cpp
     core/AudioFormatTests.cpp
     core/BrowserFilterTests.cpp
@@ -31,6 +33,9 @@ add_executable(vloomdaw_tests
     core/TransportLayoutTests.cpp)
 
 target_link_libraries(vloomdaw_tests PRIVATE vloomdaw_core Catch2::Catch2WithMain)
+vloomdaw_copy_ffmpeg_dlls(vloomdaw_tests)
+# Small media files the tests decode (tests/audio/data/README.md).
+target_compile_definitions(vloomdaw_tests PRIVATE VLOOMDAW_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/audio/data")
 vloom_set_warnings(vloomdaw_tests)
 
 list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)

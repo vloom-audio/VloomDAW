@@ -7,9 +7,10 @@
 
 namespace vloomdaw {
 
-/// File types the browser shows.
-inline constexpr std::array<std::string_view, 6> kAudioFileExtensions{
-    "wav", "aif", "aiff", "flac", "mp3", "ogg"};
+/// File types the browser shows and the app loads: WAV directly, the others
+/// decoded with FFmpeg (audio/FileDecoder).
+inline constexpr std::array<std::string_view, 9> kAudioFileExtensions{
+    "wav", "aif", "aiff", "flac", "mp3", "ogg", "oga", "opus", "m4a"};
 
 /// True when `fileName` ends in one of kAudioFileExtensions, ignoring case.
 [[nodiscard]] bool isAudioFile(std::string_view fileName) noexcept;

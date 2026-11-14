@@ -6,6 +6,7 @@
 #include "core/Project.hpp"
 #include "ui/DroppedFiles.hpp"
 #include "ui/Theme.hpp"
+#include "ui/widgets/ColorMenu/ColorMenu.hpp"
 
 #include <QDir>
 #include <QDragEnterEvent>
@@ -226,6 +227,14 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
         p.setBrush(ch == selected_ ? c.raised : c.panel);
         p.setPen(QPen(ch == selected_ ? c.accent : c.border, 1));
         p.drawRoundedRect(QRectF(nameRect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
+        if (channel.color) { // the channel's colour as a bar inside the name button's left edge
+            p.save();
+            p.setPen(Qt::NoPen);
+            p.setBrush(toQColor(*channel.color));
+            p.drawRoundedRect(
+                QRectF(nameRect.left() + 2.5, nameRect.top() + 3.5, 3, nameRect.height() - 7), 1.5, 1.5);
+            p.restore();
+        }
         // Dim names without a sample: they make no sound until one is dropped.
         p.setPen(channel.muted || channel.samplePath.empty() ? c.textDim : c.text);
         p.drawText(nameRect.adjusted(8, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft,
@@ -238,7 +247,8 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
             const QRectF pad = QRectF(padRect(ch, s)).adjusted(0.5, 0.5, -0.5, -0.5);
             const bool on = project_->step(pattern_, ch, s);
             const bool evenGroup = (s / 4) % 2 == 0;
-            QColor fill = on ? patternColor : (evenGroup ? c.raised : c.panel);
+            const QColor lit = channel.color ? toQColor(*channel.color) : patternColor;
+            QColor fill = on ? lit : (evenGroup ? c.raised : c.panel);
             if (on && channel.muted)
                 fill = fill.darker(180);
             p.setBrush(fill);
@@ -290,7 +300,7 @@ void ChannelRackView::setDropRow(int row)
 
 void ChannelRackView::dragEnterEvent(QDragEnterEvent* event)
 {
-    if (project_ == nullptr || droppedWav(event->mimeData()).isEmpty())
+    if (project_ == nullptr || droppedAudio(event->mimeData()).isEmpty())
         return; // ignored: the cursor shows it cannot drop
     event->acceptProposedAction();
     setDropRow(static_cast<int>(dropRowAt(event->position().toPoint().y())));
@@ -306,7 +316,7 @@ void ChannelRackView::dragLeaveEvent(QDragLeaveEvent* /*event*/) { setDropRow(-1
 
 void ChannelRackView::dropEvent(QDropEvent* event)
 {
-    const QString path = droppedWav(event->mimeData());
+    const QString path = droppedAudio(event->mimeData());
     const std::size_t row = dropRowAt(event->position().toPoint().y());
     setDropRow(-1);
     if (path.isEmpty())
@@ -350,8 +360,9 @@ bool ChannelRackView::event(QEvent* event)
         if (hit.part == Part::Name) {
             const std::string& path = project_->channels()[hit.channel].samplePath;
             QToolTip::showText(help->globalPos(),
-                path.empty() ? tr("No sample: drop a WAV file here")
-                             : QDir::toNativeSeparators(QString::fromStdString(path)),
+                (path.empty() ? tr("No sample: drop a WAV file here")
+                              : QDir::toNativeSeparators(QString::fromStdString(path)))
+                    + QLatin1Char('\n') + tr("Right-click to change its color"),
                 this);
             return true;
         }
@@ -390,6 +401,16 @@ void ChannelRackView::mousePressEvent(QMouseEvent* event)
     }
     if (event->button() == Qt::LeftButton && hit.part == Part::Name) {
         emit channelSelected(hit.channel);
+        return;
+    }
+    if (event->button() == Qt::RightButton && hit.part == Part::Name) {
+        QMenu menu(this);
+        const std::size_t channel = hit.channel;
+        addColorMenu(
+            menu, project_->channels()[channel].color, [this, channel](std::optional<std::uint32_t> color) {
+                emit channelColorChanged(channel, color);
+            });
+        menu.exec(event->globalPosition().toPoint());
         return;
     }
     if (hit.part == Part::Step && (event->button() == Qt::LeftButton || event->button() == Qt::RightButton)) {

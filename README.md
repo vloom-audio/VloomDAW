@@ -77,6 +77,7 @@ each feature goes (works / UI only / planned).
 - CMake ≥ 3.22 and Git
 - A C++20 compiler: Apple Clang 15+ (macOS), GCC 12+ (Linux), MSVC 2022 (Windows)
 - **Qt ≥ 6.5** with the Widgets and Svg modules
+- **FFmpeg ≥ 5.1** (libavformat, libavcodec, libswresample) to decode MP3, FLAC, Ogg, AIFF and M4A samples: downloaded automatically on Windows, from the system on macOS and Linux (see [docs/getting-started.md](docs/getting-started.md))
 - [vloom-engine](https://github.com/vloom-audio/vloom-engine) cloned next to this
   repository (`scripts/bootstrap.sh` does it for you)
 

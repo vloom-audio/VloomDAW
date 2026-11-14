@@ -82,6 +82,12 @@ void MixerModel::setMuted(std::size_t index, bool muted)
         tracks_[index].muted = muted;
 }
 
+void MixerModel::setColor(std::size_t index, std::optional<std::uint32_t> color)
+{
+    if (valid(index))
+        tracks_[index].color = color ? std::optional<std::uint32_t>(*color & 0xffffffu) : std::nullopt;
+}
+
 void MixerModel::setSoloed(std::size_t index, bool soloed)
 {
     // Solo only means something on inserts.

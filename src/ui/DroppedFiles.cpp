@@ -2,13 +2,14 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/DroppedFiles.hpp"
 
-#include <QFileInfo>
+#include "ui/AudioDecoder.hpp"
+
 #include <QMimeData>
 #include <QUrl>
 
 namespace vloomdaw {
 
-QString droppedWav(const QMimeData* mime)
+QString droppedAudio(const QMimeData* mime)
 {
     if (mime == nullptr || !mime->hasUrls())
         return {};
@@ -18,8 +19,7 @@ QString droppedWav(const QMimeData* mime)
         const QString path = url.toLocalFile();
         if (path.startsWith(QLatin1String("//")) || path.startsWith(QLatin1String("\\\\")))
             continue;
-        if (!path.isEmpty()
-            && QFileInfo(path).suffix().compare(QStringLiteral("wav"), Qt::CaseInsensitive) == 0)
+        if (!path.isEmpty() && (isWavFile(path) || needsDecoding(path)))
             return path;
     }
     return {};

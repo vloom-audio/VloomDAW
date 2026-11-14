@@ -5,8 +5,10 @@
 #include <vloom/engine/render/OfflineRenderer.hpp>
 #include <vloom/engine/render/WavWriter.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -186,6 +188,150 @@ TEST_CASE("Song mode plays the playlist: pattern clips and audio clips, once", "
     // Beat 3 (1 s) for the audio clip, bar 2 (2 s) for the pattern; no loop.
     const std::vector<std::size_t> expected{8 * kStepFrames, 16 * kStepFrames};
     CHECK(onsets(audio) == expected);
+}
+
+TEST_CASE("Song mode leaves out clips on muted tracks and on others while one is solo", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.setStep(0, 0, 0, true);
+    project.addTrack();
+    project.addClip(Clip{0, 0, 0}); // track 1, bar 1
+    const auto clipChannel = project.addChannel("hit");
+    project.setChannelSample(clipChannel, samples.impulse);
+    project.addAudioClip(AudioClip{clipChannel, 1, 2 * kTicksPerBeat}); // track 2, beat 3
+
+    const auto play = [&] {
+        vloom::Engine engine;
+        prepare(engine);
+        ChannelRackAudio rack;
+        rack.sync(engine, project, 0, kRate, true);
+        engine.play();
+        return onsets(render(engine, 1.5));
+    };
+    project.setTrackMuted(0, true);
+    CHECK(play() == std::vector<std::size_t>{8 * kStepFrames});
+    project.setTrackMuted(0, false);
+    project.setTrackSolo(0, true);
+    CHECK(play() == std::vector<std::size_t>{0});
+    project.setTrackSolo(1, true);
+    CHECK(play() == std::vector<std::size_t>{0, 8 * kStepFrames});
+    project.setTrackSolo(0, false);
+    project.setTrackSolo(1, false);
+
+    // Track 2 as a sub-track of track 1: muting the group silences both.
+    REQUIRE(project.indentTrack(1));
+    project.setTrackMuted(0, true);
+    CHECK(play().empty());
+}
+
+TEST_CASE("Muted clips stay silent in song mode", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.setStep(0, 0, 0, true);
+    Clip pattern{0, 0, 0};
+    pattern.muted = true;
+    project.addClip(pattern); // bar 1, muted
+    project.addClip(Clip{0, 0, kTicksPerBar}); // bar 2
+    AudioClip audio{0, 0, 2 * kTicksPerBeat};
+    audio.muted = true;
+    project.addAudioClip(audio); // beat 3, muted
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.sync(engine, project, 0, kRate, true);
+    engine.play();
+    CHECK(onsets(render(engine, 2.5)) == std::vector<std::size_t>{16 * kStepFrames});
+}
+
+TEST_CASE("Cut and stretched pattern clips play the right part of their pattern", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.setStep(0, 0, 0, true); // pattern 1 (one bar): steps 0 and 8
+    project.setStep(0, 0, 8, true);
+
+    // The second half of a cut clip: half a bar long, 8 steps into the pattern.
+    Clip half{0, 0, 0};
+    half.offset = 8 * kTicksPerStep;
+    half.length = 8 * kTicksPerStep;
+    project.addClip(half);
+    // Stretched to two bars from bar 2: the pattern plays twice.
+    Clip twice{0, 0, kTicksPerBar};
+    twice.length = 2 * kTicksPerBar;
+    project.addClip(twice);
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.sync(engine, project, 0, kRate, true);
+    engine.play();
+    const std::vector<std::size_t> expected{
+        0, 16 * kStepFrames, 24 * kStepFrames, 32 * kStepFrames, 40 * kStepFrames};
+    CHECK(onsets(render(engine, 6.5)) == expected);
+}
+
+TEST_CASE("An audio clip fitted to the tempo follows it: resampled or stretched", "[audio][fit]")
+{
+    // A sample with clicks one second apart, "recorded" at 60 BPM: a beat each.
+    const Samples samples;
+    const std::string clicks = (samples.folder / "clicks.wav").string();
+    std::vector<float> data(static_cast<std::size_t>(kRate * 2), 0.0f);
+    data[0] = 1.0f;
+    data[static_cast<std::size_t>(kRate)] = 1.0f;
+    REQUIRE(vloom::writeWavFloat32(clicks, data, 1, static_cast<int>(kRate)));
+
+    Project project;
+    project.setChannelSample(0, clicks);
+    AudioClip clip{0, 0, 0};
+    clip.fit = AudioClip::Fit::Resample;
+    clip.sourceBpm = 60.0;
+    project.addAudioClip(clip);
+
+    // At 120 BPM, resampled at twice the speed: the second click after half a second.
+    {
+        vloom::Engine engine;
+        prepare(engine);
+        ChannelRackAudio rack;
+        rack.setTempo(120.0);
+        rack.sync(engine, project, 0, kRate, true);
+        engine.play();
+        const auto hits = onsets(render(engine, 1.5));
+        REQUIRE_FALSE(hits.empty());
+        CHECK(hits.front() == 0);
+        // The interpolated click spreads over a few frames around 24000.
+        CHECK(std::any_of(hits.begin(), hits.end(), [](std::size_t f) { return f >= 23990 && f <= 24010; }));
+        CHECK(std::none_of(hits.begin(), hits.end(), [](std::size_t f) { return f >= 40000; }));
+    }
+
+    // Stretch: the rack asks for the stretched copy and plays it as it is.
+    {
+        project.setAudioClip(0, [&] {
+            AudioClip stretched = project.audioClips()[0];
+            stretched.fit = AudioClip::Fit::Stretch;
+            return stretched;
+        }());
+        vloom::Engine engine;
+        prepare(engine);
+        ChannelRackAudio rack;
+        rack.setTempo(120.0);
+        double askedRatio = 0.0;
+        rack.setStretchProvider([&](const std::string&, double ratio) {
+            askedRatio = ratio;
+            auto copy = std::make_shared<vloom::SampleBuffer>(1, static_cast<std::int64_t>(kRate), kRate);
+            copy->channel(0)[100] = 1.0f; // stands for the stretched audio
+            return std::shared_ptr<const vloom::SampleBuffer>(std::move(copy));
+        });
+        rack.sync(engine, project, 0, kRate, true);
+        engine.play();
+        CHECK(askedRatio == Catch::Approx(0.5)); // half as long at twice the tempo
+        CHECK(onsets(render(engine, 0.5)) == std::vector<std::size_t>{100});
+    }
 }
 
 TEST_CASE("Pattern mode leaves the playlist alone", "[audio]")

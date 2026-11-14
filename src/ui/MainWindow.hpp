@@ -18,6 +18,7 @@
 
 #include <QElapsedTimer>
 #include <QMainWindow>
+#include <QPoint>
 #include <QRect>
 #include <QStringList>
 
@@ -33,6 +34,7 @@
 class QAction;
 class QCloseEvent;
 class QEvent;
+class QComboBox;
 class QLabel;
 class QSplitter;
 class QStackedWidget;
@@ -40,6 +42,7 @@ class QMenu;
 class QPaintEvent;
 class QResizeEvent;
 class QShowEvent;
+class QThread;
 class QTimer;
 class QToolButton;
 
@@ -135,6 +138,29 @@ private:
     void removePlaylistTrack(std::size_t track);
     void renamePlaylistTrack(std::size_t track);
     void dropAudio(const QString& path, int track, int start);
+    /// Loads (decoding if needed) the sample at `path` on a background thread,
+    /// then calls `then` on this thread; the UI stays responsive meanwhile.
+    /// Reports a file that cannot be loaded instead of calling `then`.
+    void loadSampleThen(const QString& path, std::function<void()> then);
+    /// Starts the loader thread (loaderThread_, loader_) if it is not running.
+    void startLoader();
+    /// Audio clip `index`'s menu (fit to tempo) at `globalPos`.
+    void showAudioClipMenu(std::size_t index, const QPoint& globalPos);
+    /// Fits audio clip `index` to the song's tempo with `fit` (or stops),
+    /// detecting its sample's tempo first when it has none.
+    void setAudioClipFit(std::size_t index, AudioClip::Fit fit);
+    /// Gives audio clip `index` the tempo `bpm` (0: none), keeping its
+    /// offset and length on the same part of the sample.
+    void setAudioClipTempo(std::size_t index, double bpm);
+    /// Measures the tempo of the sample at `path` on the loader thread (once
+    /// per file), then calls `then` with it (0: no steady beat) on this thread.
+    void detectTempoThen(const std::string& path, std::function<void(double bpm)> then);
+    /// For ChannelRackAudio: the stretched copy of `path` at `ratio`, or null
+    /// while it is being made (once the tempo has settled).
+    [[nodiscard]] std::shared_ptr<const vloom::SampleBuffer> stretchedSample(
+        const std::string& path, double ratio);
+    /// Makes the stretched copies asked for meanwhile, on the loader thread.
+    void makeStretchedSamples();
     [[nodiscard]] const ClipAudio* clipAudio(const std::string& path);
     /// The channel rack's insert menu follows the mixer.
     void syncInsertNames();
@@ -194,6 +220,16 @@ private:
     /// Sends the channel rack of the current pattern to the engine and
     /// reports samples that could not be loaded.
     void syncChannelRack();
+    /// Ticks where the song ends: the end of its last clip, rounded up to a
+    /// bar; 0 for an empty playlist. Audio clips count at the current tempo.
+    [[nodiscard]] int songEndTicks();
+    /// Song mode loops the song: at its end playback jumps back to the start,
+    /// as in FL Studio. Sent from refreshFromEngine() when it changes, so a
+    /// tempo drag does not flood the engine's queue.
+    void applySongLoop();
+    /// Fills the playlist's clip source box (patterns, then the channels with
+    /// a sample) and shows the playlist's source in it.
+    void rebuildClipSources();
     /// Gives `channel` the WAV file at `path` (channel == count: a new channel).
     void assignSample(std::size_t channel, const QString& path);
     /// Opens the Plugin Manager, where the user scans for plugins.
@@ -220,6 +256,23 @@ private:
     MixerModel mixer_;
     Project project_;
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
+    /// Loads dropped samples (decoding, resampling) off the UI thread, one
+    /// at a time; loader_ lives on it.
+    QThread* loaderThread_ = nullptr;
+    QObject* loader_ = nullptr;
+    int loading_ = 0; ///< loads under way, for the status bar
+    QComboBox* clipSource_ = nullptr; ///< what the playlist's Draw and Paint place
+    /// Fit to tempo: tempi measured per sample path, stretched copies by
+    /// (path, ratio x 10000), and the copies asked for, being made, and used
+    /// by the last sync.
+    std::map<std::string, double> detectedTempo_;
+    using StretchKey = std::pair<std::string, long long>;
+    std::map<StretchKey, std::shared_ptr<const vloom::SampleBuffer>> stretched_;
+    std::map<StretchKey, bool> stretchWanted_; ///< value: being made
+    std::map<StretchKey, bool> stretchUsed_;
+    QTimer* stretchTimer_ = nullptr; ///< waits for the tempo to settle
+    double fitTempo_ = 0.0; ///< the song tempo the fitted clips were last sent with
+    double songLoopEnd_ = -1.0; ///< the loop end last sent to the engine (0: off; < 0: never sent)
     bool songMode_ = false; ///< the engine plays the playlist instead of looping the pattern
     /// Length and waveform of the playlist's audio files, by path.
     std::map<std::string, std::shared_ptr<const ClipAudio>> clipAudio_;

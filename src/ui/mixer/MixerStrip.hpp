@@ -4,6 +4,9 @@
 
 #include <QFrame>
 
+#include <cstdint>
+#include <optional>
+
 class QLabel;
 class QToolButton;
 
@@ -27,6 +30,9 @@ public:
     [[nodiscard]] LevelMeter* meter() const { return meter_; }
     /// New name and number, e.g. after an insert before it was deleted.
     void setLabel(const QString& name, const QString& number);
+    /// The user's colour (0xRRGGBB), drawn as a bar along the top; nullopt: none.
+    void setColor(std::optional<std::uint32_t> color);
+    [[nodiscard]] std::optional<std::uint32_t> color() const { return color_; }
 
 public slots:
     /// Greys the strip out while another insert's solo silences it.
@@ -42,6 +48,7 @@ signals:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;
 
 private:
     void showDb(double position);
@@ -57,6 +64,7 @@ private:
     QLabel* number_ = nullptr;
     QToolButton* mute_ = nullptr;
     QToolButton* solo_ = nullptr; ///< inserts only
+    std::optional<std::uint32_t> color_;
 };
 
 } // namespace vloomdaw

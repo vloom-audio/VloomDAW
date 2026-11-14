@@ -4,6 +4,7 @@
 
 #include "core/NoteNames.hpp"
 #include "ui/Theme.hpp"
+#include "ui/widgets/ColorMenu/ColorMenu.hpp"
 #include "ui/widgets/Timeline/Timeline.hpp"
 
 #include <QMouseEvent>
@@ -240,7 +241,10 @@ void PianoRollView::paintEvent(QPaintEvent* event)
         p.save();
         p.setClipRect(area);
         p.setRenderHint(QPainter::Antialiasing);
-        const QColor fill = Theme::patternColor(pattern_);
+        // The channel's colour when it has one, else the pattern's.
+        const auto& channelColor
+            = channel_ < project_->channels().size() ? project_->channels()[channel_].color : std::nullopt;
+        const QColor fill = channelColor ? toQColor(*channelColor) : Theme::patternColor(pattern_);
         for (std::size_t i = 0; i < list->size(); ++i) {
             const QRectF r = noteRect((*list)[i]).adjusted(0.5, 1.0, -0.5, -1.0);
             if (!r.intersects(area))

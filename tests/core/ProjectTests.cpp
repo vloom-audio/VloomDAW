@@ -477,3 +477,219 @@ TEST_CASE("Moving an insert or a track keeps routing and clips in place", "[proj
     CHECK(p.audioClips()[0].track == 1); // Track 3 moved up one
     CHECK(p.moveTrack(1, 50) == 2); // clamped
 }
+
+TEST_CASE("Muted tracks are silent; while any track is solo only solo tracks play", "[project]")
+{
+    Project p;
+    p.addTrack();
+    p.addTrack();
+    REQUIRE(p.tracks().size() == 3);
+    CHECK(p.trackAudible(0));
+    CHECK_FALSE(p.trackAudible(3)); // does not exist
+
+    p.setTrackMuted(1, true);
+    CHECK(p.tracks()[1].muted);
+    CHECK_FALSE(p.trackAudible(1));
+    CHECK(p.trackAudible(0));
+
+    p.setTrackSolo(2, true);
+    CHECK_FALSE(p.trackAudible(0));
+    CHECK_FALSE(p.trackAudible(1));
+    CHECK(p.trackAudible(2));
+
+    p.setTrackMuted(2, true); // mute wins over solo
+    CHECK_FALSE(p.trackAudible(2));
+    p.setTrackMuted(2, false);
+
+    // The flags travel with the track when it moves; removing the solo track
+    // lets the others play again.
+    p.moveTrack(2, 0);
+    CHECK(p.tracks()[0].solo);
+    CHECK(p.tracks()[2].muted);
+    p.removeTrack(0);
+    CHECK(p.trackAudible(0));
+    CHECK_FALSE(p.trackAudible(1));
+
+    p.setTrackMuted(9, true); // out of range: ignored
+    p.setTrackSolo(9, true);
+    CHECK(p.trackAudible(0));
+}
+
+TEST_CASE("Track heights are kept within limits", "[project]")
+{
+    Project p;
+    CHECK(p.tracks()[0].height == PlaylistTrack::kDefaultHeight);
+    p.setTrackHeight(0, 80);
+    CHECK(p.tracks()[0].height == 80);
+    p.setTrackHeight(0, 1);
+    CHECK(p.tracks()[0].height == PlaylistTrack::kMinHeight);
+    p.setTrackHeight(0, 100000);
+    CHECK(p.tracks()[0].height == PlaylistTrack::kMaxHeight);
+    p.setTrackHeight(5, 80); // out of range: ignored
+}
+
+TEST_CASE("Sub-tracks: indent, outdent, collapse and groups", "[project]")
+{
+    Project p;
+    for (int i = 0; i < 4; ++i)
+        p.addTrack();
+    REQUIRE(p.tracks().size() == 5);
+    const auto depths = [&p] {
+        std::vector<int> out;
+        for (const auto& t : p.tracks())
+            out.push_back(t.depth);
+        return out;
+    };
+
+    CHECK_FALSE(p.indentTrack(0)); // nothing above
+    CHECK(p.indentTrack(1));
+    CHECK_FALSE(p.indentTrack(1)); // already a sub-track of track 0
+    CHECK(p.indentTrack(2));
+    CHECK(p.indentTrack(2)); // a sub-track of track 1
+    CHECK(depths() == std::vector<int>{0, 1, 2, 0, 0});
+    CHECK(p.parentTrack(2) == std::size_t{1});
+    CHECK(p.parentTrack(1) == std::size_t{0});
+    CHECK_FALSE(p.parentTrack(0));
+    CHECK(p.hasSubTracks(0));
+    CHECK_FALSE(p.hasSubTracks(2));
+    CHECK(p.subTreeEnd(0) == 3);
+    CHECK(p.subTreeEnd(1) == 3);
+
+    // Collapsing hides the whole group below, not the track itself.
+    p.setTrackCollapsed(0, true);
+    CHECK(p.trackVisible(0));
+    CHECK_FALSE(p.trackVisible(1));
+    CHECK_FALSE(p.trackVisible(2));
+    CHECK(p.trackVisible(3));
+    p.setTrackCollapsed(0, false);
+
+    // Indenting a track takes its sub-tracks along.
+    CHECK(p.outdentTrack(1));
+    CHECK(depths() == std::vector<int>{0, 0, 1, 0, 0});
+    CHECK(p.indentTrack(1));
+    CHECK(depths() == std::vector<int>{0, 1, 2, 0, 0});
+
+    // Mute and solo count for the whole group.
+    p.setTrackMuted(0, true);
+    CHECK_FALSE(p.trackAudible(2));
+    CHECK(p.trackAudible(3));
+    p.setTrackMuted(0, false);
+    p.setTrackSolo(1, true);
+    CHECK_FALSE(p.trackAudible(0));
+    CHECK(p.trackAudible(1));
+    CHECK(p.trackAudible(2));
+    CHECK_FALSE(p.trackAudible(3));
+    p.setTrackSolo(1, false);
+
+    // Removing a group's track lifts what must move up.
+    p.removeTrack(0);
+    CHECK(depths() == std::vector<int>{0, 1, 0, 0});
+
+    // The depth limit.
+    Project deep;
+    for (int i = 0; i < PlaylistTrack::kMaxDepth + 2; ++i)
+        deep.addTrack();
+    for (std::size_t t = 1; t < deep.tracks().size(); ++t)
+        while (deep.indentTrack(t)) { }
+    CHECK(deep.tracks().back().depth == PlaylistTrack::kMaxDepth);
+}
+
+TEST_CASE("A track group moves with its sub-tracks and clips", "[project]")
+{
+    Project p;
+    for (int i = 0; i < 4; ++i)
+        p.addTrack();
+    p.setTrackName(0, "A");
+    p.setTrackName(1, "A1");
+    p.setTrackName(2, "B");
+    p.setTrackName(3, "B1");
+    p.setTrackName(4, "C");
+    p.indentTrack(1);
+    p.indentTrack(3);
+    p.addClip(Clip{0, 1, 0}); // on A1
+    p.addClip(Clip{0, 4, 0}); // on C
+    const auto names = [&p] {
+        std::vector<std::string> out;
+        for (const auto& t : p.tracks())
+            out.push_back(t.name);
+        return out;
+    };
+
+    CHECK(p.moveTrackGroup(0, true) == std::size_t{2}); // A below B
+    CHECK(names() == std::vector<std::string>{"B", "B1", "A", "A1", "C"});
+    CHECK(p.clips()[0].track == 3); // still on A1
+    CHECK(p.clips()[1].track == 4);
+    CHECK(p.tracks()[3].depth == 1);
+
+    CHECK(p.moveTrackGroup(4, false) == std::size_t{2}); // C above A
+    CHECK(names() == std::vector<std::string>{"B", "B1", "C", "A", "A1"});
+    CHECK(p.clips()[1].track == 2);
+
+    CHECK_FALSE(p.moveTrackGroup(1, false)); // B1 is first in its group
+    CHECK_FALSE(p.moveTrackGroup(1, true)); // and last
+    CHECK_FALSE(p.moveTrackGroup(0, false));
+    CHECK_FALSE(p.moveTrackGroup(3, true));
+}
+
+TEST_CASE("Tracks and channels keep the colour the user picks", "[project]")
+{
+    Project p;
+    CHECK_FALSE(p.tracks()[0].color);
+    CHECK_FALSE(p.channels()[0].color);
+    p.setTrackColor(0, 0x4ade80u);
+    p.setChannelColor(0, 0xff123456u); // higher bits dropped
+    CHECK(p.tracks()[0].color == 0x4ade80u);
+    CHECK(p.channels()[0].color == 0x123456u);
+
+    // A track's colour moves with it.
+    p.addTrack();
+    p.moveTrackGroup(0, true);
+    CHECK_FALSE(p.tracks()[0].color);
+    CHECK(p.tracks()[1].color == 0x4ade80u);
+
+    p.setTrackColor(1, std::nullopt);
+    p.setChannelColor(0, std::nullopt);
+    CHECK_FALSE(p.tracks()[1].color);
+    CHECK_FALSE(p.channels()[0].color);
+    p.setTrackColor(9, 0x111111u); // out of range: ignored
+    p.setChannelColor(9, 0x111111u);
+}
+
+TEST_CASE("A clip with a length of its own keeps it; offsets and lengths stay positive", "[project]")
+{
+    Project p;
+    Clip clip{0, 0, 0};
+    CHECK(p.clipLength(clip) == p.patternLength(0));
+    clip.length = 3 * kTicksPerBeat;
+    CHECK(p.clipLength(clip) == 3 * kTicksPerBeat);
+
+    clip.offset = -5;
+    clip.length = -1;
+    const auto index = p.addClip(clip);
+    REQUIRE(index);
+    CHECK(p.clips()[*index].offset == 0);
+    CHECK(p.clips()[*index].length == 0);
+
+    AudioClip audio{0, 0, 0};
+    audio.offset = -1;
+    audio.length = -1;
+    const auto audioIndex = p.addAudioClip(audio);
+    REQUIRE(audioIndex);
+    CHECK(p.audioClips()[*audioIndex].offset == 0);
+    CHECK(p.audioClips()[*audioIndex].length == 0);
+}
+
+TEST_CASE("An audio clip's tempo is kept in range, and a clip without one is not fitted", "[project]")
+{
+    Project p;
+    AudioClip clip{0, 0, 0};
+    clip.fit = AudioClip::Fit::Stretch;
+    CHECK_FALSE(clip.fitted()); // no tempo yet
+    clip.sourceBpm = 146.0;
+    CHECK(clip.fitted());
+    clip.sourceBpm = 5000.0; // out of range: dropped
+    const auto index = p.addAudioClip(clip);
+    REQUIRE(index);
+    CHECK(p.audioClips()[*index].sourceBpm == 0.0);
+    CHECK_FALSE(p.audioClips()[*index].fitted());
+}

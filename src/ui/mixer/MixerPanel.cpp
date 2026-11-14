@@ -4,7 +4,9 @@
 
 #include "ui/Theme.hpp"
 #include "ui/mixer/MixerStrip.hpp"
+#include "ui/widgets/ColorMenu/ColorMenu.hpp"
 #include "ui/widgets/DetachButton/DetachButton.hpp"
+#include "ui/widgets/ToolGroup/ToolGroup.hpp"
 
 #include <QHBoxLayout>
 #include <QIcon>
@@ -44,6 +46,7 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
         button->setIcon(Theme::icon(icon));
         button->setText(text);
         button->setToolButtonStyle(text.isEmpty() ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
+        button->setProperty("iconOnly", text.isEmpty()); // even padding (Theme)
         button->setToolTip(tip);
         button->setFocusPolicy(Qt::NoFocus);
         return button;
@@ -53,10 +56,10 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
         if (trackCount() > 1)
             emit removeInsertRequested(trackCount() - 1);
     });
-    header_->addWidget(removeInsert);
     auto* addInsert = headerButton(QStringLiteral("plus"), tr("Insert"), tr("Add an insert"));
     connect(addInsert, &QToolButton::clicked, this, &MixerPanel::addInsertRequested);
-    header_->addWidget(addInsert);
+    // "+ Insert" and "−" together, like the playlist's "+ Track" and "−".
+    header_->addWidget(makePanelButtonGroup({addInsert, removeInsert}));
     detach_ = new DetachButton(tr("mixer"), headerBox);
     connect(detach_, &QToolButton::clicked, this, &MixerPanel::detachRequested);
     header_->addWidget(detach_);
@@ -77,6 +80,13 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
 
     auto* master = new MixerStrip(MixerStrip::Kind::Master, tr("Master"), tr("M"), this);
     connectStrip(master);
+    master->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(master, &QWidget::customContextMenuRequested, this, [this, master](const QPoint& at) {
+        QMenu menu(this);
+        addColorMenu(menu, master->color(),
+            [this](std::optional<std::uint32_t> color) { emit colorChanged(0, color); });
+        menu.exec(master->mapToGlobal(at));
+    });
     strips_.append(master);
     body->addWidget(master);
 
@@ -113,6 +123,8 @@ MixerStrip* MixerPanel::makeInsertStrip(std::size_t track)
         const auto index = static_cast<std::size_t>(strips_.indexOf(strip));
         QMenu menu(this);
         menu.addAction(tr("Rename…"), this, [this, index] { emit renameRequested(index); });
+        addColorMenu(menu, strip->color(),
+            [this, index](std::optional<std::uint32_t> color) { emit colorChanged(index, color); });
         menu.addSeparator();
         menu.addAction(tr("Move Left"), this, [this, index] { emit moveInsertRequested(index, index - 1); })
             ->setEnabled(index > 1);
@@ -195,6 +207,12 @@ void MixerPanel::moveInsert(std::size_t from, std::size_t to)
         strips_[static_cast<qsizetype>(i)]->setLabel(
             name.isEmpty() ? tr("Insert %1").arg(i) : name, QString::number(i));
     }
+}
+
+void MixerPanel::setTrackColor(std::size_t track, std::optional<std::uint32_t> color)
+{
+    if (track < trackCount())
+        strips_[static_cast<qsizetype>(track)]->setColor(color);
 }
 
 void MixerPanel::setTrackName(std::size_t track, const QString& name)

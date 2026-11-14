@@ -21,6 +21,7 @@ namespace vloomdaw {
 /// QFileSystemModel reads the disk on its own thread, so large folders never
 /// block the UI. Read-only: nothing here changes files.
 class SampleTreeModel;
+class SampleWaveform;
 class SearchResultsModel;
 
 class BrowserPanel : public QWidget {
@@ -37,6 +38,8 @@ public:
     /// Reads the folder again (F5): the folders that are open stay open, the
     /// selection and scroll position stay where they were. A search runs again.
     void refresh();
+    /// The preview strip under the list: the selected file's waveform.
+    [[nodiscard]] SampleWaveform* waveform() const { return waveform_; }
 
 signals:
     /// The user added, removed or switched folders.
@@ -44,6 +47,9 @@ signals:
     /// Play this file from its start: the user clicked it, or moved to it
     /// with the keyboard while Auto preview is on.
     void previewRequested(const QString& path);
+    /// A file became the selected one without being played (arrow keys with
+    /// Auto preview off): load it for the preview strip.
+    void fileShown(const QString& path);
     /// The user clicked the file that was already selected: stop it if it
     /// is the one playing, play it again otherwise.
     void previewToggled(const QString& path);
@@ -71,6 +77,7 @@ private:
     QLineEdit* search_ = nullptr;
     QTreeView* tree_ = nullptr;
     QLabel* emptyHint_ = nullptr;
+    SampleWaveform* waveform_ = nullptr;
     SampleTreeModel* model_ = nullptr;
     QTreeView* results_ = nullptr; ///< shown instead of tree_ while searching
     SearchResultsModel* resultsModel_ = nullptr;

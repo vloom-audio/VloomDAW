@@ -22,6 +22,92 @@ and the project uses [Semantic Versioning](https://semver.org/).
   of following the engine's `main`.
 
 ### Added
+- Mute and solo for playlist tracks: the M and S buttons on each track's
+  header. A muted track's clips (pattern and audio) do not play; while any
+  track is solo, only solo tracks play (mute wins over solo). Clips on a
+  track that does not play are drawn faded.
+- Playlist tracks of their own height: drag the bottom edge of a track's
+  header (24-200 px; double-click it for the default 36 px).
+- Sub-tracks: "Make Sub-track" in a track's right-click menu puts it (with
+  its own sub-tracks) under the track above, up to 4 levels deep; "Move Out
+  of Group" takes it out again. The arrow on a track with sub-tracks hides or
+  shows them (hidden ones still play). Muting or soloing a track mutes or
+  solos its sub-tracks too, and Move Up / Move Down move a track with its
+  sub-tracks past its neighbour in the same group.
+- The track header is wider (170 px) to fit the buttons and the indentation.
+- Playlist tools, side by side in one box on the playlist's header, the one
+  in use lit; "+ Track" and "−" sit together in a box of the same height
+  beside them, as do the channel rack's "+ Bar" and "−" and the mixer's
+  "+ Insert" and "−" (keys work while
+  the playlist has the focus): Draw (P, as before), Paint (B: drag along a
+  track to lay the current pattern in every slot), Delete (D: click or drag
+  over clips), Mute (M: click or drag over clips; a muted clip is grey and
+  silent), Select (E: drag a box, Ctrl adds or toggles, drag the selection to
+  move it; Delete removes it, Ctrl+A selects all, Escape clears), Zoom (Z:
+  drag a range to fill the view, click to zoom in, right-click out) and
+  Playback (Y: hold to play the song from the pointer, drag to scrub). The
+  header's caption explains the tool in use.
+- Finer snapping in the playlist: a Snap box on its header (Auto, Bar,
+  Beat, Step). Auto, the default, snaps to the finest grid line far enough
+  apart to aim at for the zoom: beats at the default zoom, steps (16th notes)
+  zoomed in, bars zoomed far out; the grid now shows step lines when zoomed
+  in. It applies to placing, dropping, moving, trimming and cutting clips;
+  Shift snaps to steps whatever the box says (it used to snap moves to beats
+  instead of bars). Steps are the finest: the engine places clips on steps.
+- Fit to tempo for audio clips: right-click an audio clip's title strip,
+  Fit to Tempo > Stretch (keeps the pitch; Signalsmith Stretch, MIT, pinned)
+  or Resample (the pitch follows). The sample's tempo is measured from its
+  audio (`audio/TempoDetector`: the spacing at which its attacks repeat,
+  70-180 BPM, made exact for loops of whole bars and rounded to a whole BPM
+  when within a third of one; not the file name), or set by hand (Set
+  Tempo…); Detect Tempo measures again. A fitted clip keeps its bars on the
+  song's bars at any tempo; its title shows its tempo. Stretched copies are
+  made on a background thread once the tempo settles; the clip plays
+  resampled meanwhile.
+- Song mode loops the song, as in FL Studio: at the end of the last clip
+  (rounded up to a bar) playback goes back to the start instead of running on
+  past an empty playlist. The end follows edits, audio clip lengths and the
+  tempo (engine loop region, `Engine::setLoop()`).
+- Browser preview strip: under the browser's list, the selected file's name,
+  length and waveform (worked out on the previewer's thread, cached with the
+  sample), with a play / stop button and a line that follows the preview as
+  it plays; click the waveform to play from the start. Selecting a file with
+  the arrow keys while Auto preview is off shows it without playing it.
+- MP3, FLAC, Ogg (Vorbis, Opus), AIFF and M4A (AAC, ALAC) samples: drop them
+  on the channel rack or the playlist, or preview them in the browser, like
+  WAV files. FFmpeg (`audio/FileDecoder`) decodes each file once, resampling
+  it to the engine's rate on the way, into a 32-bit float WAV in the app's
+  cache folder (named after the file's path, size, date and the rate, so an
+  edited file is decoded again); the project keeps the original path. A
+  4-minute MP3 is ready in under a second (release build). FFmpeg may only
+  read local files and only these containers and codecs, so a crafted file
+  cannot make it fetch URLs or reach its other parsers; files longer than 20
+  minutes, with more than 8 channels or over 1 GiB decoded are refused. WAV
+  files still go through the engine's own hardened reader.
+  Builds need FFmpeg 5.1 or later: Windows downloads a pinned LGPL build at
+  configure time (its DLLs and licence ship with the app); macOS and Linux
+  use the system's for development and a small static one for releases
+  (`scripts/build-ffmpeg.sh`, from the signed 8.1.3 source, pinned by SHA-256).
+- A dropped sample (any type) is decoded and resampled on a background
+  thread, with "Loading …" in the status bar: a song several minutes long no
+  longer freezes the window.
+- Slice tool (C), as in FL Studio: a cut line follows the pointer, snapped
+  to the nearest beat (Shift: step); click, or drag up or down across tracks,
+  and every clip the line crosses is cut in two there. The second part goes
+  on where the first stopped, in the pattern or the sample.
+- Trim and stretch clips: with Draw, Paint or Select, drag a clip's left or
+  right edge (beat grid; Shift: step). A pattern clip longer than its pattern
+  repeats it; an audio clip reaches no further than its sample at either end,
+  and neither kind past the start of its pattern or sample. Needs vloom-engine
+  with clip offsets and lengths (`SongPatternClip::offsetSteps`,
+  `SongAudioClip::offsetSteps` / `lengthSteps`).
+- Colours of your own: a Color submenu (12 presets, Custom… with a colour
+  dialog, Default) in the right-click menu of a playlist track's header, a
+  channel's name in the channel rack and a mixer strip (inserts and the
+  master). A track shows its colour as a bar on its header and a tint behind
+  its clips, and its clips (pattern and audio) take its colour too, unless
+  muted (grey); a channel on its name button, its lit step pads and its notes in
+  the piano roll; a mixer strip as a bar along its top.
 - Pan knob for each channel in the channel rack, beside the volume knob: drag
   (Shift: fine), scroll, double-click for the centre; the tooltip reads C,
   L 35, R 100.
@@ -193,6 +279,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Window size and position are remembered between sessions
 
 ### Fixed
+- Deleting a playlist track in song mode stops its clips at once; they used
+  to play on until the next edit.
 - The pattern selector shows the project's pattern names: after deleting a
   pattern it showed renumbered names that no longer matched the panel titles,
   and deleting no longer renames the remaining patterns.

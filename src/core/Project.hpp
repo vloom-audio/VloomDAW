@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -49,19 +50,41 @@ struct Channel {
     double volume = 0.8; ///< fader position 0..1 (faderToGain(); 0.8 is unity, as on the mixer)
     double pan = 0.0; ///< -1 left .. +1 right
     int insert = 0; ///< mixer insert it plays into; 0 = the master
+    /// 0xRRGGBB chosen by the user (rack, piano roll); none: the theme's colours.
+    std::optional<std::uint32_t> color{};
 };
 
 /// A playlist track: a lane for clips.
+///
+/// Tracks form an outline: a track one level deeper than the track above it
+/// is that track's sub-track. A track's sub-tracks (and theirs) follow it
+/// directly; the first one after them at its own depth or less ends the group.
 struct PlaylistTrack {
+    static constexpr int kDefaultHeight = 36;
+    static constexpr int kMinHeight = 24;
+    static constexpr int kMaxHeight = 200;
+    static constexpr int kMaxDepth = 4; ///< sub-tracks nest at most this deep
+
     std::string name;
     bool named = false; ///< the user named it; otherwise "Track N", following its number
+    bool muted = false; ///< its clips, and its sub-tracks', do not play
+    bool solo = false; ///< while any track is solo, only solo tracks (and their sub-tracks) play
+    int height = kDefaultHeight; ///< lane height in pixels at 100% scale
+    int depth = 0; ///< 0: top level; 1: a sub-track of the nearest track above at depth 0; ...
+    bool collapsed = false; ///< its sub-tracks are hidden (they still play)
+    std::optional<std::uint32_t> color{}; ///< 0xRRGGBB chosen by the user; none: no colour
 };
 
-/// A pattern placed in the playlist. Its length is the pattern's length.
+/// A pattern placed in the playlist. It is as long as the pattern unless
+/// given a length (trimmed or stretched in the playlist: a longer clip
+/// repeats the pattern); `offset` is where in the pattern it starts (cut).
 struct Clip {
     std::size_t pattern = 0;
     int track = 0; ///< 0-based playlist track
     int start = 0; ///< ticks from the song start
+    bool muted = false; ///< stays silent (the playlist's mute tool)
+    int offset = 0; ///< ticks into the pattern where the clip starts
+    int length = 0; ///< ticks; 0: the pattern's length
 
     friend bool operator==(const Clip&, const Clip&) = default;
 };
@@ -69,10 +92,27 @@ struct Clip {
 /// A channel's sample placed in the playlist (FL Studio's audio clip): plays
 /// once from `start` at its own speed (its length in ticks depends on the
 /// tempo), through the channel: its volume, pan, mute and mixer insert.
+///
+/// It can show part of the sample (cut or trimmed): from `offset` ticks into
+/// it (at the current tempo), for `length` ticks.
 struct AudioClip {
     std::size_t channel = 0; ///< the channel whose sample plays
     int track = 0; ///< 0-based playlist track
     int start = 0; ///< ticks from the song start
+    bool muted = false; ///< stays silent (the playlist's mute tool)
+    int offset = 0; ///< ticks into the sample where the clip starts
+    int length = 0; ///< ticks; 0: to the sample's end
+    /// Fitted to the song's tempo: the sample, recorded at `sourceBpm`,
+    /// follows the song's tempo, so its bars line up with the song's.
+    /// Stretch keeps its pitch (time-stretched); Resample plays it faster or
+    /// slower, its pitch following. Offset and length then count in the
+    /// sample's own beats, whatever the song's tempo.
+    enum class Fit : std::uint8_t { Off, Stretch, Resample };
+    Fit fit = Fit::Off;
+    double sourceBpm = 0.0; ///< the sample's own tempo (detected or set); 0: unknown, so not fitted
+
+    /// Whether the clip follows the song's tempo (it has a tempo to fit from).
+    [[nodiscard]] bool fitted() const { return fit != Fit::Off && sourceBpm > 0.0; }
 
     friend bool operator==(const AudioClip&, const AudioClip&) = default;
 };
@@ -91,6 +131,9 @@ public:
     static constexpr int kMaxPlaylistTracks = 500;
     /// Longest track name, in bytes (UTF-8).
     static constexpr std::size_t kMaxTrackNameLength = 64;
+    /// The tempi an audio clip can be fitted from (AudioClip::sourceBpm).
+    static constexpr double kMinSourceBpm = 20.0;
+    static constexpr double kMaxSourceBpm = 999.0;
     /// Most patterns the UI lets a project have (the selector is sized for "Pattern 999").
     static constexpr std::size_t kMaxPatterns = 999;
     /// Most step pads a pattern can have: 16 bars.
@@ -111,6 +154,8 @@ public:
     /// The first channel playing the sample at `path`, if any.
     [[nodiscard]] std::optional<std::size_t> channelWithSample(const std::string& path) const;
     void setChannelMuted(std::size_t channel, bool muted);
+    /// The channel's colour, 0xRRGGBB (higher bits dropped); nullopt: none.
+    void setChannelColor(std::size_t channel, std::optional<std::uint32_t> color);
     void setChannelName(std::size_t channel, const std::string& name);
     /// The sample the channel plays (UTF-8 path; empty = none).
     void setChannelSample(std::size_t channel, const std::string& path);
@@ -200,13 +245,56 @@ public:
     /// Moves a track to position `to` (clamped); its clips go with it, and
     /// unnamed tracks take their new number. Returns the new position.
     std::size_t moveTrack(std::size_t from, std::size_t to);
+    /// Mutes or unmutes a track: its clips (pattern and audio) stay silent.
+    void setTrackMuted(std::size_t track, bool muted);
+    /// Solos a track: while any track is solo, only solo tracks play.
+    void setTrackSolo(std::size_t track, bool solo);
+    /// Whether `track`'s clips play: neither it nor a track it belongs to is
+    /// muted, and when any track is solo, it or a track it belongs to is.
+    /// False for a track that does not exist.
+    [[nodiscard]] bool trackAudible(std::size_t track) const;
+    /// The track's colour, 0xRRGGBB (higher bits dropped); nullopt: none.
+    void setTrackColor(std::size_t track, std::optional<std::uint32_t> color);
+    /// Sets a track's lane height (clamped to PlaylistTrack::kMinHeight..kMaxHeight).
+    void setTrackHeight(std::size_t track, int height);
+    /// Hides or shows a track's sub-tracks in the playlist.
+    void setTrackCollapsed(std::size_t track, bool collapsed);
+    /// Makes `track` (with its sub-tracks) a sub-track of the track above it,
+    /// or of that track's group. Returns whether it could (not the first
+    /// track, not deeper than PlaylistTrack::kMaxDepth).
+    bool indentTrack(std::size_t track);
+    /// Moves `track` (with its sub-tracks) one level out of its group;
+    /// tracks after it in the same group become its sub-tracks. Returns
+    /// whether it could (it was a sub-track).
+    bool outdentTrack(std::size_t track);
+    [[nodiscard]] bool canIndentTrack(std::size_t track) const;
+    /// The track `track` is a sub-track of; nullopt at the top level.
+    [[nodiscard]] std::optional<std::size_t> parentTrack(std::size_t track) const;
+    /// Whether the track right after `track` is its sub-track.
+    [[nodiscard]] bool hasSubTracks(std::size_t track) const;
+    /// Swaps `track` and its sub-tracks with the neighbouring track of the
+    /// same group above (up) or below (down), with its sub-tracks; clips go
+    /// with their tracks. Returns `track`'s new index, or nullopt when there
+    /// is no such neighbour.
+    std::optional<std::size_t> moveTrackGroup(std::size_t track, bool down);
+    [[nodiscard]] bool canMoveTrackGroup(std::size_t track, bool down) const
+    {
+        return groupSwap(track, down).has_value();
+    }
+    /// Index one past `track`'s last sub-track (track + 1 without any).
+    [[nodiscard]] std::size_t subTreeEnd(std::size_t track) const;
+    /// Whether `track` shows in the playlist: no track it belongs to is collapsed.
+    [[nodiscard]] bool trackVisible(std::size_t track) const;
     /// Clips placed on `track`, pattern and audio.
     [[nodiscard]] std::size_t clipsOnTrack(std::size_t track) const;
     /// Places `pattern` on `track` at `start` (clamped); returns its index.
     std::optional<std::size_t> addClip(Clip clip);
     void setClip(std::size_t index, Clip clip);
     void removeClip(std::size_t index);
-    [[nodiscard]] int clipLength(const Clip& clip) const { return patternLength(clip.pattern); }
+    [[nodiscard]] int clipLength(const Clip& clip) const
+    {
+        return clip.length > 0 ? clip.length : patternLength(clip.pattern);
+    }
     /// Places a channel's sample on the playlist (track and start clamped);
     /// returns its index, or nullopt for a channel that does not exist.
     std::optional<std::size_t> addAudioClip(AudioClip clip);
@@ -225,6 +313,19 @@ private:
     [[nodiscard]] Pattern emptyPattern(std::string name) const;
     /// Puts `pattern` at index `at`; clips of later patterns follow.
     std::size_t insertPatternAt(std::size_t at, Pattern pattern);
+    /// The neighbouring groups moveTrackGroup() swaps: [first, middle) and
+    /// [middle, last); nullopt when there is nothing to swap with.
+    struct GroupSwap {
+        std::size_t first = 0;
+        std::size_t middle = 0;
+        std::size_t last = 0;
+    };
+    [[nodiscard]] std::optional<GroupSwap> groupSwap(std::size_t track, bool down) const;
+    /// Keeps the track outline valid after tracks were removed or moved.
+    void normalizeTrackDepths();
+    /// Puts the tracks in `order` (old indices, each once); clips follow and
+    /// unnamed tracks take their new number.
+    void reorderTracks(const std::vector<std::size_t>& order);
 
     std::vector<Channel> channels_;
     std::vector<Pattern> patterns_;
