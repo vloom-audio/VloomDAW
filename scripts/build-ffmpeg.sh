@@ -62,7 +62,7 @@ Darwin-universal)
         [[ $arch == x86_64 ]] && extra+=(--disable-x86asm) # no nasm needed
         build "$arch" "$WORK/prefix-$arch" --arch="$arch" --target-os=darwin --enable-cross-compile \
             --cc="clang -arch $arch" --extra-cflags="-mmacosx-version-min=$MACOS_MIN" \
-            --extra-ldflags="-mmacosx-version-min=$MACOS_MIN" "${extra[@]}"
+            --extra-ldflags="-mmacosx-version-min=$MACOS_MIN" ${extra[@]+"${extra[@]}"}
     done
     # One library per name holding both architectures; headers and
     # pkg-config files are the same for both apart from the prefix.

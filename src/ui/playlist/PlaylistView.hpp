@@ -20,8 +20,8 @@ namespace vloomdaw {
 
 /// Clips changed together (a selection moved): new values by index.
 struct PlaylistClipEdit {
-    std::vector<std::pair<std::size_t, Clip>> clips;
-    std::vector<std::pair<std::size_t, AudioClip>> audioClips;
+    std::vector<std::pair<std::size_t, Clip>> clips{};
+    std::vector<std::pair<std::size_t, AudioClip>> audioClips{};
 };
 
 /// What the playlist needs to draw an audio clip.

@@ -18,7 +18,7 @@ struct MixerTrack {
     double pan = 0.0; ///< -1 left .. +1 right
     bool muted = false;
     bool soloed = false;
-    std::optional<std::uint32_t> color; ///< 0xRRGGBB chosen by the user; none: no colour
+    std::optional<std::uint32_t> color{}; ///< 0xRRGGBB chosen by the user; none: no colour
 };
 
 /// The mixer: track 0 is the master, tracks 1..N are inserts, as in FL

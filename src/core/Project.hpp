@@ -51,7 +51,7 @@ struct Channel {
     double pan = 0.0; ///< -1 left .. +1 right
     int insert = 0; ///< mixer insert it plays into; 0 = the master
     /// 0xRRGGBB chosen by the user (rack, piano roll); none: the theme's colours.
-    std::optional<std::uint32_t> color;
+    std::optional<std::uint32_t> color{};
 };
 
 /// A playlist track: a lane for clips.
@@ -72,7 +72,7 @@ struct PlaylistTrack {
     int height = kDefaultHeight; ///< lane height in pixels at 100% scale
     int depth = 0; ///< 0: top level; 1: a sub-track of the nearest track above at depth 0; ...
     bool collapsed = false; ///< its sub-tracks are hidden (they still play)
-    std::optional<std::uint32_t> color; ///< 0xRRGGBB chosen by the user; none: no colour
+    std::optional<std::uint32_t> color{}; ///< 0xRRGGBB chosen by the user; none: no colour
 };
 
 /// A pattern placed in the playlist. It is as long as the pattern unless

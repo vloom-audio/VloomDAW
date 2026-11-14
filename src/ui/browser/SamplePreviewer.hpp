@@ -69,9 +69,9 @@ signals:
 
 private:
     struct Entry {
-        QString path;
-        std::shared_ptr<const vloom::SampleBuffer> sample;
-        std::shared_ptr<const std::vector<float>> waveform;
+        QString path{};
+        std::shared_ptr<const vloom::SampleBuffer> sample{};
+        std::shared_ptr<const std::vector<float>> waveform{};
     };
 
     /// Loads `path` (from the cache, or on the worker), then emits loaded();
