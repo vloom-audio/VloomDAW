@@ -2782,6 +2782,7 @@ void MainWindow::newProject()
 void MainWindow::resetProject()
 {
     stopAndRewind();
+    unpublishedInstruments_.clear(); // the old project's
     transport_->setTempo(kDefaultTempo);
     pendingTempo_ = kDefaultTempo; // sent by refreshFromEngine()
     transport_->recordAction()->setChecked(false);
@@ -3057,6 +3058,7 @@ bool MainWindow::isScannedPlugin(const PluginSlot& slot) const
 void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
 {
     stopAndRewind();
+    unpublishedInstruments_.clear(); // the old project's
     const double rate = audio_.sampleRate() > 0 ? audio_.sampleRate() : audio_.requestedSampleRate();
     // Only plugins the user's scan found are loaded: a project file may name
     // any library, and loading one runs its code.
@@ -3083,6 +3085,9 @@ void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
     for (std::size_t c = 0; c < incoming.project.channels().size(); ++c)
         if (auto slot = incoming.project.channels()[c].instrument) {
             load(*slot, stateAt(incoming.states.instruments, c));
+            // No device yet: startDevice() activates it at the device's rate.
+            if (slot->instance != 0 && audio_.sampleRate() <= 0)
+                unpublishedInstruments_.push_back(slot->instance);
             incoming.project.setChannelInstrument(c, std::move(slot));
         }
     for (std::size_t i = 0; i < incoming.mixer.size(); ++i) {
