@@ -216,6 +216,16 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/window-minimize.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-restore.svg)
 # The app icon, set as the window icon in main() (resources/app/README.md).
+qt_add_resources(vloomdaw_ui "fonts"
+    PREFIX "/fonts"
+    BASE "${PROJECT_SOURCE_DIR}/resources/fonts"
+    FILES
+        ${PROJECT_SOURCE_DIR}/resources/fonts/NotoSans-Regular.ttf
+        ${PROJECT_SOURCE_DIR}/resources/fonts/NotoSans-SemiBold.ttf
+        ${PROJECT_SOURCE_DIR}/resources/fonts/NotoSans-Bold.ttf
+        ${PROJECT_SOURCE_DIR}/resources/fonts/NotoSansThai-Regular.ttf
+        ${PROJECT_SOURCE_DIR}/resources/fonts/NotoSansThai-SemiBold.ttf
+        ${PROJECT_SOURCE_DIR}/resources/fonts/NotoSansThai-Bold.ttf)
 qt_add_resources(vloomdaw_ui "app_icon"
     PREFIX "/app"
     BASE "${PROJECT_SOURCE_DIR}/resources/app"
