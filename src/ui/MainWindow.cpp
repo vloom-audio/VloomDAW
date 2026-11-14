@@ -25,6 +25,7 @@
 #include "ui/mixer/MixerPanel.hpp"
 #include "ui/pianoroll/PianoRollView.hpp"
 #include "ui/playlist/PlaylistView.hpp"
+#include "ui/plugins/PluginEditorWindow.hpp"
 #include "ui/plugins/PluginManagerDialog.hpp"
 #include "ui/plugins/PluginsPanel.hpp"
 #include "ui/widgets/ActivityBar/ActivityBar.hpp"
@@ -55,6 +56,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCursor>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
@@ -170,6 +172,22 @@ MainWindow::MainWindow(AudioController& audio, QWidget* parent)
     connect(stretchTimer_, &QTimer::timeout, this, &MainWindow::makeStretchedSamples);
     rackAudio_.setStretchProvider(
         [this](const std::string& path, double ratio) { return stretchedSample(path, ratio); });
+    // Hosted plugins: instruments of channels, effects of inserts.
+    rackAudio_.setPluginResolver(pluginHost_.resolver());
+    pluginIdleTimer_ = new QTimer(this);
+    connect(pluginIdleTimer_, &QTimer::timeout, this, [this] {
+        pluginHost_.idle();
+        // Plugins change their latency while they run (oversampling, linear
+        // phase): the mixer's delay compensation follows.
+        audio_.engine().updatePluginLatency();
+        // About 60 times a second while an editor is open (ADR 0009 of
+        // vloom-engine), else 30: plugins' timers and edits.
+        const bool editing = std::any_of(pluginEditors_.begin(), pluginEditors_.end(),
+            [](const auto& entry) { return !entry.second.isNull(); });
+        const int interval = editing ? 16 : 33;
+        if (pluginIdleTimer_->interval() != interval)
+            pluginIdleTimer_->setInterval(interval);
+    });
     // MP3, FLAC, Ogg and AIFF reach the engine as WAV copies decoded once.
     rackAudio_.setSourceResolver([this](const std::string& path, double sampleRate, std::string* error) {
         const QString file = QString::fromStdString(path);
@@ -217,6 +235,9 @@ MainWindow::MainWindow(AudioController& audio, QWidget* parent)
 
 MainWindow::~MainWindow()
 {
+    // Plugin editors close before their plugins and this window's members go.
+    for (auto& [handle, editor] : pluginEditors_)
+        delete editor.data();
     // A load under way finishes first; its result, queued to this window,
     // is dropped with it.
     if (loaderThread_ != nullptr) {
@@ -944,6 +965,8 @@ void MainWindow::removeMixerInsert(std::size_t track)
     syncInsertNames();
     updateMixer();
     syncChannelRack();
+    releaseUnusedPlugins(); // its effects
+    syncEffectCounts();
     statusBar()->showMessage(tr("Insert %1 deleted.").arg(track), 3000);
 }
 
@@ -1352,7 +1375,11 @@ QWidget* MainWindow::createMixer()
         syncInsertNames();
         updateMixer();
         syncChannelRack(); // channels follow their insert
+        syncEffectCounts();
     });
+    connect(mixerPanel_, &MixerPanel::effectsMenuRequested, this, &MainWindow::showEffectsMenu);
+    connect(mixerPanel_, &MixerPanel::pluginDropped, this,
+        [this](std::size_t track, std::size_t plugin) { addPluginToInsert(plugin, track); });
     connect(mixerPanel_, &MixerPanel::soloToggled, this, [this](std::size_t track, bool soloed) {
         mixer_.setSoloed(track, soloed);
         updateMixer();
@@ -1368,7 +1395,7 @@ void MainWindow::updateMixer()
     for (std::size_t i = 1; i < mixer_.size(); ++i)
         mixerPanel_->setSilenced(i, solo && !mixer_.track(i).soloed);
     updateMasterOutput();
-    audio_.engine().setMixerState(engineMixerState(mixer_));
+    audio_.engine().setMixerState(engineMixerState(mixer_, pluginHost_.resolver()));
 }
 
 void MainWindow::updateMasterOutput()
@@ -1524,6 +1551,9 @@ void MainWindow::createCentralArea()
             if (pluginManager_ != nullptr)
                 pluginManager_->setStore(pluginStore_); // its next scan starts from this
         });
+    connect(pluginsPanel_, &PluginsPanel::addToRackRequested, this,
+        [this](std::size_t plugin) { addPluginToRack(plugin, project_.channels().size()); });
+    connect(pluginsPanel_, &PluginsPanel::addToMixerRequested, this, &MainWindow::chooseInsertForPlugin);
     sidePanels_->addWidget(pluginsPanel_);
     activityBar_->addPage(Theme::icon(QStringLiteral("plug")), tr("Plugins"));
 
@@ -1645,8 +1675,19 @@ QWidget* MainWindow::createWorkspace()
         });
     connect(channelRack_, &ChannelRackView::channelSelected, this, &MainWindow::selectChannel);
     connect(channelRack_, &ChannelRackView::addBarRequested, this, [this] { changeBars(1); });
+    connect(channelRack_, &ChannelRackView::pluginDropped, this,
+        [this](std::size_t channel, std::size_t plugin) { addPluginToRack(plugin, channel); });
     connect(channelRack_, &ChannelRackView::channelOpened, this, [this](std::size_t channel) {
         selectChannel(channel);
+        // A plugin channel opens its plugin's editor, as in FL Studio.
+        if (channel < project_.channels().size()) {
+            const Channel& c = project_.channels()[channel];
+            if (c.instrument && pluginHost_.instance(c.instrument->instance) != nullptr
+                && pluginHost_.instance(c.instrument->instance)->processor().hasEditor()) {
+                openPluginEditor(c.instrument->instance, QString::fromStdString(c.name));
+                return;
+            }
+        }
         showWorkspace(WorkspacePage::PianoRoll);
     });
 
@@ -2341,7 +2382,7 @@ bool MainWindow::startDevice(int index, bool fallback)
     audio_.engine().setMasterPan(*pendingPan_);
     pendingGain_.reset();
     pendingPan_.reset();
-    audio_.engine().setMixerState(engineMixerState(mixer_));
+    audio_.engine().setMixerState(engineMixerState(mixer_, pluginHost_.resolver()));
 
     syncChannelRack(); // samples at the device's rate
     previewer_->setSampleRate(audio_.sampleRate());
@@ -2514,6 +2555,195 @@ void MainWindow::assignSample(std::size_t channel, const QString& path)
     syncChannelRack();
 }
 
+// ---------------------------------------------------------------- hosted plugins
+
+std::optional<PluginSlot> MainWindow::loadPlugin(std::size_t plugin, vloom::PluginInfo::Kind wanted)
+{
+    if (plugin >= pluginStore_.plugins.size())
+        return std::nullopt;
+    const PluginInfo& info = pluginStore_.plugins[plugin];
+    const QString name = QString::fromStdString(info.name);
+    statusBar()->showMessage(tr("Loading %1…").arg(name));
+    statusBar()->repaint(); // shown while the plugin loads
+    const double rate = audio_.sampleRate() > 0 ? audio_.sampleRate() : audio_.requestedSampleRate();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const PluginHost::Loaded loaded = pluginHost_.load(info.format, info.path, {}, info.name, rate);
+    QApplication::restoreOverrideCursor();
+    if (loaded.handle == 0) {
+        statusBar()->showMessage(
+            tr("Could not load %1: %2").arg(name, QString::fromStdString(loaded.error)), 8000);
+        return std::nullopt;
+    }
+    if (loaded.info.kind != wanted) {
+        releaseUnusedPlugins(); // the one just loaded: the engine never had it
+        statusBar()->showMessage(wanted == vloom::PluginInfo::Kind::Instrument
+                ? tr("%1 is an effect: drop it on a mixer insert.").arg(name)
+                : tr("%1 is an instrument: drop it on the channel rack.").arg(name),
+            8000);
+        return std::nullopt;
+    }
+    updatePluginIdle();
+    statusBar()->showMessage(tr("%1 loaded").arg(name), 3000);
+    PluginSlot slot;
+    slot.format = info.format;
+    const std::u8string path = info.path.u8string();
+    slot.path.assign(path.begin(), path.end());
+    slot.id = loaded.info.id;
+    slot.name = loaded.info.name.empty() ? info.name : loaded.info.name;
+    slot.instance = loaded.handle;
+    return slot;
+}
+
+void MainWindow::addPluginToRack(std::size_t plugin, std::size_t channel)
+{
+    const auto slot = loadPlugin(plugin, vloom::PluginInfo::Kind::Instrument);
+    if (!slot)
+        return;
+    if (channel >= project_.channels().size())
+        channel = project_.addChannel(slot->name);
+    else
+        project_.setChannelName(channel, slot->name);
+    project_.setChannelInstrument(channel, *slot);
+    channelRack_->refresh();
+    selectChannel(channel);
+    syncChannelRack();
+    releaseUnusedPlugins(); // the instrument it replaced, if any
+    openPluginEditor(slot->instance, QString::fromStdString(slot->name));
+}
+
+void MainWindow::addPluginToInsert(std::size_t plugin, std::size_t track)
+{
+    if (track >= mixer_.size())
+        return;
+    if (mixer_.track(track).effects.size() >= MixerModel::kMaxEffects) {
+        statusBar()->showMessage(tr("%1 has %2 effects, the most it can have.")
+                                     .arg(QString::fromStdString(mixer_.track(track).name))
+                                     .arg(static_cast<qulonglong>(MixerModel::kMaxEffects)),
+            5000);
+        return;
+    }
+    const auto slot = loadPlugin(plugin, vloom::PluginInfo::Kind::Effect);
+    if (!slot)
+        return;
+    mixer_.addEffect(track, *slot);
+    updateMixer();
+    syncEffectCounts();
+    openPluginEditor(slot->instance,
+        tr("%1 - %2").arg(
+            QString::fromStdString(slot->name), QString::fromStdString(mixer_.track(track).name)));
+}
+
+void MainWindow::chooseInsertForPlugin(std::size_t plugin)
+{
+    QMenu menu(this);
+    for (std::size_t i = 0; i < mixer_.size(); ++i) {
+        menu.addAction(QString::fromStdString(mixer_.track(i).name), this,
+            [this, plugin, i] { addPluginToInsert(plugin, i); });
+        if (i == MixerModel::kMaster)
+            menu.addSeparator();
+    }
+    menu.exec(QCursor::pos());
+}
+
+void MainWindow::showEffectsMenu(std::size_t track, const QPoint& globalPos)
+{
+    if (track >= mixer_.size())
+        return;
+    const QString insertName = QString::fromStdString(mixer_.track(track).name);
+    const auto& effects = mixer_.track(track).effects;
+    QMenu menu(this);
+    if (effects.empty())
+        menu.addAction(tr("No effects: drag a plugin here from the Plugins panel"))->setEnabled(false);
+    for (std::size_t i = 0; i < effects.size(); ++i) {
+        const PluginSlot& effect = effects[i];
+        const QString name = QString::fromStdString(effect.name);
+        QMenu* sub = menu.addMenu(effect.bypassed
+                ? tr("%1. %2 (bypassed)").arg(static_cast<qulonglong>(i + 1)).arg(name)
+                : tr("%1. %2").arg(static_cast<qulonglong>(i + 1)).arg(name));
+        const auto instance = pluginHost_.instance(effect.instance);
+        QAction* open
+            = sub->addAction(tr("Open Editor"), this, [this, handle = effect.instance, name, insertName] {
+                  openPluginEditor(handle, tr("%1 - %2").arg(name, insertName));
+              });
+        open->setEnabled(instance != nullptr && instance->processor().hasEditor());
+        QAction* bypass = sub->addAction(tr("Bypass"), this, [this, track, i](bool on) {
+            mixer_.setEffectBypassed(track, i, on);
+            updateMixer();
+        });
+        bypass->setCheckable(true);
+        bypass->setChecked(effect.bypassed);
+        sub->addSeparator();
+        sub->addAction(tr("Remove"), this, [this, track, i] {
+            mixer_.removeEffect(track, i);
+            updateMixer();
+            releaseUnusedPlugins();
+            syncEffectCounts();
+        });
+    }
+    menu.exec(globalPos);
+}
+
+void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
+{
+    if (const auto it = pluginEditors_.find(handle); it != pluginEditors_.end() && !it->second.isNull()) {
+        it->second->showNormal();
+        it->second->raise();
+        it->second->activateWindow();
+        return;
+    }
+    const auto instance = pluginHost_.instance(handle);
+    if (instance == nullptr || !instance->processor().hasEditor())
+        return;
+    auto* editor = new PluginEditorWindow(instance, title, this);
+    QString error;
+    if (!editor->open(&error)) {
+        editor->close(); // deletes it
+        statusBar()->showMessage(tr("%1: %2").arg(title, error), 8000);
+        return;
+    }
+    pluginEditors_[handle] = editor;
+    updatePluginIdle();
+}
+
+std::vector<std::uint64_t> MainWindow::pluginsInUse() const
+{
+    std::vector<std::uint64_t> handles;
+    for (const Channel& channel : project_.channels())
+        if (channel.instrument)
+            handles.push_back(channel.instrument->instance);
+    for (std::size_t i = 0; i < mixer_.size(); ++i)
+        for (const PluginSlot& effect : mixer_.track(i).effects)
+            handles.push_back(effect.instance);
+    return handles;
+}
+
+void MainWindow::releaseUnusedPlugins()
+{
+    pluginHost_.retainOnly(pluginsInUse(), [this](std::uint64_t handle) {
+        if (const auto it = pluginEditors_.find(handle); it != pluginEditors_.end()) {
+            if (!it->second.isNull())
+                delete it->second.data(); // closes the editor first
+            pluginEditors_.erase(it);
+        }
+    });
+    std::erase_if(pluginEditors_, [](const auto& entry) { return entry.second.isNull(); });
+    updatePluginIdle();
+}
+
+void MainWindow::syncEffectCounts()
+{
+    for (std::size_t i = 0; i < mixer_.size(); ++i)
+        mixerPanel_->setEffectCount(i, mixer_.track(i).effects.size());
+}
+
+void MainWindow::updatePluginIdle()
+{
+    if (pluginHost_.size() == 0)
+        pluginIdleTimer_->stop();
+    else if (!pluginIdleTimer_->isActive())
+        pluginIdleTimer_->start(33);
+}
+
 void MainWindow::newProject()
 {
     stopAndRewind();
@@ -2529,6 +2759,8 @@ void MainWindow::newProject()
     currentChannel_ = 0;
     refreshEditors();
     selectChannel(0);
+    syncChannelRack();
+    releaseUnusedPlugins(); // the old project's instruments
     statusBar()->showMessage(tr("New project"), 3000);
 }
 

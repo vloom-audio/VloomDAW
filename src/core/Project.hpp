@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "core/PluginSlot.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -52,6 +54,8 @@ struct Channel {
     int insert = 0; ///< mixer insert it plays into; 0 = the master
     /// 0xRRGGBB chosen by the user (rack, piano roll); none: the theme's colours.
     std::optional<std::uint32_t> color{};
+    /// A hosted instrument plugin; when loaded it plays instead of the sample.
+    std::optional<PluginSlot> instrument{};
 };
 
 /// A playlist track: a lane for clips.
@@ -159,6 +163,8 @@ public:
     void setChannelName(std::size_t channel, const std::string& name);
     /// The sample the channel plays (UTF-8 path; empty = none).
     void setChannelSample(std::size_t channel, const std::string& path);
+    /// The instrument plugin the channel plays; nullopt: its sample again.
+    void setChannelInstrument(std::size_t channel, std::optional<PluginSlot> instrument);
     /// Fader position 0..1 (clamped; NaN ignored).
     void setChannelVolume(std::size_t channel, double volume);
     /// -1 .. +1 (clamped; NaN ignored).

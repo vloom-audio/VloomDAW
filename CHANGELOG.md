@@ -7,6 +7,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Plugin hosting (CLAP and VST 3, in-process, vloom-engine ADR 0006 and 0009):
+  drag a plugin from the Plugins panel onto a mixer strip (an effect, the
+  master's too) or the channel rack (an instrument), or use its context menu.
+  A strip's FX button lists its effects: open the editor, bypass, remove.
+  Double-clicking a plugin channel opens its editor. Editors are the plugins'
+  own windows, sized as they ask and resizable when they allow it; a timer
+  runs the plugins' main-thread work and follows latency they change while
+  running. Not saved with the project yet.
 - Installers built by CI (`.github/workflows/release.yml`, see
   `docs/releasing.md`): a Windows setup (Inno Setup), a universal macOS DMG
   and a Linux AppImage. A `v*` tag drafts a GitHub Release with them and

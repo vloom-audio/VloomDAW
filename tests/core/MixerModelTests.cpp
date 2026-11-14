@@ -172,3 +172,43 @@ TEST_CASE("A mixer track keeps its colour when inserts move", "[mixer]")
     CHECK_FALSE(mixer.track(3).color);
     mixer.setColor(99, 0x111111u); // out of range: ignored
 }
+
+TEST_CASE("Mixer tracks hold an effect chain", "[mixer]")
+{
+    MixerModel mixer(3);
+    PluginSlot reverb;
+    reverb.name = "Reverb";
+    reverb.instance = 1;
+    PluginSlot delay;
+    delay.name = "Delay";
+    delay.instance = 2;
+    CHECK(mixer.addEffect(MixerModel::kMaster, reverb)); // the master's chain: on the whole mix
+    CHECK(mixer.track(MixerModel::kMaster).effects.size() == 1);
+    CHECK_FALSE(mixer.addEffect(99, reverb));
+    CHECK(mixer.addEffect(1, reverb));
+    CHECK(mixer.addEffect(1, delay));
+    REQUIRE(mixer.track(1).effects.size() == 2);
+    CHECK(mixer.track(1).effects[1].name == "Delay"); // in the order added
+
+    mixer.setEffectBypassed(1, 0, true);
+    CHECK(mixer.track(1).effects[0].bypassed);
+    mixer.setEffectBypassed(1, 9, true); // no such effect: ignored
+
+    mixer.moveInsert(1, 3); // the chain goes with its insert
+    CHECK(mixer.track(1).effects.empty());
+    REQUIRE(mixer.track(3).effects.size() == 2);
+
+    CHECK(mixer.removeEffect(3, 0));
+    REQUIRE(mixer.track(3).effects.size() == 1);
+    CHECK(mixer.track(3).effects[0].name == "Delay");
+    CHECK_FALSE(mixer.removeEffect(3, 1));
+}
+
+TEST_CASE("An insert takes at most kMaxEffects effects", "[mixer]")
+{
+    MixerModel mixer(1);
+    for (std::size_t i = 0; i < MixerModel::kMaxEffects; ++i)
+        CHECK(mixer.addEffect(1, PluginSlot{}));
+    CHECK_FALSE(mixer.addEffect(1, PluginSlot{}));
+    CHECK(mixer.track(1).effects.size() == MixerModel::kMaxEffects);
+}

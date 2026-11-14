@@ -54,6 +54,10 @@ signals:
     /// A WAV file was dropped on `channel`; channel == the channel count
     /// means below the last one (a new channel). `path` is a local path.
     void sampleDropped(std::size_t channel, const QString& path);
+    /// Plugin `plugin` (an index into the plugin store) was dragged from the
+    /// Plugins panel onto `channel`; channel == the channel count means a
+    /// new channel.
+    void pluginDropped(std::size_t channel, std::size_t plugin);
     /// The volume knob moved: fader position 0..1 (0.8 = unity).
     void volumeChanged(std::size_t channel, double volume);
     /// The pan knob moved: -1 left .. +1 right.

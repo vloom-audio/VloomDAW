@@ -3,11 +3,14 @@
 #include "ui/mixer/MixerStrip.hpp"
 
 #include "core/Decibels.hpp"
+#include "ui/plugins/PluginDrag.hpp"
 #include "ui/widgets/ColorMenu/ColorMenu.hpp"
 #include "ui/widgets/Fader/Fader.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
 #include "ui/widgets/LevelMeter/LevelMeter.hpp"
 
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -60,6 +63,24 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     connect(pan_, &Knob::valueChanged, this, [this](double percent) { emit panChanged(percent / 100.0); });
     layout->addWidget(pan_, 0, Qt::AlignHCenter);
 
+    {
+        // The track's effects: a menu of them (open, bypass, remove).
+        // Plugins dragged from the Plugins panel onto the strip are added.
+        effects_ = new QToolButton(this);
+        effects_->setObjectName(QStringLiteral("stripEffects"));
+        effects_->setFocusPolicy(Qt::NoFocus);
+        effects_->setToolTip(kind == Kind::Master
+                ? tr("Effects on the whole mix: drag a plugin from the Plugins panel onto the master")
+                : tr("Effects: drag a plugin from the Plugins panel onto this insert"));
+        effects_->setAccessibleName(tr("Effects"));
+        effects_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        connect(effects_, &QToolButton::clicked, this,
+            [this] { emit effectsMenuRequested(effects_->mapToGlobal(QPoint(0, effects_->height()))); });
+        layout->addWidget(effects_);
+        setEffectCount(0);
+        setAcceptDrops(true);
+    }
+
     auto* levels = new QHBoxLayout;
     levels->setSpacing(4);
     meter_ = new LevelMeter(this);
@@ -106,6 +127,31 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     number_->setAlignment(Qt::AlignCenter);
     layout->addWidget(number_);
     setLabel(name, number);
+}
+
+void MixerStrip::setEffectCount(std::size_t count)
+{
+    if (effects_ == nullptr)
+        return;
+    effects_->setText(count == 0 ? tr("FX") : tr("FX %1").arg(count));
+    effects_->setProperty("active", count > 0); // styled in Theme
+    effects_->style()->unpolish(effects_);
+    effects_->style()->polish(effects_);
+}
+
+void MixerStrip::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (effects_ != nullptr && droppedPlugin(event->mimeData()))
+        event->acceptProposedAction();
+}
+
+void MixerStrip::dropEvent(QDropEvent* event)
+{
+    const auto plugin = droppedPlugin(event->mimeData());
+    if (effects_ == nullptr || !plugin)
+        return;
+    event->acceptProposedAction();
+    emit pluginDropped(*plugin);
 }
 
 void MixerStrip::setColor(std::optional<std::uint32_t> color)

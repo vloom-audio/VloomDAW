@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "audio/ChannelRackAudio.hpp"
 
+#include <vloom/engine/plugin/PluginInstance.hpp>
 #include <vloom/engine/render/OfflineRenderer.hpp>
 #include <vloom/engine/render/WavWriter.hpp>
 
@@ -58,6 +59,30 @@ std::vector<float> render(vloom::Engine& engine, double seconds)
     options.blockSize = 256;
     return vloom::renderInterleaved(engine, options);
 }
+
+/// An instrument that plays a steady 0.5 from its first note on.
+class HoldInstrument : public vloom::AudioProcessor {
+public:
+    [[nodiscard]] vloom::PluginInfo info() const override
+    {
+        vloom::PluginInfo info;
+        info.id = "test.hold";
+        info.kind = vloom::PluginInfo::Kind::Instrument;
+        return info;
+    }
+    bool activate(double /*sampleRate*/, int /*maxBlockFrames*/) override { return true; }
+    void process(const vloom::ProcessContext& context) noexcept override
+    {
+        for (const vloom::NoteEvent& note : context.notes)
+            if (note.type == vloom::NoteEvent::Type::On)
+                sounding_ = true;
+        for (int ch = 0; ch < context.numChannels; ++ch)
+            std::fill_n(context.channels[ch], context.numFrames, sounding_ ? 0.5f : 0.0f);
+    }
+
+private:
+    bool sounding_ = false;
+};
 
 void prepare(vloom::Engine& engine)
 {
@@ -397,4 +422,49 @@ TEST_CASE("The playlist can load a sample for its waveform", "[audio]")
     const auto sample = rack.sample(samples.impulse);
     REQUIRE(sample != nullptr);
     CHECK(sample->frames() == 1);
+}
+
+TEST_CASE("A channel with a loaded instrument plugin plays it instead of its sample", "[audio]")
+{
+    auto plugin = std::make_shared<vloom::PluginInstance>(std::make_unique<HoldInstrument>());
+    REQUIRE(plugin->activate(kRate, vloom::kMaxBlockFrames));
+    Project project;
+    PluginSlot slot;
+    slot.instance = 7;
+    project.setChannelInstrument(0, slot);
+    project.setStep(0, 0, 0, true);
+    project.setChannelVolume(0, 0.8); // unity
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.setPluginResolver([&](std::uint64_t handle) { return handle == 7 ? plugin : nullptr; });
+    rack.sync(engine, project, 0, kRate);
+    engine.play();
+    const auto audio = render(engine, 0.05);
+    CHECK(*std::max_element(audio.begin(), audio.end()) > 0.3f); // 0.5, panned centre
+
+    slot.bypassed = true;
+    project.setChannelInstrument(0, slot);
+    rack.sync(engine, project, 0, kRate);
+    CHECK(plugin->isBypassed());
+}
+
+TEST_CASE("A channel whose plugin is not loaded plays its sample", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    PluginSlot slot;
+    slot.instance = 3; // nothing loaded under it
+    project.setChannelInstrument(0, slot);
+    project.setStep(0, 0, 0, true);
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.setPluginResolver([](std::uint64_t) { return std::shared_ptr<vloom::PluginInstance>(); });
+    rack.sync(engine, project, 0, kRate);
+    engine.play();
+    CHECK(onsets(render(engine, 0.05)) == std::vector<std::size_t>{0});
 }

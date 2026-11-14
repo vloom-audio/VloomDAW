@@ -3,6 +3,7 @@
 #pragma once
 
 #include "audio/ChannelRackAudio.hpp"
+#include "audio/PluginHost.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/DeviceWatch.hpp"
 #include "core/FrameStats.hpp"
@@ -19,6 +20,7 @@
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPoint>
+#include <QPointer>
 #include <QRect>
 #include <QStringList>
 
@@ -64,6 +66,7 @@ class PianoRollView;
 class PlaylistView;
 struct ClipAudio;
 class PluginManagerDialog;
+class PluginEditorWindow;
 class PluginsPanel;
 class TransportBar;
 class WindowButtons;
@@ -234,6 +237,32 @@ private:
     void assignSample(std::size_t channel, const QString& path);
     /// Opens the Plugin Manager, where the user scans for plugins.
     void showPluginManager();
+
+    // ---- hosted plugins
+    /// Loads plugin `plugin` (an index into the plugin store) as the
+    /// instrument of `channel` (channel == count: a new channel), and opens
+    /// its editor.
+    void addPluginToRack(std::size_t plugin, std::size_t channel);
+    /// Loads plugin `plugin` as the last effect of mixer insert `track`, and
+    /// opens its editor.
+    void addPluginToInsert(std::size_t plugin, std::size_t track);
+    /// Asks which insert plugin `plugin` goes on.
+    void chooseInsertForPlugin(std::size_t plugin);
+    /// Loads plugin `plugin`, which must be of kind `wanted`; says why not in
+    /// the status bar otherwise.
+    std::optional<PluginSlot> loadPlugin(std::size_t plugin, vloom::PluginInfo::Kind wanted);
+    /// The insert's effects: open, bypass, remove.
+    void showEffectsMenu(std::size_t track, const QPoint& globalPos);
+    /// Opens (or raises) the editor of loaded plugin `handle`.
+    void openPluginEditor(std::uint64_t handle, const QString& title);
+    /// Drops the plugins the project no longer uses (the engine was sent
+    /// states without them), closing their editors.
+    void releaseUnusedPlugins();
+    /// The handles of every plugin the project uses.
+    [[nodiscard]] std::vector<std::uint64_t> pluginsInUse() const;
+    void syncEffectCounts();
+    /// Runs the plugins' main-thread work while any are loaded.
+    void updatePluginIdle();
     /// Starts over: stops, returns to the start and resets the tempo.
     void newProject();
     void togglePlay();
@@ -255,7 +284,10 @@ private:
     AudioController& audio_;
     MixerModel mixer_;
     Project project_;
+    PluginHost pluginHost_; ///< the plugins the project uses, loaded
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
+    std::map<std::uint64_t, QPointer<PluginEditorWindow>> pluginEditors_; ///< by plugin handle
+    QTimer* pluginIdleTimer_ = nullptr; ///< runs the plugins' main-thread work (PluginHost::idle())
     /// Loads dropped samples (decoding, resampling) off the UI thread, one
     /// at a time; loader_ lives on it.
     QThread* loaderThread_ = nullptr;

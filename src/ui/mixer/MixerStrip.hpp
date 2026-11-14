@@ -4,6 +4,7 @@
 
 #include <QFrame>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -32,6 +33,8 @@ public:
     void setLabel(const QString& name, const QString& number);
     /// The user's colour (0xRRGGBB), drawn as a bar along the top; nullopt: none.
     void setColor(std::optional<std::uint32_t> color);
+    /// Shows how many effects the track has.
+    void setEffectCount(std::size_t count);
     [[nodiscard]] std::optional<std::uint32_t> color() const { return color_; }
 
 public slots:
@@ -45,10 +48,16 @@ signals:
     void soloToggled(bool soloed);
     /// The name was double-clicked (inserts only): the user wants to rename.
     void renameRequested();
+    /// The FX button was clicked: show the track's effects at `globalPos`.
+    void effectsMenuRequested(const QPoint& globalPos);
+    /// Plugin `plugin` (an index into the plugin store) was dropped on the strip.
+    void pluginDropped(std::size_t plugin);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     void showDb(double position);
@@ -64,6 +73,7 @@ private:
     QLabel* number_ = nullptr;
     QToolButton* mute_ = nullptr;
     QToolButton* solo_ = nullptr; ///< inserts only
+    QToolButton* effects_ = nullptr; ///< the FX button
     std::optional<std::uint32_t> color_;
 };
 

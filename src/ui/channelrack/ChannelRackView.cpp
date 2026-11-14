@@ -6,6 +6,7 @@
 #include "core/Project.hpp"
 #include "ui/DroppedFiles.hpp"
 #include "ui/Theme.hpp"
+#include "ui/plugins/PluginDrag.hpp"
 #include "ui/widgets/ColorMenu/ColorMenu.hpp"
 
 #include <QDir>
@@ -300,7 +301,8 @@ void ChannelRackView::setDropRow(int row)
 
 void ChannelRackView::dragEnterEvent(QDragEnterEvent* event)
 {
-    if (project_ == nullptr || droppedAudio(event->mimeData()).isEmpty())
+    if (project_ == nullptr
+        || (droppedAudio(event->mimeData()).isEmpty() && !droppedPlugin(event->mimeData())))
         return; // ignored: the cursor shows it cannot drop
     event->acceptProposedAction();
     setDropRow(static_cast<int>(dropRowAt(event->position().toPoint().y())));
@@ -319,6 +321,11 @@ void ChannelRackView::dropEvent(QDropEvent* event)
     const QString path = droppedAudio(event->mimeData());
     const std::size_t row = dropRowAt(event->position().toPoint().y());
     setDropRow(-1);
+    if (const auto plugin = droppedPlugin(event->mimeData())) {
+        event->acceptProposedAction();
+        emit pluginDropped(row, *plugin);
+        return;
+    }
     if (path.isEmpty())
         return;
     event->acceptProposedAction();
