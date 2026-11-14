@@ -67,7 +67,12 @@ the transport in all three editors.
 | Scan | ✅ | Only when you press Scan, never automatically. Runs in the background and the results are remembered across restarts |
 | Vendor and category | ✅ | With "Read vendor and category" on, each new or changed plugin is loaded in a separate process (`vloomdaw-plugin-probe`); a plugin that crashes or hangs (20 s) is skipped and marked. Rescan All reads every plugin again |
 | Your own categories | ✅ | Right-click a plugin to set its category; kept across scans |
-| Loading and playing plugins | ⏳ | CLAP hosting in M4, VST3 in M5 |
+| Loading and playing plugins | ✅ | CLAP and VST 3, loaded in the app's process (a plugin that crashes takes the app down). Drag a plugin from the Plugins panel onto the channel rack (an instrument: a new channel, or the one it is dropped on) or onto a mixer strip (an effect), or right-click it: Add to Channel Rack / Add to Mixer… |
+| Instrument plugins | ✅ | A channel with a loaded instrument plays it instead of its sample: steps and piano-roll notes, through the channel's volume, pan and insert. Double-click the channel's name for the plugin's editor |
+| Mixer effects | ✅ | Up to 10 per track, the master's included (the master's run on the whole mix, not the metronome or the browser preview). A strip's FX button lists them: open the editor, bypass, remove. Plugin latency is compensated, also when a plugin changes it while running (oversampling, linear phase) |
+| Plugin editors | ✅ | The plugin's own window, sized as it asks and resizable when it allows. Windows and macOS; on Linux X11 only (start with `QT_QPA_PLATFORM=xcb` under Wayland) |
+| Generic controls | ⏳ | Knobs for plugins without an editor of their own |
+| Plugins in the project file | ⏳ | Arrives with the File menu (#19) |
 
 ## Browser
 
