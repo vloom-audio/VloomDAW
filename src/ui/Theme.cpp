@@ -304,6 +304,19 @@ QToolButton#muteButton, QToolButton#soloButton {
 QToolButton#muteButton:hover, QToolButton#soloButton:hover { border-color: @textDim; }
 QToolButton#muteButton:checked { background: @accentTint; color: @accent; border-color: @accent; }
 QToolButton#soloButton:checked { background: @playingTint; color: @playing; border-color: @playing; }
+/* A strip's FX button (MixerStrip::setEffectCount): accented while the track has effects. */
+QToolButton#stripEffects {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @textDim;
+    font-size: 8pt;
+    font-weight: 700;
+    padding: 1px 0;
+}
+QToolButton#stripEffects:hover { border-color: @textDim; }
+QToolButton#stripEffects[active="true"] { background: @accentTint; color: @accent; border-color: @accent; }
+QFrame#mixerStrip[silenced="true"] QToolButton#stripEffects[active="true"] { color: @textDim; }
 QToolButton#panelClose { border: none; border-radius: 6px; padding: 4px; }
 QToolButton#panelClose:hover { background: @raised; }
 
