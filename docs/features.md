@@ -46,8 +46,8 @@ the transport in all three editors.
 | Channel volume | ✅ | Knob per channel: drag (`Shift`: fine), scroll, double-click for 0 dB |
 | Channel routing | ✅ | Insert box per channel: click to pick a mixer insert, or scroll; `-` plays straight into the master |
 | Channel pan | ⏳ | M1.5: the engine supports it, no control in the rack yet |
-| Piano roll (`F7`) | 🎨 | Add, move, resize and delete notes; snap (`Alt`: off); `Ctrl+wheel` zoom; scale shading. Plays in M2 |
-| Playlist (`F5`) | 🎨 | One track in a new project, 1-500 with + Track / − in the header; double-click a track name (or right-click, Rename…) to rename it inline (Enter confirms, Escape cancels); right-click to move up / down or delete; place, move (`Shift`: snap to beats) and delete pattern clips; drop WAV files (browser or desktop) for audio clips with a waveform, below the last track for a new one; each plays through a channel of the channel rack (made for the file, or the one already playing it), so its volume, pan, mute and insert apply. Dropping one turns song mode on. Plays in song mode |
+| Piano roll (`F7`) | 🎨 | Add, move, resize and delete notes; snap menu (beat, 1/8, step, 1/32, 1/64; `Alt`: off); `Ctrl+wheel` zoom; scale shading. Plays in M2 |
+| Playlist (`F5`) | 🎨 | One track in a new project, 1-500 with + Track / − in the header; double-click a track name (or right-click, Rename…) to rename it inline (Enter confirms, Escape cancels); right-click to move up / down or delete; place, move and delete pattern clips, snapped to the Snap menu (auto, bar, beat, step, 1/32; `Shift`: steps); drop WAV files (browser or desktop) for audio clips with a waveform, below the last track for a new one; each plays through a channel of the channel rack (made for the file, or the one already playing it), so its volume, pan, mute and insert apply. Dropping one turns song mode on. Plays in song mode |
 
 ## Mixer
 
