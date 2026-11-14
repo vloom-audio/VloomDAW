@@ -22,6 +22,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   of following the engine's `main`.
 
 ### Added
+- Finer snap: the playlist snaps clips to 1/32 notes ("Snap: 1/32", and Auto
+  when zoomed far in), and they play exactly there (vloom-engine places
+  song clips on ticks now, not steps). The piano roll has a snap menu too:
+  beat, 1/8, step (1/16, the default), 1/32 or 1/64. A clip snapped to 1/32
+  notes can be one 32nd long. An audio clip's offset and length keep their
+  exact place when its tempo or fit changes instead of rounding to steps.
 - Mute and solo for playlist tracks: the M and S buttons on each track's
   header. A muted track's clips (pattern and audio) do not play; while any
   track is solo, only solo tracks play (mute wins over solo). Clips on a

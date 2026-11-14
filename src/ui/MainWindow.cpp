@@ -817,9 +817,7 @@ void MainWindow::setAudioClipTempo(std::size_t index, double bpm)
     const double before = clip.fitted() ? clip.sourceBpm : transport_->tempo();
     clip.sourceBpm = bpm;
     const double after = clip.fitted() ? clip.sourceBpm : transport_->tempo();
-    const auto rescale = [&](int ticks) {
-        return static_cast<int>(std::lround(ticks * after / before / kTicksPerStep)) * kTicksPerStep;
-    };
+    const auto rescale = [&](int ticks) { return static_cast<int>(std::lround(ticks * after / before)); };
     clip.offset = rescale(clip.offset);
     clip.length = rescale(clip.length);
     project_.setAudioClip(index, clip);
@@ -840,9 +838,7 @@ void MainWindow::setAudioClipFit(std::size_t index, AudioClip::Fit fit)
         const double before = changed.fitted() ? changed.sourceBpm : transport_->tempo();
         changed.fit = mode;
         const double after = changed.fitted() ? changed.sourceBpm : transport_->tempo();
-        const auto rescale = [&](int ticks) {
-            return static_cast<int>(std::lround(ticks * after / before / kTicksPerStep)) * kTicksPerStep;
-        };
+        const auto rescale = [&](int ticks) { return static_cast<int>(std::lround(ticks * after / before)); };
         changed.offset = rescale(changed.offset);
         changed.length = rescale(changed.length);
         project_.setAudioClip(index, changed);
@@ -1661,6 +1657,23 @@ QWidget* MainWindow::createWorkspace()
     workspace_->addWidget(pianoRollFrame_);
     makeDetachable(detachable_[0], WorkspacePage::PianoRoll, pianoRollFrame_, tr("Piano roll"),
         tr("piano roll"), QStringLiteral("pianoRoll"));
+    {
+        // What notes snap to while placed, moved or resized (Alt: no snap).
+        auto* snap = new QComboBox(pianoRollFrame_);
+        snap->setObjectName(QStringLiteral("pianoRollSnap"));
+        snap->setFocusPolicy(Qt::NoFocus);
+        snap->setToolTip(tr("Snap: what notes line up to when placed, moved or resized (Alt: no snap)"));
+        snap->setAccessibleName(tr("Snap"));
+        snap->addItem(tr("Snap: Beat"), kTicksPerBeat);
+        snap->addItem(tr("Snap: 1/8"), kTicksPerStep * 2);
+        snap->addItem(tr("Snap: Step"), kTicksPerStep);
+        snap->addItem(tr("Snap: 1/32"), kTicksPerStep / 2);
+        snap->addItem(tr("Snap: 1/64"), kTicksPerStep / 4);
+        snap->setCurrentIndex(snap->findData(kTicksPerStep));
+        connect(snap, &QComboBox::activated, this,
+            [this, snap](int row) { pianoRoll_->setSnapTicks(snap->itemData(row).toInt()); });
+        pianoRollFrame_->addHeaderWidget(snap);
+    }
     const auto notesEdited = [this] {
         pianoRoll_->viewport()->update();
         playlist_->viewport()->update(); // clip lengths follow the pattern
@@ -1771,6 +1784,7 @@ QWidget* MainWindow::createWorkspace()
         snap->addItem(tr("Snap: Bar"), static_cast<int>(PlaylistView::Snap::Bar));
         snap->addItem(tr("Snap: Beat"), static_cast<int>(PlaylistView::Snap::Beat));
         snap->addItem(tr("Snap: Step"), static_cast<int>(PlaylistView::Snap::Step));
+        snap->addItem(tr("Snap: 1/32"), static_cast<int>(PlaylistView::Snap::HalfStep));
         connect(snap, &QComboBox::activated, this, [this, snap](int row) {
             playlist_->setSnap(static_cast<PlaylistView::Snap>(snap->itemData(row).toInt()));
         });

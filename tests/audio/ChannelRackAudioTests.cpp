@@ -276,6 +276,27 @@ TEST_CASE("Cut and stretched pattern clips play the right part of their pattern"
     CHECK(onsets(render(engine, 6.5)) == expected);
 }
 
+TEST_CASE("Clips placed between steps play on their tick", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.setStep(0, 0, 0, true);
+
+    // A 32nd note (half a step) past bar 2.
+    Clip clip{0, 0, kTicksPerBar + kTicksPerStep / 2};
+    clip.length = kTicksPerBar;
+    project.addClip(clip);
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.sync(engine, project, 0, kRate, true);
+    engine.play();
+    const std::vector<std::size_t> expected{16 * kStepFrames + kStepFrames / 2};
+    CHECK(onsets(render(engine, 3.0)) == expected);
+}
+
 TEST_CASE("An audio clip fitted to the tempo follows it: resampled or stretched", "[audio][fit]")
 {
     // A sample with clicks one second apart, "recorded" at 60 BPM: a beat each.
