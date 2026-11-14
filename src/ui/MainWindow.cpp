@@ -1749,11 +1749,11 @@ QWidget* MainWindow::createWorkspace()
         clipSource_->setFocusPolicy(Qt::NoFocus);
         clipSource_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
         connect(clipSource_, &QComboBox::activated, this, [this](int row) {
-            const QVariant data = clipSource_->itemData(row);
-            if (!data.isValid())
+            const QVariant value = clipSource_->itemData(row);
+            if (!value.isValid())
                 return;
-            const auto index = static_cast<std::size_t>(data.toULongLong() & 0xffffffffULL);
-            const bool audio = (data.toULongLong() >> 32) != 0;
+            const auto index = static_cast<std::size_t>(value.toULongLong() & 0xffffffffULL);
+            const bool audio = (value.toULongLong() >> 32) != 0;
             if (audio)
                 playlist_->setSource(PlaylistView::ClipSource{true, index});
             else

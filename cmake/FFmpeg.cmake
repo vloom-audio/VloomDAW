@@ -51,7 +51,22 @@ if(FFMPEG_ROOT)
         find_package(PkgConfig REQUIRED)
         set(ENV{PKG_CONFIG_PATH} "${FFMPEG_ROOT}/lib/pkgconfig")
         pkg_check_modules(FFMPEG_STATIC REQUIRED libavformat libavcodec libswresample libavutil)
-        target_link_libraries(vloomdaw_ffmpeg INTERFACE ${FFMPEG_STATIC_STATIC_LDFLAGS})
+        # pkg-config splits "-framework CoreVideo" into two items, and CMake
+        # drops the repeated "-framework" ones, leaving "-lCoreVideo": keep
+        # each pair as one flag.
+        set(_ffmpeg_static "")
+        set(_framework OFF)
+        foreach(_flag IN LISTS FFMPEG_STATIC_STATIC_LDFLAGS)
+            if(_framework)
+                list(APPEND _ffmpeg_static "-framework ${_flag}")
+                set(_framework OFF)
+            elseif(_flag STREQUAL "-framework")
+                set(_framework ON)
+            else()
+                list(APPEND _ffmpeg_static "${_flag}")
+            endif()
+        endforeach()
+        target_link_libraries(vloomdaw_ffmpeg INTERFACE ${_ffmpeg_static})
     endif()
     if(WIN32)
         file(GLOB VLOOMDAW_FFMPEG_DLLS
