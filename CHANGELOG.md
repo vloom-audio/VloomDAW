@@ -7,6 +7,34 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The File menu works:
+  - **Projects:** New, Open, Open Recent (with Clear), Save and Save As read
+    and write `.vloom` project files, a versioned JSON format
+    (docs/project-file.md). A project holds:
+    - channels, patterns, steps and notes;
+    - the playlist (tracks, clips, audio clips);
+    - the mixer, with every plugin and its saved settings;
+    - the song's tempo, key and song mode.
+  - **Unsaved changes:** they show as "*" in the window title, and New, Open
+    and quitting ask about them.
+  - **Import Audio:** adds audio files as new channels.
+  - **Export WAV:** renders the song, or the pattern when the playlist is
+    empty, plugins included, with progress and cancel. Formats are 24-bit,
+    16-bit or 32-bit float.
+  - **Command line:** `VloomDAW song.vloom` opens a project.
+- A start window (File > Start Window, and at startup unless turned off).
+  - **New project:** at a tempo you pick; the last tempo is remembered.
+  - **Recent projects:** cards with an arrangement preview, tempo, length
+    and plugin count.
+  - **Finding one:** pin, search, and filter by all, pinned or this week.
+  - **Audio status:** a status line shows the audio output.
+- Opening a project file is built for untrusted files:
+  - sizes, counts and nesting are capped;
+  - every value is checked;
+  - samples on network shares are left out;
+  - only plugins the user's scan found are loaded.
+- New Project now also resets the mixer, so the old project's inserts and
+  effects no longer stay.
 - Plugin hosting (CLAP and VST 3, in-process, vloom-engine ADR 0006 and 0009):
   drag a plugin from the Plugins panel onto a mixer strip (an effect, the
   master's too) or the channel rack (an instrument), or use its context menu.

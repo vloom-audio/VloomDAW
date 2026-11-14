@@ -12,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -66,6 +67,12 @@ public:
     /// vloom::kMaxBlockFrames.
     [[nodiscard]] Loaded load(PluginFormat format, const std::filesystem::path& path, std::string_view id,
         std::string_view name, double sampleRate);
+
+    /// load(), then gives the instance `state` (saved by AudioProcessor::
+    /// saveState(); empty: its defaults) before the engine gets it. A state
+    /// the plugin refuses leaves it loaded at its defaults, with `error` set.
+    [[nodiscard]] Loaded loadWithState(PluginFormat format, const std::filesystem::path& path,
+        std::string_view id, std::string_view name, double sampleRate, std::span<const std::uint8_t> state);
 
     [[nodiscard]] std::shared_ptr<vloom::PluginInstance> instance(std::uint64_t handle) const;
     /// The rate instance `handle` was last activated at; 0 if there is none.

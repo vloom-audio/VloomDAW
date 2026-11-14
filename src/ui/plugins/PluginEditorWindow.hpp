@@ -6,6 +6,7 @@
 
 #include <QWidget>
 
+#include <cstdint>
 #include <memory>
 
 namespace vloom {
@@ -34,6 +35,10 @@ public:
     /// set, if the plugin has no editor or would not open it.
     bool open(QString* error);
 
+signals:
+    /// A parameter was changed in the editor: the project has unsaved changes.
+    void edited();
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -41,6 +46,7 @@ protected:
 private:
     void editorResizeRequested(vloom::EditorSize size) override;
     void editorClosed() override;
+    void parameterEdited(std::uint32_t id, double value) override;
 
     /// Plugin sizes are pixels on Windows and Linux, points on macOS.
     [[nodiscard]] qreal pluginScale() const;

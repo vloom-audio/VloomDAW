@@ -35,6 +35,8 @@ public:
     void setColor(std::optional<std::uint32_t> color);
     /// Shows how many effects the track has.
     void setEffectCount(std::size_t count);
+    /// Shows saved settings (a project was opened) without signalling them back.
+    void setValues(double fader, double pan, bool muted, bool soloed);
     [[nodiscard]] std::optional<std::uint32_t> color() const { return color_; }
 
 public slots:

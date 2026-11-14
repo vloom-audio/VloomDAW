@@ -26,6 +26,7 @@ add_executable(vloomdaw_tests
     core/PluginScannerTests.cpp
     core/PositionFormatTests.cpp
     core/ProcessMemoryTests.cpp
+    core/ProjectFileTests.cpp
     core/ProjectTests.cpp
     core/SampleFolderTests.cpp
     core/ScalesTests.cpp

@@ -49,6 +49,8 @@ public slots:
     void setSilenced(std::size_t track, bool silenced);
     /// Shows insert `track`'s effect count on its FX button.
     void setEffectCount(std::size_t track, std::size_t count);
+    /// Shows a track's saved fader, pan, mute and solo without signalling them.
+    void setTrackValues(std::size_t track, double fader, double pan, bool muted, bool soloed);
     /// Shows "dock" instead of "detach" on the header button.
     void setDetached(bool detached);
 

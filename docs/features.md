@@ -72,7 +72,7 @@ the transport in all three editors.
 | Mixer effects | ✅ | Up to 10 per track, the master's included (the master's run on the whole mix, not the metronome or the browser preview). A strip's FX button lists them: open the editor, bypass, remove. Plugin latency is compensated, also when a plugin changes it while running (oversampling, linear phase) |
 | Plugin editors | ✅ | The plugin's own window, sized as it asks and resizable when it allows. Windows and macOS; on Linux X11 only (start with `QT_QPA_PLATFORM=xcb` under Wayland) |
 | Generic controls | ⏳ | Knobs for plugins without an editor of their own |
-| Plugins in the project file | ⏳ | Arrives with the File menu (#19) |
+| Plugins in the project file | ✅ | A project saves every plugin (channel instruments, insert and master effects) with its settings, and loads them again when it opens. Only plugins your scan found are loaded; the others stay in the project and are listed when it opens |
 
 ## Browser
 
@@ -117,7 +117,10 @@ the transport in all three editors.
 |---|---|---|
 | New project | ✅ | `Ctrl/Cmd+N`: stop, rewind, reset tempo |
 | Edit menu: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Select All | ⏳ | Menu and shortcuts exist (`Ctrl/Cmd+Z`, `Shift+Ctrl/Cmd+Z`, `Ctrl+Y` on Windows, …) and say when they arrive: undo at the start of M2, the rest with the M2 editing tools. Text fields keep their own keys |
-| Open, Open Recent, Save, Save As, Import, Export | ⏳ | Menu items and shortcuts exist; WAV export in M3, project files and import in M4 |
+| New, Open, Open Recent, Save, Save As | ✅ | `.vloom` project files ([format](project-file.md)): channels, patterns, playlist, mixer, plugins and their settings, song tempo and key. Unsaved changes show as "*" in the title and are asked about before New, Open and quitting. Opening a project loads only plugins your scan found |
+| Start window | ✅ | Shown at startup (can be turned off) and from File > Start Window. Make a new project at a tempo you pick, or open a recent one from cards that show its arrangement, tempo, length and plugin count. Pin, search and filter (all, pinned, this week); right-click to show its folder or remove it from the list. Templates and crash recovery come later |
+| Import Audio | ✅ | File > Import Audio adds audio files as new channels |
+| Export WAV | ✅ | File > Export WAV renders the song (or the pattern, with an empty playlist) to 24-bit, 16-bit or 32-bit float WAV, plugins included, with progress and cancel; audio output pauses meanwhile |
 
 ## Performance and diagnostics
 

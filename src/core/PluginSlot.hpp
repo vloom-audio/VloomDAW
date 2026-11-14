@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace vloomdaw {
 
@@ -21,6 +22,10 @@ struct PluginSlot {
     /// PluginHost handle of the loaded instance; 0: not loaded. Valid for
     /// this run only.
     std::uint64_t instance = 0;
+    /// The settings a project file held for it, kept while it is not loaded
+    /// (not in the user's scan, or it failed to load), so saving the project
+    /// again does not lose them. Empty once it is loaded.
+    std::vector<std::uint8_t> savedState{};
 
     friend bool operator==(const PluginSlot&, const PluginSlot&) = default;
 };
