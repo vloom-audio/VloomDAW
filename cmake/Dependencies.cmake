@@ -8,7 +8,7 @@
 # change on the engine's main reaches VloomDAW only through a PR that bumps it.
 set(VLOOM_ENGINE_DIR "${PROJECT_SOURCE_DIR}/../vloom-engine"
     CACHE PATH "Local vloom-engine checkout, used when it exists")
-set(VLOOM_ENGINE_GIT_TAG "e0bd0ac6390ad45d4744ed0b70a53eec366156bd"
+set(VLOOM_ENGINE_GIT_TAG "7b4b899464fb6486c428428b281d50b120c09d0d"
     CACHE STRING "vloom-engine commit to fetch when no local checkout exists")
 
 if(EXISTS "${VLOOM_ENGINE_DIR}/CMakeLists.txt")
