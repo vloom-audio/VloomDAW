@@ -341,7 +341,7 @@ MixerSlotRack::MixerSlotRack(QWidget* parent)
 {
     setObjectName(QStringLiteral("fxRack"));
     setFixedWidth(60);
-    setFixedHeight(static_cast<int>(MixerModel::kMaxEffects * kSlotHeight));
+    setFixedHeight(kSlotHeight);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -350,6 +350,7 @@ MixerSlotRack::MixerSlotRack(QWidget* parent)
     for (std::size_t i = 0; i < MixerModel::kMaxEffects; ++i) {
         auto* row = new MixerSlotRow(i, this);
         rows_[i] = row;
+        row->setVisible(i == 0); // Initially only 1 empty slot visible
         layout->addWidget(row);
 
         connect(row, &MixerSlotRow::bypassToggled, this, [this, i](bool on) { emit bypassToggled(i, on); });
@@ -363,12 +364,18 @@ MixerSlotRack::MixerSlotRack(QWidget* parent)
 
 void MixerSlotRack::setEffects(const std::vector<PluginSlot>& effects)
 {
+    // Initially 1 empty slot. If N effects loaded, show N effects + 1 trailing empty slot (up to kMaxEffects).
+    const std::size_t visibleCount = std::clamp<std::size_t>(effects.size() + 1, 1, MixerModel::kMaxEffects);
+
     for (std::size_t i = 0; i < MixerModel::kMaxEffects; ++i) {
         if (i < effects.size())
             rows_[i]->setEffect(QString::fromStdString(effects[i].name), effects[i].bypassed);
         else
             rows_[i]->setEmpty();
+
+        rows_[i]->setVisible(i < visibleCount);
     }
+    setFixedHeight(static_cast<int>(visibleCount * kSlotHeight));
 }
 
 } // namespace vloomdaw

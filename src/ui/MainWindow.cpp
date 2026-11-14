@@ -148,7 +148,7 @@ constexpr QLatin1StringView kSidebarPageKey{"mainWindow/sidebarPage"};
 
 constexpr int kDefaultSidebarWidth = 260;
 constexpr int kThemeApplyMs = 200; ///< full restyle once theme edits pause this long
-constexpr int kDefaultMixerHeight = 420;
+constexpr int kDefaultMixerHeight = 300;
 constexpr std::size_t kMixerInserts = 16;
 constexpr double kDefaultTempo = 120.0; ///< BPM of a new project
 
@@ -1348,7 +1348,7 @@ void MainWindow::setMixerVisible(bool visible)
 QWidget* MainWindow::createMixer()
 {
     mixerPanel_ = new MixerPanel(mixer_.size() - 1, this);
-    mixerPanel_->setMinimumHeight(320);
+    mixerPanel_->setMinimumHeight(200);
     connect(mixerPanel_, &MixerPanel::closeRequested, this, [this] { setMixerVisible(false); });
     connect(
         mixerPanel_, &MixerPanel::detachRequested, this, [this] { setMixerDetached(!isMixerDetached()); });
@@ -1414,6 +1414,7 @@ QWidget* MainWindow::createMixer()
         mixer_.setSoloed(track, soloed);
         updateMixer();
     });
+    syncEffectCounts();
     mixerPanel_->hide();
     return mixerPanel_;
 }
