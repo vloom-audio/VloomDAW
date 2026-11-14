@@ -72,7 +72,7 @@ the transport in all three editors.
 | Mixer effects | ✅ | Up to 10 per track, the master's included (the master's run on the whole mix, not the metronome or the browser preview). A strip's FX button lists them: open the editor, bypass, remove. Plugin latency is compensated, also when a plugin changes it while running (oversampling, linear phase) |
 | Plugin editors | ✅ | The plugin's own window, sized as it asks and resizable when it allows. Windows and macOS; on Linux X11 only (start with `QT_QPA_PLATFORM=xcb` under Wayland) |
 | Generic controls | ⏳ | Knobs for plugins without an editor of their own |
-| Plugins in the project file | ⏳ | Arrives with the File menu (#19) |
+| Plugins in the project file | ✅ | A project saves every plugin (channel instruments, insert and master effects) with its settings, and loads them again when it opens. Only plugins your scan found are loaded; the others stay in the project and are listed when it opens |
 
 ## Browser
 
