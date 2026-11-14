@@ -2716,6 +2716,10 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
     if (instance == nullptr || !instance->processor().hasEditor())
         return;
     auto* editor = new PluginEditorWindow(instance, title, this);
+    connect(editor, &PluginEditorWindow::edited, this, [this] {
+        pluginsEdited_ = true; // unsaved changes
+        setWindowModified(true);
+    });
     QString error;
     if (!editor->open(&error)) {
         editor->close(); // deletes it
@@ -2863,11 +2867,36 @@ std::string MainWindow::projectSnapshot() const
     return ProjectFile::write(projectData(false), projectPath_.parent_path());
 }
 
-bool MainWindow::isProjectModified() const { return projectSnapshot() != savedSnapshot_; }
+bool MainWindow::isProjectModified() const { return pluginsEdited_ || projectSnapshot() != savedSnapshot_; }
+
+std::uint64_t MainWindow::pluginFingerprint() const
+{
+    std::uint64_t print = 14695981039346656037ull; // FNV-1a
+    const auto mix = [&print](std::uint8_t byte) { print = (print ^ byte) * 1099511628211ull; };
+    const auto add = [&](const PluginSlot& slot) {
+        const auto instance = pluginHost_.instance(slot.instance);
+        if (instance == nullptr)
+            return;
+        const std::vector<std::uint8_t> state = instance->processor().saveState();
+        for (std::size_t size = state.size(), i = 0; i < 8; ++i, size >>= 8)
+            mix(static_cast<std::uint8_t>(size)); // the length too: states do not run together
+        for (const std::uint8_t byte : state)
+            mix(byte);
+    };
+    for (const Channel& channel : project_.channels())
+        if (channel.instrument)
+            add(*channel.instrument);
+    for (std::size_t i = 0; i < mixer_.size(); ++i)
+        for (const PluginSlot& effect : mixer_.track(i).effects)
+            add(effect);
+    return print;
+}
 
 void MainWindow::markProjectSaved()
 {
     savedSnapshot_ = projectSnapshot();
+    savedPluginPrint_ = pluginFingerprint();
+    pluginsEdited_ = false;
     updateWindowTitle();
 }
 
@@ -2875,12 +2904,20 @@ void MainWindow::updateWindowTitle()
 {
     const QString name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
     setWindowTitle(tr("%1[*] - VloomDAW").arg(name));
+    // Comparing means writing the project out as text: on a very large
+    // project that takes a while, so the check then runs less often (at
+    // most about 2 % of the UI thread's time).
+    QElapsedTimer clock;
+    clock.start();
     setWindowModified(isProjectModified());
+    if (modifiedTimer_ != nullptr)
+        modifiedTimer_->setInterval(static_cast<int>(std::clamp<qint64>(clock.elapsed() * 50, 1000, 30000)));
 }
 
 bool MainWindow::maybeSaveChanges()
 {
-    if (!isProjectModified())
+    // Plugin settings are compared here too (not every plugin reports edits).
+    if (!isProjectModified() && pluginFingerprint() == savedPluginPrint_)
         return true;
     const QString name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
     const auto answer = QMessageBox::warning(this, tr("Unsaved changes"),

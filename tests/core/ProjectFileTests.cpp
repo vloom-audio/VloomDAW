@@ -12,7 +12,17 @@ using namespace vloomdaw;
 
 namespace {
 
-const std::filesystem::path kFolder = pathFromUtf8("C:/Music/My Song");
+// Absolute paths as this platform writes them ("C:/x" is relative on POSIX).
+#if defined(_WIN32)
+const std::string kHere = "C:/Music/";
+const std::string kElsewhere = "D:/Packs/";
+const std::string kMovedTo = "E:/Backup/";
+#else
+const std::string kHere = "/home/me/music/";
+const std::string kElsewhere = "/mnt/packs/";
+const std::string kMovedTo = "/media/backup/";
+#endif
+const std::filesystem::path kFolder = pathFromUtf8(kHere + "My Song");
 
 PluginSlot plugin(PluginFormat format, std::string name)
 {
@@ -30,7 +40,7 @@ ProjectData sample()
     ProjectData data;
     Project& p = data.project;
     p.setChannelSample(0, pathToUtf8(kFolder / "samples" / "kick.wav"));
-    p.setChannelSample(1, "D:/Packs/clap.wav"); // outside the folder
+    p.setChannelSample(1, kElsewhere + "clap.wav"); // outside the folder
     p.setChannelVolume(1, 0.5);
     p.setChannelPan(1, -0.25);
     p.setChannelInsert(1, 2);
@@ -78,7 +88,7 @@ TEST_CASE("A project survives a save and an open", "[project-file]")
     const ProjectData saved = sample();
     const std::string text = ProjectFile::write(saved, kFolder);
     CHECK(text.find("\"samples/kick.wav\"") != std::string::npos); // relative inside the folder
-    CHECK(text.find("D:/Packs/clap.wav") != std::string::npos); // absolute outside it
+    CHECK(text.find(kElsewhere + "clap.wav") != std::string::npos); // absolute outside it
     CHECK(text.find("42") == std::string::npos); // no runtime instance handles
 
     const auto read = ProjectFile::read(text, kFolder);
@@ -148,11 +158,11 @@ TEST_CASE("A project survives a save and an open", "[project-file]")
 TEST_CASE("A moved project finds its samples in its new folder", "[project-file]")
 {
     const std::string text = ProjectFile::write(sample(), kFolder);
-    const auto moved = ProjectFile::read(text, pathFromUtf8("E:/Backup/My Song"));
+    const auto moved = ProjectFile::read(text, pathFromUtf8(kMovedTo + "My Song"));
     REQUIRE(moved.data);
     CHECK(pathFromUtf8(moved.data->project.channels()[0].samplePath)
-        == pathFromUtf8("E:/Backup/My Song/samples/kick.wav").lexically_normal());
-    CHECK(moved.data->project.channels()[1].samplePath == "D:/Packs/clap.wav");
+        == pathFromUtf8(kMovedTo + "My Song/samples/kick.wav").lexically_normal());
+    CHECK(moved.data->project.channels()[1].samplePath == kElsewhere + "clap.wav");
 }
 
 TEST_CASE("Plugin states of every size round-trip through base64", "[project-file]")

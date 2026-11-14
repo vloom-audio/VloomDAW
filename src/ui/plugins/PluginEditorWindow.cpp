@@ -97,6 +97,8 @@ void PluginEditorWindow::editorClosed()
     QMetaObject::invokeMethod(this, &QWidget::close, Qt::QueuedConnection);
 }
 
+void PluginEditorWindow::parameterEdited(std::uint32_t /*id*/, double /*value*/) { emit edited(); }
+
 qreal PluginEditorWindow::pluginScale() const
 {
 #if defined(Q_OS_MACOS)

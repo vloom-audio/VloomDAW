@@ -296,7 +296,12 @@ private:
     /// are not cheap, and not compared to tell whether the project changed).
     [[nodiscard]] ProjectData projectData(bool withPluginStates) const;
     [[nodiscard]] std::string projectSnapshot() const;
+    /// Whether the project differs from what was saved. Cheap enough for the
+    /// title's "*": plugin settings count through the editors' edit reports.
     [[nodiscard]] bool isProjectModified() const;
+    /// A fingerprint of every plugin's settings (their saved states): what
+    /// maybeSaveChanges() compares, so an edit no editor reported still asks.
+    [[nodiscard]] std::uint64_t pluginFingerprint() const;
     void markProjectSaved();
     void updateWindowTitle();
     /// Replaces the project, mixer and song settings with `incoming`, loading the
@@ -360,6 +365,8 @@ private:
     std::size_t currentChannel_ = 0;
     std::filesystem::path projectPath_; ///< the project's file; empty: never saved
     std::string savedSnapshot_; ///< projectSnapshot() as last saved or opened
+    std::uint64_t savedPluginPrint_ = 0; ///< pluginFingerprint() then
+    bool pluginsEdited_ = false; ///< an editor reported an edit since
     QMenu* recentMenu_ = nullptr;
     QTimer* modifiedTimer_ = nullptr; ///< updates the "*" in the window title
 
