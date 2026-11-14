@@ -256,6 +256,10 @@ private:
     /// Loads plugin `plugin` as the last effect of mixer insert `track`, and
     /// opens its editor.
     void addPluginToInsert(std::size_t plugin, std::size_t track);
+    /// Replaces the effect at `slot` on mixer insert `track` with `plugin`.
+    void replacePluginInInsert(std::size_t plugin, std::size_t track, std::size_t slot);
+    /// Moves an effect from slot `from` to slot `to` on mixer insert `track`.
+    void moveEffectInInsert(std::size_t track, std::size_t from, std::size_t to);
     /// Asks which insert plugin `plugin` goes on.
     void chooseInsertForPlugin(std::size_t plugin);
     /// Loads plugin `plugin`, which must be of kind `wanted`; says why not in
@@ -263,6 +267,12 @@ private:
     std::optional<PluginSlot> loadPlugin(std::size_t plugin, vloom::PluginInfo::Kind wanted);
     /// The insert's effects: open, bypass, remove.
     void showEffectsMenu(std::size_t track, const QPoint& globalPos);
+    /// Context menu for a specific FX slot on an insert.
+    void showEffectSlotContextMenu(std::size_t track, std::size_t slot, const QPoint& globalPos);
+    /// Menu of effect plugins to load into slot `slot` of insert `track`.
+    void showEffectChooserMenu(std::size_t track, std::size_t slot, const QPoint& globalPos);
+    /// Handles a plugin dropped onto slot `slot` of insert `track`.
+    void handlePluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin);
     /// Opens (or raises) the editor of loaded plugin `handle`.
     void openPluginEditor(std::uint64_t handle, const QString& title);
     /// Drops the plugins the project no longer uses (the engine was sent

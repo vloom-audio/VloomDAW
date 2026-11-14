@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "core/PluginSlot.hpp"
+
 #include <QList>
 #include <QStringList>
 #include <QWidget>
@@ -9,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 class QHBoxLayout;
 class QScrollArea;
@@ -44,6 +47,8 @@ public:
     void setTrackName(std::size_t track, const QString& name);
     /// Shows track `track` (0 = master) in the user's colour (0xRRGGBB; nullopt: none).
     void setTrackColor(std::size_t track, std::optional<std::uint32_t> color);
+    /// Updates track `track`'s FX rack with its effects chain.
+    void setTrackEffects(std::size_t track, const std::vector<PluginSlot>& effects);
 
 public slots:
     void setSilenced(std::size_t track, bool silenced);
@@ -76,6 +81,14 @@ signals:
     void colorChanged(std::size_t track, std::optional<std::uint32_t> color);
     /// Track `track`'s FX button was clicked (the master's too): show its effects at `globalPos`.
     void effectsMenuRequested(std::size_t track, const QPoint& globalPos);
+    /// An effect slot's bypass switch was clicked on track `track`.
+    void effectBypassToggled(std::size_t track, std::size_t slot, bool bypassed);
+    /// An effect slot was clicked on track `track`: open editor or insert plugin.
+    void effectClicked(std::size_t track, std::size_t slot);
+    /// An effect slot's context menu was requested on track `track` at `globalPos`.
+    void effectMenuRequested(std::size_t track, std::size_t slot, const QPoint& globalPos);
+    /// Plugin `plugin` was dropped specifically onto slot `slot` of track `track`.
+    void pluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin);
     /// Plugin `plugin` (an index into the plugin store) was dropped on track `track` (0: the master).
     void pluginDropped(std::size_t track, std::size_t plugin);
 

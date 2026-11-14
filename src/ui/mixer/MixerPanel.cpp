@@ -166,10 +166,33 @@ void MixerPanel::connectStrip(MixerStrip* strip)
         if (const auto i = strips_.indexOf(strip); i >= 0)
             emit effectsMenuRequested(static_cast<std::size_t>(i), at);
     });
+    connect(strip, &MixerStrip::effectBypassToggled, this, [this, strip](std::size_t slot, bool bypassed) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit effectBypassToggled(static_cast<std::size_t>(i), slot, bypassed);
+    });
+    connect(strip, &MixerStrip::effectClicked, this, [this, strip](std::size_t slot) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit effectClicked(static_cast<std::size_t>(i), slot);
+    });
+    connect(strip, &MixerStrip::effectMenuRequested, this, [this, strip](std::size_t slot, const QPoint& at) {
+        if (const auto i = strips_.indexOf(strip); i >= 0)
+            emit effectMenuRequested(static_cast<std::size_t>(i), slot, at);
+    });
+    connect(
+        strip, &MixerStrip::pluginDroppedOnSlot, this, [this, strip](std::size_t slot, std::size_t plugin) {
+            if (const auto i = strips_.indexOf(strip); i >= 0)
+                emit pluginDroppedOnSlot(static_cast<std::size_t>(i), slot, plugin);
+        });
     connect(strip, &MixerStrip::pluginDropped, this, [this, strip](std::size_t plugin) {
         if (const auto i = strips_.indexOf(strip); i >= 0)
             emit pluginDropped(static_cast<std::size_t>(i), plugin);
     });
+}
+
+void MixerPanel::setTrackEffects(std::size_t track, const std::vector<PluginSlot>& effects)
+{
+    if (track < static_cast<std::size_t>(strips_.size()))
+        strips_[static_cast<qsizetype>(track)]->setEffects(effects);
 }
 
 void MixerPanel::setEffectCount(std::size_t track, std::size_t count)

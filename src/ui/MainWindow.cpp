@@ -9,6 +9,7 @@
 #include "core/BrowserFilter.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/NoteNames.hpp"
+#include "core/PluginMetadata.hpp"
 #include "core/PositionFormat.hpp"
 #include "core/ProcessMemory.hpp"
 #include "core/Scales.hpp"
@@ -147,7 +148,7 @@ constexpr QLatin1StringView kSidebarPageKey{"mainWindow/sidebarPage"};
 
 constexpr int kDefaultSidebarWidth = 260;
 constexpr int kThemeApplyMs = 200; ///< full restyle once theme edits pause this long
-constexpr int kDefaultMixerHeight = 300;
+constexpr int kDefaultMixerHeight = 420;
 constexpr std::size_t kMixerInserts = 16;
 constexpr double kDefaultTempo = 120.0; ///< BPM of a new project
 
@@ -1347,7 +1348,7 @@ void MainWindow::setMixerVisible(bool visible)
 QWidget* MainWindow::createMixer()
 {
     mixerPanel_ = new MixerPanel(mixer_.size() - 1, this);
-    mixerPanel_->setMinimumHeight(200);
+    mixerPanel_->setMinimumHeight(320);
     connect(mixerPanel_, &MixerPanel::closeRequested, this, [this] { setMixerVisible(false); });
     connect(
         mixerPanel_, &MixerPanel::detachRequested, this, [this] { setMixerDetached(!isMixerDetached()); });
@@ -1387,6 +1388,26 @@ QWidget* MainWindow::createMixer()
         syncEffectCounts();
     });
     connect(mixerPanel_, &MixerPanel::effectsMenuRequested, this, &MainWindow::showEffectsMenu);
+    connect(mixerPanel_, &MixerPanel::effectBypassToggled, this,
+        [this](std::size_t track, std::size_t slot, bool bypassed) {
+            mixer_.setEffectBypassed(track, slot, bypassed);
+            updateMixer();
+            syncEffectCounts();
+        });
+    connect(mixerPanel_, &MixerPanel::effectClicked, this, [this](std::size_t track, std::size_t slot) {
+        if (track >= mixer_.size())
+            return;
+        if (slot < mixer_.track(track).effects.size()) {
+            const auto& effect = mixer_.track(track).effects[slot];
+            openPluginEditor(effect.instance,
+                tr("%1 - %2").arg(
+                    QString::fromStdString(effect.name), QString::fromStdString(mixer_.track(track).name)));
+        } else {
+            showEffectChooserMenu(track, slot, QCursor::pos());
+        }
+    });
+    connect(mixerPanel_, &MixerPanel::effectMenuRequested, this, &MainWindow::showEffectSlotContextMenu);
+    connect(mixerPanel_, &MixerPanel::pluginDroppedOnSlot, this, &MainWindow::handlePluginDroppedOnSlot);
     connect(mixerPanel_, &MixerPanel::pluginDropped, this,
         [this](std::size_t track, std::size_t plugin) { addPluginToInsert(plugin, track); });
     connect(mixerPanel_, &MixerPanel::soloToggled, this, [this](std::size_t track, bool soloed) {
@@ -2713,6 +2734,136 @@ void MainWindow::showEffectsMenu(std::size_t track, const QPoint& globalPos)
     menu.exec(globalPos);
 }
 
+void MainWindow::replacePluginInInsert(std::size_t plugin, std::size_t track, std::size_t slot)
+{
+    if (track >= mixer_.size() || slot >= mixer_.track(track).effects.size())
+        return;
+    const auto newSlot = loadPlugin(plugin, vloom::PluginInfo::Kind::Effect);
+    if (!newSlot)
+        return;
+    mixer_.replaceEffect(track, slot, *newSlot);
+    updateMixer();
+    releaseUnusedPlugins();
+    syncEffectCounts();
+    openPluginEditor(newSlot->instance,
+        tr("%1 - %2").arg(
+            QString::fromStdString(newSlot->name), QString::fromStdString(mixer_.track(track).name)));
+}
+
+void MainWindow::moveEffectInInsert(std::size_t track, std::size_t from, std::size_t to)
+{
+    if (track >= mixer_.size() || !mixer_.moveEffect(track, from, to))
+        return;
+    updateMixer();
+    syncEffectCounts();
+}
+
+void MainWindow::showEffectSlotContextMenu(std::size_t track, std::size_t slot, const QPoint& globalPos)
+{
+    if (track >= mixer_.size())
+        return;
+    if (slot >= mixer_.track(track).effects.size()) {
+        showEffectChooserMenu(track, slot, globalPos);
+        return;
+    }
+    const PluginSlot& effect = mixer_.track(track).effects[slot];
+    const QString effectName = QString::fromStdString(effect.name);
+    const QString trackName = QString::fromStdString(mixer_.track(track).name);
+
+    QMenu menu(this);
+    const auto instance = pluginHost_.instance(effect.instance);
+    QAction* open
+        = menu.addAction(tr("Open Editor"), this, [this, handle = effect.instance, effectName, trackName] {
+              openPluginEditor(handle, tr("%1 - %2").arg(effectName, trackName));
+          });
+    open->setEnabled(instance != nullptr && instance->processor().hasEditor());
+
+    QAction* bypass = menu.addAction(tr("Bypass"), this, [this, track, slot](bool on) {
+        mixer_.setEffectBypassed(track, slot, on);
+        updateMixer();
+        syncEffectCounts();
+    });
+    bypass->setCheckable(true);
+    bypass->setChecked(effect.bypassed);
+
+    menu.addSeparator();
+
+    QAction* moveUp = menu.addAction(tr("Move Up"), this, [this, track, slot] {
+        if (slot > 0)
+            moveEffectInInsert(track, slot, slot - 1);
+    });
+    moveUp->setEnabled(slot > 0);
+
+    QAction* moveDown = menu.addAction(tr("Move Down"), this, [this, track, slot] {
+        if (slot + 1 < mixer_.track(track).effects.size())
+            moveEffectInInsert(track, slot, slot + 1);
+    });
+    moveDown->setEnabled(slot + 1 < mixer_.track(track).effects.size());
+
+    menu.addSeparator();
+
+    QMenu* replaceMenu = menu.addMenu(tr("Replace"));
+    bool hasEffects = false;
+    for (std::size_t i = 0; i < pluginStore_.plugins.size(); ++i) {
+        const auto& p = pluginStore_.plugins[i];
+        if (effectiveCategory(p) != "Instrument") {
+            hasEffects = true;
+            replaceMenu->addAction(QString::fromStdString(p.name), this,
+                [this, i, track, slot] { replacePluginInInsert(i, track, slot); });
+        }
+    }
+    if (!hasEffects)
+        replaceMenu->addAction(tr("No effect plugins scanned yet"))->setEnabled(false);
+    replaceMenu->addSeparator();
+    replaceMenu->addAction(tr("More plugins…"), this, &MainWindow::showPluginManager);
+
+    menu.addSeparator();
+    menu.addAction(tr("Remove"), this, [this, track, slot] {
+        mixer_.removeEffect(track, slot);
+        updateMixer();
+        releaseUnusedPlugins();
+        syncEffectCounts();
+    });
+
+    menu.exec(globalPos);
+}
+
+void MainWindow::showEffectChooserMenu(std::size_t track, std::size_t slot, const QPoint& globalPos)
+{
+    if (track >= mixer_.size())
+        return;
+    QMenu menu(this);
+    menu.setTitle(tr("Select Effect"));
+    bool hasEffects = false;
+    for (std::size_t i = 0; i < pluginStore_.plugins.size(); ++i) {
+        const auto& p = pluginStore_.plugins[i];
+        if (effectiveCategory(p) != "Instrument") {
+            hasEffects = true;
+            menu.addAction(QString::fromStdString(p.name), this, [this, i, track, slot] {
+                if (slot < mixer_.track(track).effects.size())
+                    replacePluginInInsert(i, track, slot);
+                else
+                    addPluginToInsert(i, track);
+            });
+        }
+    }
+    if (!hasEffects)
+        menu.addAction(tr("No effect plugins scanned yet"))->setEnabled(false);
+    menu.addSeparator();
+    menu.addAction(tr("More plugins…"), this, &MainWindow::showPluginManager);
+    menu.exec(globalPos);
+}
+
+void MainWindow::handlePluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin)
+{
+    if (track >= mixer_.size())
+        return;
+    if (slot < mixer_.track(track).effects.size())
+        replacePluginInInsert(plugin, track, slot);
+    else
+        addPluginToInsert(plugin, track);
+}
+
 void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
 {
     if (const auto it = pluginEditors_.find(handle); it != pluginEditors_.end() && !it->second.isNull()) {
@@ -2766,8 +2917,10 @@ void MainWindow::releaseUnusedPlugins()
 
 void MainWindow::syncEffectCounts()
 {
-    for (std::size_t i = 0; i < mixer_.size(); ++i)
+    for (std::size_t i = 0; i < mixer_.size(); ++i) {
+        mixerPanel_->setTrackEffects(i, mixer_.track(i).effects);
         mixerPanel_->setEffectCount(i, mixer_.track(i).effects.size());
+    }
 }
 
 void MainWindow::updatePluginIdle()
