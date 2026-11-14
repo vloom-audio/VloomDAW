@@ -189,6 +189,16 @@ TEST_CASE("Files that are not projects, or from a newer VloomDAW, are refused", 
     CHECK_FALSE(ProjectFile::read(R"({"format":"something-else","version":1})", kFolder).data);
     CHECK_FALSE(ProjectFile::read(R"({"format":"vloomdaw-project"})", kFolder).data);
     CHECK_FALSE(ProjectFile::read(R"({"format":"vloomdaw-project","version":0})", kFolder).data);
+    // Values of the wrong type anywhere must not throw (review finding: a
+    // number as "format" crashed File > Open and the launcher's preview).
+    CHECK_FALSE(ProjectFile::read(R"({"format":5,"version":1})", kFolder).data);
+    CHECK_FALSE(ProjectFile::read(R"({"format":"vloomdaw-project","version":"1"})", kFolder).data);
+    const auto wrongTypes = ProjectFile::read(R"({"format":"vloomdaw-project","version":1,
+        "song":[1],"channels":{"a":1},"patterns":"x","tracks":7,"clips":null,"audioClips":true,
+        "mixer":[5,"x",{"effects":"none","name":3,"fader":"loud"}]})",
+        kFolder);
+    REQUIRE(wrongTypes.data);
+    CHECK(wrongTypes.data->mixer.size() == 3);
     const auto newer = ProjectFile::read(R"({"format":"vloomdaw-project","version":99})", kFolder);
     CHECK_FALSE(newer.data);
     CHECK(newer.error.find("newer") != std::string::npos);
@@ -230,6 +240,14 @@ TEST_CASE("Hostile values in a project are clamped or left out", "[project-file]
         "audioClips": [{"channel": 99, "track": 0}, {"channel": 0, "fit": "warp", "sourceBpm": 5}],
         "mixer": [{"fader": -1, "effects": [{"format": "vst3", "path": "", "id": ""}]}]
     })";
+    // Routed to insert 5 of a mixer with two inserts: into the master.
+    const auto routed = ProjectFile::read(R"({"format":"vloomdaw-project","version":1,
+        "channels":[{"name":"A","insert":5},{"name":"B","insert":2}],"mixer":[{},{},{}]})",
+        kFolder);
+    REQUIRE(routed.data);
+    CHECK(routed.data->project.channels()[0].insert == 0);
+    CHECK(routed.data->project.channels()[1].insert == 2);
+    CHECK_FALSE(routed.warnings.empty());
     const auto read = ProjectFile::read(text, kFolder);
     INFO(read.error);
     REQUIRE(read.data);

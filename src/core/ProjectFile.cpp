@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <fstream>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -422,8 +423,34 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
 
 // ---------------------------------------------------------------- read
 
+namespace {
+ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesystem::path& folder);
+} // namespace
+
 ProjectFile::ReadResult ProjectFile::read(std::string_view text, const std::filesystem::path& folder)
 {
+    // Every value is type-checked before it is read; this is the backstop,
+    // so a file can never take the app down through an exception.
+    try {
+        return readUnguarded(text, folder);
+    } catch (const std::exception&) {
+        ReadResult result;
+        result.error = "The project file is damaged";
+        return result;
+    }
+}
+
+namespace {
+ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesystem::path& folder)
+{
+    using ReadResult = ProjectFile::ReadResult;
+    constexpr auto kMaxFileBytes = ProjectFile::kMaxFileBytes;
+    constexpr auto kMaxDepth = ProjectFile::kMaxDepth;
+    constexpr auto kVersion = ProjectFile::kVersion;
+    constexpr auto kFormat = ProjectFile::kFormat;
+    constexpr auto kMaxChannels = ProjectFile::kMaxChannels;
+    constexpr auto kMaxNotes = ProjectFile::kMaxNotes;
+    constexpr auto kMaxClips = ProjectFile::kMaxClips;
     ReadResult result;
     const auto fail = [&result](std::string message) {
         result.error = std::move(message);
@@ -436,7 +463,8 @@ ProjectFile::ReadResult ProjectFile::read(std::string_view text, const std::file
     const Json root = Json::parse(text, nullptr, false);
     if (root.is_discarded() || !root.is_object())
         return fail("This is not a VloomDAW project, or the file is damaged");
-    if (root.value("format", std::string()) != kFormat)
+    const auto format = root.find("format");
+    if (format == root.end() || !format->is_string() || format->get_ref<const std::string&>() != kFormat)
         return fail("This is not a VloomDAW project");
     const auto version = root.find("version");
     if (version == root.end() || !version->is_number_integer())
@@ -606,9 +634,17 @@ ProjectFile::ReadResult ProjectFile::read(std::string_view text, const std::file
     if (mixer.empty())
         data.states.effects.emplace_back(); // the master
 
+    // A channel plays into an insert the mixer has; otherwise into the master.
+    for (std::size_t c = 0; c < data.project.channels().size(); ++c)
+        if (static_cast<std::size_t>(data.project.channels()[c].insert) > data.mixer.insertCount()) {
+            data.project.setChannelInsert(c, 0);
+            in.warn("A channel routed to a mixer insert that does not exist now plays into the master");
+        }
+
     result.data = std::move(data);
     return result;
 }
+} // namespace
 
 // ---------------------------------------------------------------- files
 
