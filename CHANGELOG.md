@@ -15,6 +15,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   own windows, sized as they ask and resizable when they allow it; a timer
   runs the plugins' main-thread work and follows latency they change while
   running. Not saved with the project yet.
+- The interface uses Noto Sans Thai, with Noto Sans for Latin letters and
+  digits (regular, semi-bold, bold), bundled in `resources/fonts` under the SIL Open Font
+  License, so it looks the same on every OS. Other scripts fall back to the
+  system's fonts.
 - Installers built by CI (`.github/workflows/release.yml`, see
   `docs/releasing.md`): a Windows setup (Inno Setup), a universal macOS DMG
   and a Linux AppImage. A `v*` tag drafts a GitHub Release with them and
