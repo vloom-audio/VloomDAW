@@ -92,12 +92,15 @@ public:
     enum class Tool { Draw, Paint, Delete, Mute, Slice, Select, Zoom, Playback };
 
     /// What placing, moving, trimming and cutting clips snap to. Auto: the
-    /// finest grid line far enough apart at the zoom to aim at (a step when
-    /// zoomed in, up to a bar when zoomed out). Shift snaps to steps whatever
-    /// this is. A step (a 16th note) is the finest: the engine places clips on
-    /// steps.
-    enum class Snap { Auto, Bar, Beat, Step };
-    void setSnap(Snap snap) { snap_ = snap; }
+    /// finest grid line far enough apart at the zoom to aim at (a 1/32 note
+    /// when zoomed far in, up to a bar when zoomed out). Shift snaps to steps
+    /// whatever this is. Step: a 16th note; HalfStep: a 32nd note.
+    enum class Snap { Auto, Bar, Beat, Step, HalfStep };
+    void setSnap(Snap snap)
+    {
+        snap_ = snap;
+        viewport()->update(); // the grid shows what clips snap to
+    }
     [[nodiscard]] Snap snap() const { return snap_; }
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }

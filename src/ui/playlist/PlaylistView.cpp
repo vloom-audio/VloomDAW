@@ -457,8 +457,10 @@ void PlaylistView::paintEvent(QPaintEvent* event)
         if (lineY >= area.top() && lineY <= area.bottom())
             p.fillRect(QRect(area.left(), lineY, area.width(), 1), trackLine);
     }
-    // Down to steps when zoomed in: the lines show what clips snap to.
-    timeline::paintGrid(p, area, scale, kTicksPerStep, timeline::GridStyle::Calm);
+    // Down to steps (32nd notes when clips snap to them) when zoomed in:
+    // the lines show what clips snap to.
+    const int finest = snap_ == Snap::Auto || snap_ == Snap::HalfStep ? kTicksPerStep / 2 : kTicksPerStep;
+    timeline::paintGrid(p, area, scale, finest, timeline::GridStyle::Calm);
 
     // Clips: a coloured header with the pattern name over a tinted body.
     if (project_ != nullptr && !area.isEmpty()) {
@@ -1399,17 +1401,18 @@ void PlaylistView::resizeClipTo(double tick, int grid)
     const int length = audio ? audioLength(resizeStartAudio_) : project_->clipLength(resizeStartClip_);
     const int whole = audio ? sampleTicks(resizeStartAudio_) : 0; // 0: no limit (a pattern repeats)
     const int end = start + length;
+    const int shortest = std::min(grid, kTicksPerStep); // a clip snapped to 32nd notes can be one long
     int newStart = start;
     int newLength = length;
     if (resizeRight_) {
-        int newEnd = std::max(at, start + kTicksPerStep);
+        int newEnd = std::max(at, start + shortest);
         if (whole > 0)
             newEnd = std::min(newEnd, start + (whole - offset)); // no further than the sample's end
         newLength = newEnd - start;
     } else {
         // The left edge stops where the content starts (offset 0): before
         // the start of the sample or pattern there is nothing to show.
-        newStart = std::clamp(at, std::max(0, start - offset), end - kTicksPerStep);
+        newStart = std::clamp(at, std::max(0, start - offset), end - shortest);
         newLength = end - newStart;
     }
     const int newOffset = offset + (newStart - start);
@@ -1439,12 +1442,14 @@ int PlaylistView::snapTicks(Qt::KeyboardModifiers modifiers) const
         return kTicksPerBeat;
     case Snap::Step:
         return kTicksPerStep;
+    case Snap::HalfStep:
+        return kTicksPerStep / 2;
     case Snap::Auto:
         break;
     }
-    // Auto: from a step, doubled until the lines are far enough apart to aim at.
+    // Auto: from a 32nd note, doubled until the lines are far enough apart to aim at.
     constexpr double kMinSnapPixels = 12.0;
-    int grid = kTicksPerStep;
+    int grid = kTicksPerStep / 2;
     while (grid * pixelsPerTick() < kMinSnapPixels && grid < kTicksPerBar)
         grid *= 2;
     return grid;

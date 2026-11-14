@@ -85,6 +85,12 @@ void PianoRollView::setKey(int root, Scale scale)
     viewport()->update();
 }
 
+void PianoRollView::setSnapTicks(int ticks)
+{
+    snapTicks_ = std::max(kMinNoteLength, ticks);
+    viewport()->update();
+}
+
 void PianoRollView::setPlayhead(double tick)
 {
     if (tick == playhead_)
@@ -224,7 +230,7 @@ void PianoRollView::paintEvent(QPaintEvent* event)
                 p.fillRect(
                     QRect(area.left(), lineY, area.width(), 1), pitchClassOf(key) == 0 ? c.border : c.rail);
         }
-        timeline::paintGrid(p, area, scale, kTicksPerStep);
+        timeline::paintGrid(p, area, scale, std::min(snapTicks_, kTicksPerStep));
 
         // Shade past the pattern's end.
         if (project_ != nullptr) {
@@ -330,7 +336,7 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
         return;
     }
     // New note at the clicked step, then drag it into place.
-    const Note note{keyAt(pos.y()), snapDown(tickAt(pos.x()), kTicksPerStep), lastLength_};
+    const Note note{keyAt(pos.y()), snapDown(tickAt(pos.x()), snapTicks_), lastLength_};
     emit noteAdded(note);
     if (const auto* list = notes(); list != nullptr && !list->empty())
         beginDrag(list->size() - 1, Drag::Move, pos);
@@ -349,11 +355,11 @@ void PianoRollView::mouseMoveEvent(QMouseEvent* event)
     Note note = dragStartNote_;
     if (drag_ == Drag::Move) {
         note.start = free ? static_cast<int>(std::lround(dragStartNote_.start + dt))
-                          : snapNearest(dragStartNote_.start + dt, kTicksPerStep);
+                          : snapNearest(dragStartNote_.start + dt, snapTicks_);
         note.key = dragStartNote_.key + (keyAt(pos.y()) - dragStartKey_);
     } else {
         const int end = free ? static_cast<int>(std::lround(dragStartNote_.end() + dt))
-                             : snapNearest(dragStartNote_.end() + dt, kTicksPerStep);
+                             : snapNearest(dragStartNote_.end() + dt, snapTicks_);
         note.length = end - note.start;
         lastLength_ = std::max(kMinNoteLength, note.length);
     }

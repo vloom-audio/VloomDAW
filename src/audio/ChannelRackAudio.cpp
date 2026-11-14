@@ -122,9 +122,9 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
             if (!clip.muted && audible(clip.track)) {
                 vloom::SongPatternClip out;
                 out.pattern = static_cast<int>(clip.pattern);
-                out.startStep = clip.start / kTicksPerStep;
-                out.lengthSteps = project.clipLength(clip) / kTicksPerStep;
-                out.offsetSteps = clip.offset / kTicksPerStep; // cut: it goes on inside the pattern
+                out.startTick = clip.start;
+                out.lengthTicks = project.clipLength(clip);
+                out.offsetTicks = clip.offset; // cut: it goes on inside the pattern
                 state->patternClips.push_back(out);
             }
         // Audio clips play their channel's sample through the channel, from
@@ -133,9 +133,9 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
             if (!clip.muted && audible(clip.track)) {
                 vloom::SongAudioClip out;
                 out.channel = static_cast<int>(clip.channel);
-                out.startStep = clip.start / kTicksPerStep;
-                out.offsetSteps = clip.offset / kTicksPerStep;
-                out.lengthSteps = clip.length / kTicksPerStep;
+                out.startTick = clip.start;
+                out.offsetTicks = clip.offset;
+                out.lengthTicks = clip.length;
                 if (clip.fitted()) {
                     // The sample follows the song's tempo: stretched (its
                     // pitch kept) when the stretched copy is ready, resampled

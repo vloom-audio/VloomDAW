@@ -19,9 +19,10 @@ namespace vloomdaw {
 /// scale are shaded darker. Reads the Project; edits are emitted as signals
 /// for MainWindow to apply, which then calls refresh().
 ///
-/// Left-click an empty spot to add a note (snapped to 1/16) and keep
-/// dragging to place it; drag a note to move it, drag its right edge to
-/// resize; right-click a note to delete it. Hold Alt to move without snap.
+/// Left-click an empty spot to add a note (snapped to the grid, a 1/16 step
+/// by default) and keep dragging to place it; drag a note to move it, drag
+/// its right edge to resize; right-click a note to delete it. Hold Alt to
+/// move without snap.
 /// Ctrl+wheel zooms horizontally.
 class PianoRollView : public QAbstractScrollArea {
     Q_OBJECT
@@ -34,6 +35,10 @@ public:
     void setKey(int root, Scale scale);
     /// Playhead in ticks from the pattern start (< 0: hidden).
     void setPlayhead(double tick);
+    /// What notes snap to, in ticks (e.g. kTicksPerStep / 2 for 1/32 notes);
+    /// at least kMinNoteLength. The grid shows it.
+    void setSnapTicks(int ticks);
+    [[nodiscard]] int snapTicks() const { return snapTicks_; }
     void refresh();
 
 signals:
@@ -75,6 +80,7 @@ private:
     double playhead_ = -1.0;
     double pixelsPerBeat_ = 64.0;
     int lastLength_ = kTicksPerStep; ///< length of the next new note
+    int snapTicks_ = kTicksPerStep;
     bool scrolledToMiddle_ = false;
 
     Drag drag_ = Drag::None;
