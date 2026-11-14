@@ -6,6 +6,8 @@
 
 #include <QApplication>
 #include <QFile>
+#include <QFont>
+#include <QFontDatabase>
 #include <QHash>
 #include <QIcon>
 #include <QIconEngine>
@@ -525,6 +527,27 @@ QColor Theme::patternColor(std::size_t index)
 void Theme::apply(QApplication& app)
 {
     const Colors& c = colors();
+
+    // The interface font, bundled (resources/fonts): Noto Sans Thai, with
+    // Noto Sans for Latin text, at the system's default size. Loaded once;
+    // apply() runs again on theme changes.
+    static const bool fontLoaded = [] {
+        bool any = false;
+        for (const char* family : {"NotoSans", "NotoSansThai"})
+            for (const char* weight : {"Regular", "SemiBold", "Bold"})
+                any |= QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/%1-%2.ttf")
+                               .arg(QLatin1String(family), QLatin1String(weight)))
+                    != -1;
+        if (any) {
+            QFont font = QApplication::font();
+            // Noto Sans Thai first, for every widget's metrics and line height;
+            // it has no Latin letters or digits, which come from Noto Sans.
+            font.setFamilies({QStringLiteral("Noto Sans Thai"), QStringLiteral("Noto Sans")});
+            QApplication::setFont(font);
+        }
+        return any;
+    }();
+    (void)fontLoaded;
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     // Ask the OS for dark window chrome too: the Windows title bar, macOS menus
