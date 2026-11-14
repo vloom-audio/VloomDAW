@@ -25,6 +25,7 @@
 #include "ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/SettingsDialog.hpp"
 #include "ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp"
+#include "ui/launcher/LauncherDialog.hpp"
 #include "ui/mixer/MixerPanel.hpp"
 #include "ui/pianoroll/PianoRollView.hpp"
 #include "ui/playlist/PlaylistView.hpp"
@@ -273,6 +274,7 @@ void MainWindow::createMenus()
         return action;
     };
     addFileAction(tr("&New Project"), QKeySequence(Qt::CTRL | Qt::Key_N), [this] { newProject(); });
+    fileMenu->addAction(tr("S&tart Window…"), this, [this] { showLauncher(); });
     addFileAction(tr("&Open…"), QKeySequence(Qt::CTRL | Qt::Key_O), [this] { openProject(); });
 
     recentMenu_ = fileMenu->addMenu(tr("Open &Recent"));
@@ -2967,6 +2969,43 @@ void MainWindow::openProjectFile(const QString& path)
             QMessageBox::Ok, this);
         box.setDetailedText(problems.join(QLatin1Char('\n')));
         box.exec();
+    }
+}
+
+void MainWindow::showLauncher()
+{
+    LauncherDialog::AudioStatus status;
+    if (audio_.isRunning()) {
+        status.device = QString::fromStdString(audio_.deviceName());
+        status.sampleRate = audio_.sampleRate();
+        status.bufferFrames = audio_.bufferFrames();
+    }
+    LauncherDialog launcher(status, kDefaultTempo, this);
+    launcher.exec();
+    switch (launcher.choice()) {
+    case LauncherDialog::Choice::NewProject:
+        if (!maybeSaveChanges())
+            return;
+        resetProject();
+        transport_->setTempo(launcher.tempo());
+        pendingTempo_ = launcher.tempo(); // sent by refreshFromEngine()
+        syncChannelRack(); // fitted audio clips follow the tempo
+        projectPath_.clear();
+        markProjectSaved();
+        statusBar()->showMessage(tr("New project"), 3000);
+        break;
+    case LauncherDialog::Choice::OpenFile:
+        if (maybeSaveChanges())
+            openProjectFile(launcher.path());
+        break;
+    case LauncherDialog::Choice::BrowseOpen:
+        openProject();
+        break;
+    case LauncherDialog::Choice::AudioSettings:
+        showSettings(SettingsDialog::Page::Audio);
+        break;
+    case LauncherDialog::Choice::None:
+        break;
     }
 }
 

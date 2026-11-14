@@ -294,3 +294,23 @@ TEST_CASE("Projects are saved to and opened from files, under any name", "[proje
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
 }
+
+TEST_CASE("A project's summary gives the launcher its preview", "[project-file]")
+{
+    const ProjectSummary s = ProjectFile::summarize(sample());
+    CHECK(s.tempo == 140.0);
+    CHECK(s.channels == 4);
+    CHECK(s.plugins == 3); // Sylenth1, Saturn, Pro-L 2
+    // The chorus (32 steps: 2 bars) starts after one bar: 3 bars in all.
+    CHECK(s.bars == 3);
+    REQUIRE(s.blocks.size() == 2);
+    const auto& pattern = s.blocks[0];
+    CHECK(pattern.lane == 1);
+    CHECK(pattern.pattern == 1);
+    CHECK(pattern.start + pattern.length <= 1.0 + 1e-9);
+    CHECK(s.blocks[1].pattern == ProjectSummary::kAudio);
+
+    const ProjectSummary empty = ProjectFile::summarize(ProjectData{});
+    CHECK(empty.bars == 0);
+    CHECK(empty.blocks.empty());
+}

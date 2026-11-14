@@ -662,4 +662,53 @@ ProjectFile::ReadResult ProjectFile::load(const std::filesystem::path& path)
     return read(text, path.parent_path());
 }
 
+// ---------------------------------------------------------------- summaries
+
+ProjectSummary ProjectFile::summarize(const ProjectData& data)
+{
+    const Project& p = data.project;
+    ProjectSummary summary;
+    summary.tempo = data.song.tempo;
+    summary.channels = p.channels().size();
+    for (const Channel& c : p.channels())
+        summary.plugins += c.instrument ? 1 : 0;
+    for (std::size_t i = 0; i < data.mixer.size(); ++i)
+        summary.plugins += data.mixer.track(i).effects.size();
+
+    // An audio clip's length depends on its sample: a bar stands in for it.
+    const auto audioLength = [](const AudioClip& c) { return c.length > 0 ? c.length : kTicksPerBar; };
+    std::int64_t end = 0;
+    for (const Clip& c : p.clips())
+        end = std::max<std::int64_t>(end, std::int64_t{c.start} + p.clipLength(c));
+    for (const AudioClip& c : p.audioClips())
+        end = std::max<std::int64_t>(end, std::int64_t{c.start} + audioLength(c));
+    summary.bars = static_cast<int>((end + kTicksPerBar - 1) / kTicksPerBar);
+    if (end <= 0)
+        return summary;
+    const auto place = [&](int track, std::int64_t start, std::int64_t length, std::size_t pattern) {
+        if (track >= ProjectSummary::kLanes || summary.blocks.size() >= ProjectSummary::kMaxBlocks)
+            return;
+        summary.blocks.push_back({track, static_cast<double>(start) / static_cast<double>(end),
+            static_cast<double>(length) / static_cast<double>(end), pattern});
+    };
+    for (const Clip& c : p.clips())
+        place(c.track, c.start, p.clipLength(c), c.pattern);
+    for (const AudioClip& c : p.audioClips())
+        place(c.track, c.start, audioLength(c), ProjectSummary::kAudio);
+    return summary;
+}
+
+std::optional<ProjectSummary> ProjectFile::summarize(
+    const std::filesystem::path& path, std::uintmax_t maxBytes)
+{
+    std::error_code ec;
+    const std::uintmax_t size = std::filesystem::file_size(path, ec);
+    if (ec || size > maxBytes)
+        return std::nullopt;
+    const ReadResult read = load(path);
+    if (!read.data)
+        return std::nullopt;
+    return summarize(*read.data);
+}
+
 } // namespace vloomdaw

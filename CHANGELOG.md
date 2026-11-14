@@ -22,6 +22,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
     empty, plugins included, with progress and cancel. Formats are 24-bit,
     16-bit or 32-bit float.
   - **Command line:** `VloomDAW song.vloom` opens a project.
+- A start window (File > Start Window, and at startup unless turned off).
+  - **New project:** at a tempo you pick; the last tempo is remembered.
+  - **Recent projects:** cards with an arrangement preview, tempo, length
+    and plugin count.
+  - **Finding one:** pin, search, and filter by all, pinned or this week.
+  - **Audio status:** a status line shows the audio output.
 - Opening a project file is built for untrusted files:
   - sizes, counts and nesting are capped;
   - every value is checked;

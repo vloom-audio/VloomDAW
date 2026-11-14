@@ -5,6 +5,8 @@
 #include <QDir>
 #include <QSettings>
 
+#include <algorithm>
+
 namespace vloomdaw::recent {
 
 namespace {
@@ -55,5 +57,32 @@ void remove(const QString& path)
 }
 
 void clear() { QSettings().remove(kKey); }
+
+namespace {
+const QString kPinnedKey = QStringLiteral("project/pinned");
+constexpr int kMaxPinned = 50;
+} // namespace
+
+QStringList pinned()
+{
+    QStringList list = QSettings().value(kPinnedKey).toStringList();
+    list.removeAll(QString());
+    return list.mid(0, kMaxPinned);
+}
+
+bool isPinned(const QString& path)
+{
+    const QStringList list = pinned();
+    return std::any_of(list.begin(), list.end(), [&](const QString& p) { return same(p, path); });
+}
+
+void setPinned(const QString& path, bool pin)
+{
+    QStringList list = pinned();
+    list.removeIf([&](const QString& p) { return same(p, path); });
+    if (pin)
+        list.prepend(QDir::cleanPath(path));
+    QSettings().setValue(kPinnedKey, list.mid(0, kMaxPinned));
+}
 
 } // namespace vloomdaw::recent

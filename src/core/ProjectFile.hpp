@@ -38,6 +38,26 @@ struct ProjectData {
     PluginStates states;
 };
 
+/// What the launcher shows of a project without opening it.
+struct ProjectSummary {
+    /// A clip in the arrangement preview, placed in fractions of the song.
+    struct Block {
+        int lane = 0; ///< playlist track, from the top (only the first kLanes)
+        double start = 0.0; ///< 0 .. 1 of the song's length
+        double length = 0.0; ///< of the song's length
+        std::size_t pattern = 0; ///< for its colour; audio clips: kAudio
+    };
+    static constexpr int kLanes = 5;
+    static constexpr std::size_t kMaxBlocks = 300;
+    static constexpr std::size_t kAudio = static_cast<std::size_t>(-1);
+
+    double tempo = 120.0;
+    int bars = 0; ///< the song's length; 0 for an empty playlist
+    std::size_t channels = 0;
+    std::size_t plugins = 0; ///< instruments and effects
+    std::vector<Block> blocks;
+};
+
 /// The .vloom project file (docs/project-file.md): UTF-8 JSON with a format
 /// name and version. Sample paths inside the project's folder are stored
 /// relative to it, so the folder can move.
@@ -77,6 +97,13 @@ public:
     [[nodiscard]] static bool save(
         const std::filesystem::path& path, const ProjectData& data, std::string* error);
     [[nodiscard]] static ReadResult load(const std::filesystem::path& path);
+
+    /// A summary of `data` for the launcher.
+    [[nodiscard]] static ProjectSummary summarize(const ProjectData& data);
+    /// Reads the file at `path` and summarizes it; nullopt if it cannot be
+    /// read or is larger than `maxBytes` (plugin states make big files slow).
+    [[nodiscard]] static std::optional<ProjectSummary> summarize(
+        const std::filesystem::path& path, std::uintmax_t maxBytes);
 };
 
 /// A UTF-8 string as a path, and back (std::filesystem's own conversions

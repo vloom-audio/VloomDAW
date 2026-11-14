@@ -16,4 +16,9 @@ void add(const QString& path);
 void remove(const QString& path);
 void clear();
 
+/// Projects pinned in the launcher (kept until unpinned).
+[[nodiscard]] QStringList pinned();
+[[nodiscard]] bool isPinned(const QString& path);
+void setPinned(const QString& path, bool pinned);
+
 } // namespace vloomdaw::recent

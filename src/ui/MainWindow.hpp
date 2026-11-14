@@ -86,6 +86,9 @@ public:
     /// (File > Open and Open Recent ask first; so does the command line's
     /// caller, which has nothing open yet).
     void openProjectFile(const QString& path);
+    /// The start window (File > Start Window, and at startup): a new
+    /// project, or a recent one.
+    void showLauncher();
 
 protected:
     bool event(QEvent* event) override;

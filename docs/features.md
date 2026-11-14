@@ -118,6 +118,7 @@ the transport in all three editors.
 | New project | ✅ | `Ctrl/Cmd+N`: stop, rewind, reset tempo |
 | Edit menu: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Select All | ⏳ | Menu and shortcuts exist (`Ctrl/Cmd+Z`, `Shift+Ctrl/Cmd+Z`, `Ctrl+Y` on Windows, …) and say when they arrive: undo at the start of M2, the rest with the M2 editing tools. Text fields keep their own keys |
 | New, Open, Open Recent, Save, Save As | ✅ | `.vloom` project files ([format](project-file.md)): channels, patterns, playlist, mixer, plugins and their settings, song tempo and key. Unsaved changes show as "*" in the title and are asked about before New, Open and quitting. Opening a project loads only plugins your scan found |
+| Start window | ✅ | Shown at startup (can be turned off) and from File > Start Window. Make a new project at a tempo you pick, or open a recent one from cards that show its arrangement, tempo, length and plugin count. Pin, search and filter (all, pinned, this week); right-click to show its folder or remove it from the list. Templates and crash recovery come later |
 | Import Audio | ✅ | File > Import Audio adds audio files as new channels |
 | Export WAV | ✅ | File > Export WAV renders the song (or the pattern, with an empty playlist) to 24-bit, 16-bit or 32-bit float WAV, plugins included, with progress and cancel; audio output pauses meanwhile |
 

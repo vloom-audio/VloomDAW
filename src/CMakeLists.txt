@@ -78,6 +78,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/FilePaths.hpp
     ui/RecentProjects.cpp
     ui/RecentProjects.hpp
+    ui/launcher/LauncherDialog.cpp
+    ui/launcher/LauncherDialog.hpp
     ui/browser/BrowserPanel.cpp
     ui/browser/BrowserPanel.hpp
     ui/AudioDecoder.cpp
