@@ -44,6 +44,8 @@ public:
     /// Shows saved settings (a project was opened) without signalling them back.
     void setValues(double fader, double pan, bool muted, bool soloed);
     [[nodiscard]] std::optional<std::uint32_t> color() const { return color_; }
+    [[nodiscard]] QSize minimumSizeHint() const override;
+    [[nodiscard]] QSize sizeHint() const override;
 
 public slots:
     /// Greys the strip out while another insert's solo silences it.

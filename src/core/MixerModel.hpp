@@ -37,7 +37,7 @@ public:
     /// Most inserts: as many as the engine routes (vloom::kMaxInserts).
     static constexpr std::size_t kMaxInserts = 125;
     /// Most effects on one insert.
-    static constexpr std::size_t kMaxEffects = 10;
+    static constexpr std::size_t kMaxEffects = 9;
     /// Longest insert name, in bytes (UTF-8).
     static constexpr std::size_t kMaxNameLength = 64;
 

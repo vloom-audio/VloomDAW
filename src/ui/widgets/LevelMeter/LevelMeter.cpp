@@ -37,6 +37,7 @@ double scaleOf(double db) { return (db - kFloorDb) / (kTopDb - kFloorDb); }
 LevelMeter::LevelMeter(QWidget* parent)
     : QWidget(parent)
 {
+    setMinimumHeight(50);
     setToolTip(tr("Output level (click to reset the clip light)"));
     // Paints every pixel, so its 30 Hz updates do not repaint the strip.
     setAttribute(Qt::WA_OpaquePaintEvent);
@@ -95,9 +96,15 @@ void LevelMeter::paintEvent(QPaintEvent* /*event*/)
     QPainter p(this);
 
     p.fillRect(rect(), colors.display); // one dark housing for both bars
-    const int barWidth = (width() - kGap) / 2;
+    if (height() <= kClipLight + 2)
+        return;
+
+    const int barWidth = std::max(1, (width() - kGap) / 2);
     const int top = kClipLight + 1;
-    const int barHeight = height() - top;
+    const int barHeight = std::max(0, height() - top);
+    if (barHeight <= 0)
+        return;
+
     const int unityY = top + static_cast<int>((1.0 - scaleOf(0.0)) * barHeight);
     const int warnY = top + static_cast<int>((1.0 - scaleOf(-6.0)) * barHeight);
 
@@ -108,7 +115,7 @@ void LevelMeter::paintEvent(QPaintEvent* /*event*/)
         p.fillRect(x, top, barWidth, barHeight, colors.display);
 
         // Lit part, coloured by zone: normal, last 6 dB before 0, over 0.
-        const int litTop = top + static_cast<int>((1.0 - c.level) * barHeight);
+        const int litTop = top + static_cast<int>((1.0 - std::clamp(c.level, 0.0, 1.0)) * barHeight);
         const int bottom = top + barHeight;
         const auto band = [&](int from, int to, const QColor& color) {
             const int y0 = std::max(from, litTop);
@@ -120,8 +127,8 @@ void LevelMeter::paintEvent(QPaintEvent* /*event*/)
         band(top, unityY, colors.danger);
 
         if (c.hold > 0.0) {
-            const int holdY = top + static_cast<int>((1.0 - c.hold) * barHeight);
-            p.fillRect(x, std::min(holdY, bottom - 1), barWidth, 1, colors.text);
+            const int holdY = top + static_cast<int>((1.0 - std::clamp(c.hold, 0.0, 1.0)) * barHeight);
+            p.fillRect(x, std::clamp(holdY, top, bottom - 1), barWidth, 1, colors.text);
         }
 
         p.fillRect(x, 0, barWidth, kClipLight, c.clipped ? colors.danger : colors.border);

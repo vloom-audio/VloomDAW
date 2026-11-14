@@ -25,6 +25,7 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
 {
     setObjectName(QStringLiteral("mixerPanel"));
     setAttribute(Qt::WA_StyledBackground);
+    setMinimumHeight(350);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(10, 6, 10, 10);
@@ -287,5 +288,9 @@ void MixerPanel::setSilenced(std::size_t track, bool silenced)
     if (track < trackCount())
         strips_[static_cast<qsizetype>(track)]->setSilenced(silenced);
 }
+
+QSize MixerPanel::minimumSizeHint() const { return {200, 350}; }
+
+QSize MixerPanel::sizeHint() const { return {800, 380}; }
 
 } // namespace vloomdaw

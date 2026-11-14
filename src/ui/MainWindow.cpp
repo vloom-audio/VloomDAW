@@ -32,6 +32,7 @@
 #include "ui/playlist/PlaylistView.hpp"
 #include "ui/plugins/PluginEditorWindow.hpp"
 #include "ui/plugins/PluginManagerDialog.hpp"
+#include "ui/plugins/PluginPickerPopup.hpp"
 #include "ui/plugins/PluginsPanel.hpp"
 #include "ui/widgets/ActivityBar/ActivityBar.hpp"
 #include "ui/widgets/DetachButton/DetachButton.hpp"
@@ -148,7 +149,7 @@ constexpr QLatin1StringView kSidebarPageKey{"mainWindow/sidebarPage"};
 
 constexpr int kDefaultSidebarWidth = 260;
 constexpr int kThemeApplyMs = 200; ///< full restyle once theme edits pause this long
-constexpr int kDefaultMixerHeight = 300;
+constexpr int kDefaultMixerHeight = 380;
 constexpr std::size_t kMixerInserts = 16;
 constexpr double kDefaultTempo = 120.0; ///< BPM of a new project
 
@@ -1348,7 +1349,7 @@ void MainWindow::setMixerVisible(bool visible)
 QWidget* MainWindow::createMixer()
 {
     mixerPanel_ = new MixerPanel(mixer_.size() - 1, this);
-    mixerPanel_->setMinimumHeight(200);
+    mixerPanel_->setMinimumHeight(350);
     connect(mixerPanel_, &MixerPanel::closeRequested, this, [this] { setMixerVisible(false); });
     connect(
         mixerPanel_, &MixerPanel::detachRequested, this, [this] { setMixerDetached(!isMixerDetached()); });
@@ -2287,6 +2288,14 @@ void MainWindow::restoreWindowState()
     restoreState(settings.value(kStateKey).toByteArray());
     splitter_->restoreState(settings.value(kSplitterKey).toByteArray());
     workspaceSplitter_->restoreState(settings.value(kMixerSplitterKey).toByteArray());
+    // Ensure the mixer has enough height to cleanly show all FX slots and the fader without overlapping.
+    if (workspaceSplitter_->sizes().size() >= 2 && mixerPanel_ != nullptr) {
+        const int minH = mixerPanel_->minimumHeight();
+        if (workspaceSplitter_->sizes()[1] < minH) {
+            const int total = workspaceSplitter_->sizes()[0] + workspaceSplitter_->sizes()[1];
+            workspaceSplitter_->setSizes({std::max(100, total - minH), minH});
+        }
+    }
     setMixerVisible(settings.value(kMixerOpenKey, false).toBool());
     if (settings.value(kMixerDetachedKey, false).toBool())
         setMixerDetached(true);
@@ -2803,20 +2812,8 @@ void MainWindow::showEffectSlotContextMenu(std::size_t track, std::size_t slot, 
 
     menu.addSeparator();
 
-    QMenu* replaceMenu = menu.addMenu(tr("Replace"));
-    bool hasEffects = false;
-    for (std::size_t i = 0; i < pluginStore_.plugins.size(); ++i) {
-        const auto& p = pluginStore_.plugins[i];
-        if (effectiveCategory(p) != "Instrument") {
-            hasEffects = true;
-            replaceMenu->addAction(QString::fromStdString(p.name), this,
-                [this, i, track, slot] { replacePluginInInsert(i, track, slot); });
-        }
-    }
-    if (!hasEffects)
-        replaceMenu->addAction(tr("No effect plugins scanned yet"))->setEnabled(false);
-    replaceMenu->addSeparator();
-    replaceMenu->addAction(tr("More plugins…"), this, &MainWindow::showPluginManager);
+    menu.addAction(tr("Replace…"), this,
+        [this, track, slot, globalPos] { showEffectChooserMenu(track, slot, globalPos); });
 
     menu.addSeparator();
     menu.addAction(tr("Remove"), this, [this, track, slot] {
@@ -2833,26 +2830,16 @@ void MainWindow::showEffectChooserMenu(std::size_t track, std::size_t slot, cons
 {
     if (track >= mixer_.size())
         return;
-    QMenu menu(this);
-    menu.setTitle(tr("Select Effect"));
-    bool hasEffects = false;
-    for (std::size_t i = 0; i < pluginStore_.plugins.size(); ++i) {
-        const auto& p = pluginStore_.plugins[i];
-        if (effectiveCategory(p) != "Instrument") {
-            hasEffects = true;
-            menu.addAction(QString::fromStdString(p.name), this, [this, i, track, slot] {
-                if (slot < mixer_.track(track).effects.size())
-                    replacePluginInInsert(i, track, slot);
-                else
-                    addPluginToInsert(i, track);
-            });
-        }
-    }
-    if (!hasEffects)
-        menu.addAction(tr("No effect plugins scanned yet"))->setEnabled(false);
-    menu.addSeparator();
-    menu.addAction(tr("More plugins…"), this, &MainWindow::showPluginManager);
-    menu.exec(globalPos);
+
+    auto* picker = new PluginPickerPopup(pluginStore_, PluginPickerPopup::Filter::Effect, this);
+    connect(picker, &PluginPickerPopup::pluginSelected, this, [this, track, slot](std::size_t pluginIndex) {
+        if (slot < mixer_.track(track).effects.size())
+            replacePluginInInsert(pluginIndex, track, slot);
+        else
+            addPluginToInsert(pluginIndex, track);
+    });
+    connect(picker, &PluginPickerPopup::morePluginsRequested, this, &MainWindow::showPluginManager);
+    picker->showAt(globalPos);
 }
 
 void MainWindow::handlePluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin)

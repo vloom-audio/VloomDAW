@@ -50,6 +50,9 @@ public:
     /// Updates track `track`'s FX rack with its effects chain.
     void setTrackEffects(std::size_t track, const std::vector<PluginSlot>& effects);
 
+    [[nodiscard]] QSize minimumSizeHint() const override;
+    [[nodiscard]] QSize sizeHint() const override;
+
 public slots:
     void setSilenced(std::size_t track, bool silenced);
     /// Shows insert `track`'s effect count on its FX button.

@@ -19,8 +19,8 @@ namespace vloomdaw {
 
 namespace {
 
-constexpr int kSlotHeight = 18;
-constexpr int kSwitchWidth = 15;
+constexpr int kSlotHeight = 14;
+constexpr int kSwitchWidth = 14;
 
 /// Left switch button of an FX slot: shows a green triangle when active,
 /// muted dim triangle when bypassed, and a small dark square when empty.
@@ -76,11 +76,11 @@ protected:
                 p.setBrush(QColor(0x55, 0x62, 0x5b)); // Dim grey-green ▶
             }
             QPolygonF triangle;
-            triangle << QPointF(4.0, 4.5) << QPointF(4.0, 13.5) << QPointF(11.0, 9.0);
+            triangle << QPointF(3.5, 3.0) << QPointF(3.5, 11.0) << QPointF(10.0, 7.0);
             p.drawPolygon(triangle);
         } else {
             p.setBrush(QColor(0x32, 0x36, 0x3a)); // Empty slot square ■
-            p.drawRect(QRectF(5.5, 7.0, 4.0, 4.0));
+            p.drawRect(QRectF(5.0, 5.0, 4.0, 4.0));
         }
     }
 
@@ -341,7 +341,7 @@ MixerSlotRack::MixerSlotRack(QWidget* parent)
 {
     setObjectName(QStringLiteral("fxRack"));
     setFixedWidth(60);
-    setFixedHeight(kSlotHeight);
+    setFixedHeight(static_cast<int>(MixerModel::kMaxEffects * kSlotHeight));
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -350,7 +350,6 @@ MixerSlotRack::MixerSlotRack(QWidget* parent)
     for (std::size_t i = 0; i < MixerModel::kMaxEffects; ++i) {
         auto* row = new MixerSlotRow(i, this);
         rows_[i] = row;
-        row->setVisible(i == 0); // Initially only 1 empty slot visible
         layout->addWidget(row);
 
         connect(row, &MixerSlotRow::bypassToggled, this, [this, i](bool on) { emit bypassToggled(i, on); });
@@ -364,18 +363,12 @@ MixerSlotRack::MixerSlotRack(QWidget* parent)
 
 void MixerSlotRack::setEffects(const std::vector<PluginSlot>& effects)
 {
-    // Initially 1 empty slot. If N effects loaded, show N effects + 1 trailing empty slot (up to kMaxEffects).
-    const std::size_t visibleCount = std::clamp<std::size_t>(effects.size() + 1, 1, MixerModel::kMaxEffects);
-
     for (std::size_t i = 0; i < MixerModel::kMaxEffects; ++i) {
         if (i < effects.size())
             rows_[i]->setEffect(QString::fromStdString(effects[i].name), effects[i].bypassed);
         else
             rows_[i]->setEmpty();
-
-        rows_[i]->setVisible(i < visibleCount);
     }
-    setFixedHeight(static_cast<int>(visibleCount * kSlotHeight));
 }
 
 } // namespace vloomdaw

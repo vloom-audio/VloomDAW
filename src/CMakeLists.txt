@@ -123,6 +123,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/PluginEditorWindow.hpp
     ui/plugins/PluginManagerDialog.cpp
     ui/plugins/PluginManagerDialog.hpp
+    ui/plugins/PluginPickerPopup.cpp
+    ui/plugins/PluginPickerPopup.hpp
     ui/plugins/PluginProber.cpp
     ui/plugins/PluginProber.hpp
     ui/plugins/PluginsPanel.cpp
