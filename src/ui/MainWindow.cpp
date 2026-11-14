@@ -2848,9 +2848,10 @@ ProjectData MainWindow::projectData(bool withPluginStates) const
     out.song.songMode = songMode_;
     if (!withPluginStates)
         return out;
+    // A plugin that is not loaded keeps the settings its project file had.
     const auto stateOf = [this](const PluginSlot& slot) {
         const auto instance = pluginHost_.instance(slot.instance);
-        return instance != nullptr ? instance->processor().saveState() : std::vector<std::uint8_t>{};
+        return instance != nullptr ? instance->processor().saveState() : slot.savedState;
     };
     for (const Channel& channel : project_.channels())
         out.states.instruments.push_back(
@@ -3064,6 +3065,7 @@ void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
     // any library, and loading one runs its code.
     const auto load = [&](PluginSlot& slot, std::span<const std::uint8_t> state) {
         slot.instance = 0;
+        slot.savedState.assign(state.begin(), state.end()); // kept unless it loads
         const QString name = QString::fromStdString(slot.name);
         if (!isScannedPlugin(slot)) {
             problems << tr("%1: not among your scanned plugins (Options > Plugin Manager)").arg(name);
@@ -3078,6 +3080,7 @@ void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
         if (!loaded.error.empty())
             problems << tr("%1: %2").arg(name, QString::fromStdString(loaded.error));
         slot.instance = loaded.handle;
+        slot.savedState.clear(); // the instance holds them now
     };
     const auto stateAt = [](const auto& list, std::size_t i) -> std::span<const std::uint8_t> {
         return i < list.size() ? std::span<const std::uint8_t>(list[i]) : std::span<const std::uint8_t>();

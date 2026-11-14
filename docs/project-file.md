@@ -103,6 +103,10 @@ A project file can come from anyone, so reading it is defensive:
 - **Values:** every value is range-checked and goes through the model's own
   setters (`Project::restored()`). A clip of a pattern or channel that does
   not exist is dropped.
+- **Sample paths:** a sample may be anywhere on the computer (packs live
+  outside projects), so a path can name any file the user can read,
+  absolute or through `..`. VloomDAW only decodes it as audio; nothing of
+  it is shown or sent anywhere.
 - **Network paths:** sample paths on network shares (`\\server\share`,
   `//server/share`) are left out. Opening one would send the user's Windows
   credentials to that server.

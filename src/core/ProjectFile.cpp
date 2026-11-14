@@ -664,8 +664,12 @@ bool ProjectFile::save(const std::filesystem::path& path, const ProjectData& dat
             return fail("Could not write to " + pathToUtf8(path.parent_path()));
         out.write(text.data(), static_cast<std::streamsize>(text.size()));
         out.flush();
-        if (!out)
+        if (!out) {
+            out.close();
+            std::error_code ignored;
+            std::filesystem::remove(temp, ignored); // no half-written file left behind
             return fail("Could not write the project (is the disk full?)");
+        }
     }
     std::error_code ec;
     std::filesystem::rename(temp, path, ec);
