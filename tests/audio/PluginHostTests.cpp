@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace vloomdaw;
 
@@ -38,4 +40,32 @@ TEST_CASE("A plugin that cannot be loaded gives no handle and says why", "[plugi
     CHECK(host.resolver()(1) == nullptr);
     host.retainOnly({}); // nothing to drop
     host.idle();
+}
+
+TEST_CASE("The plugin to load is found by id, then by name, then as a file's only plugin", "[plugins]")
+{
+    const auto plugin = [](std::string id, std::string name) {
+        vloom::PluginInfo info;
+        info.id = std::move(id);
+        info.name = std::move(name);
+        return info;
+    };
+    const std::vector<vloom::PluginInfo> several{
+        plugin("com.a.synth", "Synth"), plugin("com.a.verb", "Verb")};
+
+    CHECK(pickPlugin(several, "com.a.verb", "Synth").plugin == &several[1]); // the id wins
+    const PluginPick gone = pickPlugin(several, "com.a.delay", "Delay");
+    CHECK(gone.plugin == nullptr);
+    CHECK_FALSE(gone.error.empty());
+
+    CHECK(pickPlugin(several, {}, "Verb").plugin == &several[1]);
+    // Several and no name matches (an unprobed scan names a plugin after
+    // its file): no guess.
+    const PluginPick unknown = pickPlugin(several, {}, "Bundle");
+    CHECK(unknown.plugin == nullptr);
+    CHECK(unknown.error.find("2 plugins") != std::string::npos);
+
+    const std::vector<vloom::PluginInfo> one{plugin("com.a.synth", "Synth")};
+    CHECK(pickPlugin(one, {}, "synth-file").plugin == &one[0]);
+    CHECK(pickPlugin({}, {}, "Synth").plugin == nullptr);
 }

@@ -10,23 +10,30 @@
 
 namespace vloomdaw {
 
-namespace {
-
-/// The plugin to create from `plugins`: by id, else by name, else the first.
-const vloom::PluginInfo* pick(
+PluginPick pickPlugin(
     const std::vector<vloom::PluginInfo>& plugins, std::string_view id, std::string_view name)
 {
     if (plugins.empty())
-        return nullptr;
+        return {nullptr, "the file holds no plugins"};
     if (!id.empty()) {
         const auto it = std::find_if(
             plugins.begin(), plugins.end(), [id](const vloom::PluginInfo& p) { return p.id == id; });
-        return it == plugins.end() ? nullptr : &*it;
+        if (it == plugins.end())
+            return {nullptr, "the plugin is no longer in its file"};
+        return {&*it, {}};
     }
     const auto it = std::find_if(
         plugins.begin(), plugins.end(), [name](const vloom::PluginInfo& p) { return p.name == name; });
-    return it == plugins.end() ? &plugins.front() : &*it;
+    if (it != plugins.end())
+        return {&*it, {}};
+    if (plugins.size() == 1)
+        return {&plugins.front(), {}}; // the scan named it after its file
+    return {nullptr,
+        "the file holds " + std::to_string(plugins.size())
+            + " plugins and none is named so; scan again with \"Read vendor and category\" on to list each"};
 }
+
+namespace {
 
 template <typename Library>
 std::shared_ptr<Library> openCached(std::map<std::filesystem::path, std::shared_ptr<Library>>& cache,
@@ -49,9 +56,10 @@ PluginHost::Loaded create(const std::shared_ptr<Library>& library, std::string_v
         loaded.error = error.empty() ? "not a plugin this app can load" : error;
         return loaded;
     }
-    const vloom::PluginInfo* chosen = pick(library->plugins(), id, name);
+    const PluginPick picked = pickPlugin(library->plugins(), id, name);
+    const vloom::PluginInfo* chosen = picked.plugin;
     if (chosen == nullptr) {
-        loaded.error = id.empty() ? "the file holds no plugins" : "the plugin is no longer in its file";
+        loaded.error = picked.error;
         return loaded;
     }
     loaded.info = *chosen;

@@ -28,6 +28,18 @@ namespace vloomdaw {
 /// is none. What the mixer and the channel rack use to build engine states.
 using PluginResolver = std::function<std::shared_ptr<vloom::PluginInstance>(std::uint64_t handle)>;
 
+/// Which of a library's `plugins` to create: the one with `id`; with no
+/// id, the one named `name` (a probed scan lists each plugin of a file by
+/// name), else the only one (an unprobed scan names it after its file).
+/// Several plugins and no match: none, with `error` saying why, rather than
+/// a guess whose id would then be saved.
+struct PluginPick {
+    const vloom::PluginInfo* plugin = nullptr; ///< points into `plugins`
+    std::string error{};
+};
+[[nodiscard]] PluginPick pickPlugin(
+    const std::vector<vloom::PluginInfo>& plugins, std::string_view id, std::string_view name);
+
 /// The CLAP and VST 3 plugins the project uses, loaded in-process (ADR 0006
 /// of vloom-engine: a crashing plugin takes the app down). Each instance has
 /// a handle the project stores (PluginSlot::instance). Libraries are opened
@@ -49,9 +61,9 @@ public:
     PluginHost(const PluginHost&) = delete;
     PluginHost& operator=(const PluginHost&) = delete;
 
-    /// Loads plugin `id` of the library at `path` (or, with no id, the one
-    /// named `name`, else the library's only or first plugin) and activates
-    /// it at `sampleRate` for blocks of vloom::kMaxBlockFrames.
+    /// Loads the plugin of the library at `path` that pickPlugin() chooses
+    /// for `id` and `name`, and activates it at `sampleRate` for blocks of
+    /// vloom::kMaxBlockFrames.
     [[nodiscard]] Loaded load(PluginFormat format, const std::filesystem::path& path, std::string_view id,
         std::string_view name, double sampleRate);
 
