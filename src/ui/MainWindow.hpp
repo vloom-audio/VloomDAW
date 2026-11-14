@@ -288,6 +288,11 @@ private:
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
     std::map<std::uint64_t, QPointer<PluginEditorWindow>> pluginEditors_; ///< by plugin handle
     QTimer* pluginIdleTimer_ = nullptr; ///< runs the plugins' main-thread work (PluginHost::idle())
+    /// Instruments loaded while no device ran: activated at the requested
+    /// rate and not sent to the engine yet (the rack is published only with
+    /// a device), so Engine::prepare() does not see them. startDevice()
+    /// activates them at the device's real rate.
+    std::vector<std::uint64_t> unpublishedInstruments_;
     /// Loads dropped samples (decoding, resampling) off the UI thread, one
     /// at a time; loader_ lives on it.
     QThread* loaderThread_ = nullptr;

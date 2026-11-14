@@ -90,6 +90,7 @@ PluginHost::Loaded PluginHost::load(PluginFormat format, const std::filesystem::
     }
     loaded.handle = next_++;
     instances_.emplace(loaded.handle, std::move(instance));
+    rates_[loaded.handle] = sampleRate;
     return loaded;
 }
 
@@ -97,6 +98,21 @@ std::shared_ptr<vloom::PluginInstance> PluginHost::instance(std::uint64_t handle
 {
     const auto it = instances_.find(handle);
     return it == instances_.end() ? nullptr : it->second;
+}
+
+double PluginHost::sampleRate(std::uint64_t handle) const
+{
+    const auto it = rates_.find(handle);
+    return it == rates_.end() ? 0.0 : it->second;
+}
+
+bool PluginHost::reactivate(std::uint64_t handle, double sampleRate)
+{
+    const auto it = instances_.find(handle);
+    if (it == instances_.end() || !it->second->activate(sampleRate, vloom::kMaxBlockFrames))
+        return false;
+    rates_[handle] = sampleRate;
+    return true;
 }
 
 PluginResolver PluginHost::resolver() const
@@ -116,6 +132,7 @@ void PluginHost::retainOnly(
             beforeDrop(it->first);
         if (it->second->processor().isEditorOpen())
             it->second->processor().closeEditor();
+        rates_.erase(it->first);
         it = instances_.erase(it);
     }
 }

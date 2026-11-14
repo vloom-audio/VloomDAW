@@ -56,6 +56,13 @@ public:
         std::string_view name, double sampleRate);
 
     [[nodiscard]] std::shared_ptr<vloom::PluginInstance> instance(std::uint64_t handle) const;
+    /// The rate instance `handle` was last activated at; 0 if there is none.
+    [[nodiscard]] double sampleRate(std::uint64_t handle) const;
+    /// Activates instance `handle` again at `sampleRate`. Only for an
+    /// instance the engine has never been given (Engine::prepare() takes
+    /// care of the published ones): the audio thread must not be processing
+    /// it. False if there is no such instance or it refused.
+    bool reactivate(std::uint64_t handle, double sampleRate);
     [[nodiscard]] PluginResolver resolver() const;
     [[nodiscard]] std::size_t size() const { return instances_.size(); }
 
@@ -72,6 +79,7 @@ private:
     std::map<std::filesystem::path, std::shared_ptr<vloom::ClapLibrary>> clap_;
     std::map<std::filesystem::path, std::shared_ptr<vloom::Vst3Library>> vst3_;
     std::map<std::uint64_t, std::shared_ptr<vloom::PluginInstance>> instances_;
+    std::map<std::uint64_t, double> rates_; ///< what each instance was activated at
     std::uint64_t next_ = 1;
 };
 

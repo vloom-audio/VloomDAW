@@ -2372,6 +2372,13 @@ bool MainWindow::startDevice(int index, bool fallback)
     }
     deviceWatch_.opened(!fallback, deviceClock_.elapsed());
 
+    // Instruments loaded before any device ran: at the device's rate before
+    // the rack first sends them to the engine (below).
+    for (const std::uint64_t handle : unpublishedInstruments_)
+        if (pluginHost_.sampleRate(handle) != audio_.sampleRate())
+            pluginHost_.reactivate(handle, audio_.sampleRate());
+    unpublishedInstruments_.clear();
+
     // Re-send UI state so the engine matches what the user sees.
     pendingTempo_.reset();
     songLoopEnd_ = -1.0; // sent again on the next tick
@@ -2600,10 +2607,10 @@ void MainWindow::addPluginToRack(std::size_t plugin, std::size_t channel)
     if (!slot)
         return;
     if (channel >= project_.channels().size())
-        channel = project_.addChannel(slot->name);
-    else
-        project_.setChannelName(channel, slot->name);
+        channel = project_.addChannel(slot->name); // an existing channel keeps its name
     project_.setChannelInstrument(channel, *slot);
+    if (audio_.sampleRate() <= 0)
+        unpublishedInstruments_.push_back(slot->instance);
     channelRack_->refresh();
     selectChannel(channel);
     syncChannelRack();
