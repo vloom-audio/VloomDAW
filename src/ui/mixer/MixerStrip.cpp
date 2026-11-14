@@ -15,6 +15,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
+#include <QSignalBlocker>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -127,6 +128,21 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     number_->setAlignment(Qt::AlignCenter);
     layout->addWidget(number_);
     setLabel(name, number);
+}
+
+void MixerStrip::setValues(double fader, double pan, bool muted, bool soloed)
+{
+    const QSignalBlocker blockFader(fader_);
+    const QSignalBlocker blockPan(pan_);
+    const QSignalBlocker blockMute(mute_);
+    fader_->setValue(fader);
+    pan_->setValue(pan * 100.0);
+    mute_->setChecked(muted);
+    if (solo_ != nullptr) {
+        const QSignalBlocker blockSolo(solo_);
+        solo_->setChecked(soloed);
+    }
+    showDb(fader_->value());
 }
 
 void MixerStrip::setEffectCount(std::size_t count)

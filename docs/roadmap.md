@@ -23,8 +23,8 @@ README roadmap are updated in the same PR that makes a feature work.
 | Undo / redo | not started | M2 |
 | Playlist | 🎨 | M3 |
 | Pattern / song mode | ⏳ | M3 |
-| Export (WAV) | ⏳ | M3 |
-| Open, Open Recent, Save, Save As | ⏳ | M4 |
+| Export (WAV) | ✅ | M3 |
+| Open, Open Recent, Save, Save As | ✅ | M4 (autosave and crash recovery still to come) |
 | Import (samples, MIDI files) | ⏳ | M4 |
 | Loading and playing plugins | ⏳ | M4 (CLAP), M5 (VST3) |
 | Mixer effects | not started | M4 (plugins), M5 (built-in) |

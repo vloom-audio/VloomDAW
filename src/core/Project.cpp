@@ -19,6 +19,75 @@ Project::Project()
         addTrack();
 }
 
+Project Project::restored(const std::vector<Channel>& channels, const std::vector<Pattern>& patterns,
+    const std::vector<PlaylistTrack>& tracks, const std::vector<Clip>& clips,
+    const std::vector<AudioClip>& audioClips)
+{
+    Project p;
+    p.channels_.clear();
+    p.patterns_.clear();
+    p.tracks_.clear();
+    p.clips_.clear();
+    p.audioClips_.clear();
+
+    for (const Channel& in : channels) {
+        const std::size_t c = p.addChannel(in.name);
+        p.setChannelMuted(c, in.muted);
+        p.setChannelSample(c, in.samplePath);
+        p.setChannelVolume(c, in.volume);
+        p.setChannelPan(c, in.pan);
+        p.setChannelInsert(c, in.insert);
+        p.setChannelColor(c, in.color);
+        p.setChannelInstrument(c, in.instrument);
+    }
+
+    for (const Pattern& in : patterns) {
+        if (p.patterns_.size() >= kMaxPatterns)
+            break;
+        const std::string blank = "Pattern " + std::to_string(p.patterns_.size() + 1);
+        const bool named = std::any_of(in.name.begin(), in.name.end(), [](char ch) { return ch != ' '; });
+        Pattern pattern = p.emptyPattern(named ? in.name : blank);
+        pattern.steps = std::clamp(in.steps, 1, kMaxSteps);
+        for (std::size_t c = 0; c < pattern.channels.size(); ++c) {
+            ChannelPattern& out = pattern.channels[c];
+            out.steps.assign(static_cast<std::size_t>(pattern.steps), false);
+            if (c >= in.channels.size())
+                continue;
+            const ChannelPattern& saved = in.channels[c];
+            for (std::size_t s = 0; s < saved.steps.size() && s < out.steps.size(); ++s)
+                out.steps[s] = saved.steps[s];
+            out.notes.reserve(saved.notes.size());
+            for (const Note& note : saved.notes)
+                out.notes.push_back(clamped(note));
+        }
+        p.patterns_.push_back(std::move(pattern));
+    }
+    if (p.patterns_.empty())
+        p.addPattern();
+
+    for (const PlaylistTrack& in : tracks) {
+        if (p.tracks_.size() >= static_cast<std::size_t>(kMaxPlaylistTracks))
+            break;
+        PlaylistTrack track = in;
+        track.height = std::clamp(in.height, PlaylistTrack::kMinHeight, PlaylistTrack::kMaxHeight);
+        track.depth = std::clamp(in.depth, 0, PlaylistTrack::kMaxDepth);
+        if (track.color)
+            track.color = *track.color & 0xFFFFFFu;
+        p.tracks_.push_back(std::move(track));
+        const std::size_t t = p.tracks_.size() - 1;
+        p.setTrackName(t, in.named ? in.name : std::string());
+    }
+    if (p.tracks_.empty())
+        p.addTrack();
+    p.normalizeTrackDepths();
+
+    for (const Clip& clip : clips)
+        p.addClip(clip); // a missing pattern: dropped
+    for (const AudioClip& clip : audioClips)
+        p.addAudioClip(clip); // a missing channel: dropped
+    return p;
+}
+
 // ---------------------------------------------------------------- channels
 
 std::size_t Project::addChannel(const std::string& name)

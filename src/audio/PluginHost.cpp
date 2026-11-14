@@ -102,6 +102,17 @@ PluginHost::Loaded PluginHost::load(PluginFormat format, const std::filesystem::
     return loaded;
 }
 
+PluginHost::Loaded PluginHost::loadWithState(PluginFormat format, const std::filesystem::path& path,
+    std::string_view id, std::string_view name, double sampleRate, std::span<const std::uint8_t> state)
+{
+    Loaded loaded = load(format, path, id, name, sampleRate);
+    if (loaded.handle == 0 || state.empty())
+        return loaded;
+    if (!instance(loaded.handle)->processor().loadState(state))
+        loaded.error = "its saved settings could not be restored";
+    return loaded;
+}
+
 std::shared_ptr<vloom::PluginInstance> PluginHost::instance(std::uint64_t handle) const
 {
     const auto it = instances_.find(handle);

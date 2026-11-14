@@ -24,6 +24,7 @@ target_sources(vloomdaw_core PRIVATE
     core/PositionFormat.cpp
     core/ProcessMemory.cpp
     core/Project.cpp
+    core/ProjectFile.cpp
     core/SampleFolder.cpp
     core/Scales.cpp
     core/TapTempo.cpp
@@ -39,7 +40,7 @@ target_sources(vloomdaw_core PRIVATE
     audio/MixerAudio.cpp
     audio/PluginHost.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(vloomdaw_core PUBLIC vloom::engine PRIVATE vloomdaw::ffmpeg signalsmith-stretch)
+target_link_libraries(vloomdaw_core PUBLIC vloom::engine PRIVATE vloomdaw::ffmpeg signalsmith-stretch nlohmann_json::nlohmann_json)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
 vloom_set_warnings(vloomdaw_core)
 
@@ -75,6 +76,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/DeviceScanner.hpp
     ui/FilePaths.cpp
     ui/FilePaths.hpp
+    ui/RecentProjects.cpp
+    ui/RecentProjects.hpp
     ui/browser/BrowserPanel.cpp
     ui/browser/BrowserPanel.hpp
     ui/AudioDecoder.cpp

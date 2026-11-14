@@ -6,7 +6,9 @@
 #include "ui/Theme.hpp"
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QIcon>
+#include <QTimer>
 
 int main(int argc, char* argv[])
 {
@@ -33,6 +35,12 @@ int main(int argc, char* argv[])
     vloomdaw::AudioController audio;
     vloomdaw::MainWindow window(audio);
     window.show();
+    // "VloomDAW song.vloom" (and opening a .vloom with the app) opens it.
+    const QStringList args = QApplication::arguments();
+    if (args.size() > 1 && args.at(1).endsWith(QStringLiteral(".vloom"), Qt::CaseInsensitive)) {
+        const QString path = QFileInfo(args.at(1)).absoluteFilePath();
+        QTimer::singleShot(0, &window, [&window, path] { window.openProjectFile(path); });
+    }
 
     return QApplication::exec();
 }

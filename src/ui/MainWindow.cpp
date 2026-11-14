@@ -6,6 +6,7 @@
 #include "audio/MixerAudio.hpp"
 #include "audio/TempoDetector.hpp"
 #include "audio/TimeStretch.hpp"
+#include "core/BrowserFilter.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/NoteNames.hpp"
 #include "core/PositionFormat.hpp"
@@ -13,6 +14,8 @@
 #include "core/Scales.hpp"
 #include "ui/AudioDecoder.hpp"
 #include "ui/DeviceScanner.hpp"
+#include "ui/FilePaths.hpp"
+#include "ui/RecentProjects.hpp"
 #include "ui/Theme.hpp"
 #include "ui/browser/BrowserPanel.hpp"
 #include "ui/browser/SamplePreviewer.hpp"
@@ -49,6 +52,7 @@
 #endif
 
 #include <vloom/engine/core/Version.hpp>
+#include <vloom/engine/render/SongExport.hpp>
 #include <vloom/engine/sample/SampleBuffer.hpp>
 #include <vloom/engine/sample/SampleLoader.hpp>
 
@@ -59,6 +63,7 @@
 #include <QCursor>
 #include <QDir>
 #include <QEvent>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -72,6 +77,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPixmap>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScreen>
@@ -82,6 +88,7 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QThread>
 #include <QTimer>
@@ -93,6 +100,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <span>
 #include <string>
 
 namespace vloomdaw {
@@ -264,30 +272,29 @@ void MainWindow::createMenus()
         action->setShortcut(shortcut);
         return action;
     };
-    // Project files arrive with the project model (milestone M4). Until then
-    // these say so instead of doing nothing.
-    const auto notYet = [this](const QString& feature) {
-        return [this, feature] {
-            statusBar()->showMessage(
-                tr("%1 is not available yet: projects arrive in milestone M4.").arg(feature), 5000);
-        };
-    };
-
     addFileAction(tr("&New Project"), QKeySequence(Qt::CTRL | Qt::Key_N), [this] { newProject(); });
-    addFileAction(tr("&Open…"), QKeySequence(Qt::CTRL | Qt::Key_O), notYet(tr("Open")));
+    addFileAction(tr("&Open…"), QKeySequence(Qt::CTRL | Qt::Key_O), [this] { openProject(); });
 
-    auto* recentMenu = fileMenu->addMenu(tr("Open &Recent"));
-    recentMenu->addAction(tr("No recent projects"))->setEnabled(false);
-    recentMenu->addSeparator();
-    recentMenu->addAction(tr("Clear Recent Projects"))->setEnabled(false);
-
-    fileMenu->addSeparator();
-    addFileAction(tr("&Save"), QKeySequence(Qt::CTRL | Qt::Key_S), notYet(tr("Save")));
-    addFileAction(tr("Save &As…"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), notYet(tr("Save As")));
+    recentMenu_ = fileMenu->addMenu(tr("Open &Recent"));
+    connect(recentMenu_, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentMenu);
+    rebuildRecentMenu();
 
     fileMenu->addSeparator();
-    addFileAction(tr("&Import…"), QKeySequence(Qt::CTRL | Qt::Key_I), notYet(tr("Import")));
-    addFileAction(tr("&Export…"), QKeySequence(Qt::CTRL | Qt::Key_E), notYet(tr("Export")));
+    addFileAction(tr("&Save"), QKeySequence(Qt::CTRL | Qt::Key_S), [this] { saveProject(); });
+    addFileAction(
+        tr("Save &As…"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), [this] { saveProjectAs(); });
+
+    fileMenu->addSeparator();
+    addFileAction(tr("&Import Audio…"), QKeySequence(Qt::CTRL | Qt::Key_I), [this] { importAudioFiles(); });
+    addFileAction(tr("&Export WAV…"), QKeySequence(Qt::CTRL | Qt::Key_E), [this] { exportSong(); });
+
+    // The title's "*" follows unsaved changes; the snapshot is taken once
+    // the window is built.
+    modifiedTimer_ = new QTimer(this);
+    modifiedTimer_->setInterval(1000);
+    connect(modifiedTimer_, &QTimer::timeout, this, &MainWindow::updateWindowTitle);
+    modifiedTimer_->start();
+    QTimer::singleShot(0, this, [this] { markProjectSaved(); });
 
     fileMenu->addSeparator();
     // close(), not QApplication::quit(): closeEvent() saves the window state
@@ -2265,6 +2272,11 @@ void MainWindow::restoreWindowState()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    if (!maybeSaveChanges()) {
+        event->ignore();
+        return;
+    }
+
     // A visible Settings window would otherwise keep the app running.
     settingsDialog_->close();
 
@@ -2753,6 +2765,16 @@ void MainWindow::updatePluginIdle()
 
 void MainWindow::newProject()
 {
+    if (!maybeSaveChanges())
+        return;
+    resetProject();
+    projectPath_.clear();
+    markProjectSaved();
+    statusBar()->showMessage(tr("New project"), 3000);
+}
+
+void MainWindow::resetProject()
+{
     stopAndRewind();
     transport_->setTempo(kDefaultTempo);
     pendingTempo_ = kDefaultTempo; // sent by refreshFromEngine()
@@ -2764,11 +2786,397 @@ void MainWindow::newProject()
     rackAudio_.reset();
     currentPattern_ = 0;
     currentChannel_ = 0;
+    transport_->songModeAction()->setChecked(false);
+    mixer_ = MixerModel(kMixerInserts); // the old project's inserts and effects go too
+    syncMixerPanel();
+    syncInsertNames();
+    syncPatternSelector();
     refreshEditors();
     selectChannel(0);
     syncChannelRack();
-    releaseUnusedPlugins(); // the old project's instruments
-    statusBar()->showMessage(tr("New project"), 3000);
+    updateMixer();
+    releaseUnusedPlugins(); // the old project's instruments and effects
+}
+
+// ---------------------------------------------------------------- project files
+
+namespace {
+
+const QString kProjectFilter = QObject::tr("VloomDAW project (*.vloom)");
+constexpr QLatin1StringView kProjectFolderKey{"project/lastFolder"};
+
+/// Where file dialogs open: the last folder used, else the user's Music folder.
+QString projectFolder()
+{
+    const QString last = QSettings().value(kProjectFolderKey).toString();
+    if (!last.isEmpty() && QDir(last).exists())
+        return last;
+    return QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+}
+
+void rememberFolder(const QString& file)
+{
+    QSettings().setValue(kProjectFolderKey, QFileInfo(file).absolutePath());
+}
+
+bool samePath(const QString& a, const QString& b)
+{
+#if defined(Q_OS_WIN)
+    return QDir::cleanPath(a).compare(QDir::cleanPath(b), Qt::CaseInsensitive) == 0;
+#else
+    return QDir::cleanPath(a) == QDir::cleanPath(b);
+#endif
+}
+
+} // namespace
+
+ProjectData MainWindow::projectData(bool withPluginStates) const
+{
+    ProjectData out;
+    out.project = project_;
+    out.mixer = mixer_;
+    out.song.tempo = transport_->tempo();
+    out.song.keyRoot = transport_->keyDisplay()->rootNote();
+    out.song.scale = transport_->keyDisplay()->scale();
+    out.song.songMode = songMode_;
+    if (!withPluginStates)
+        return out;
+    const auto stateOf = [this](const PluginSlot& slot) {
+        const auto instance = pluginHost_.instance(slot.instance);
+        return instance != nullptr ? instance->processor().saveState() : std::vector<std::uint8_t>{};
+    };
+    for (const Channel& channel : project_.channels())
+        out.states.instruments.push_back(
+            channel.instrument ? stateOf(*channel.instrument) : std::vector<std::uint8_t>{});
+    for (std::size_t i = 0; i < mixer_.size(); ++i) {
+        auto& states = out.states.effects.emplace_back();
+        for (const PluginSlot& effect : mixer_.track(i).effects)
+            states.push_back(stateOf(effect));
+    }
+    return out;
+}
+
+std::string MainWindow::projectSnapshot() const
+{
+    return ProjectFile::write(projectData(false), projectPath_.parent_path());
+}
+
+bool MainWindow::isProjectModified() const { return projectSnapshot() != savedSnapshot_; }
+
+void MainWindow::markProjectSaved()
+{
+    savedSnapshot_ = projectSnapshot();
+    updateWindowTitle();
+}
+
+void MainWindow::updateWindowTitle()
+{
+    const QString name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
+    setWindowTitle(tr("%1[*] - VloomDAW").arg(name));
+    setWindowModified(isProjectModified());
+}
+
+bool MainWindow::maybeSaveChanges()
+{
+    if (!isProjectModified())
+        return true;
+    const QString name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
+    const auto answer = QMessageBox::warning(this, tr("Unsaved changes"),
+        tr("Save the changes to “%1” before closing it?").arg(name),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Cancel)
+        return false;
+    return answer == QMessageBox::Discard || saveProject();
+}
+
+bool MainWindow::saveProject()
+{
+    if (projectPath_.empty())
+        return saveProjectAs();
+    return writeProject(toQString(projectPath_));
+}
+
+bool MainWindow::saveProjectAs()
+{
+    const QString suggested = projectPath_.empty() ? QDir(projectFolder()).filePath(tr("Untitled.vloom"))
+                                                   : toQString(projectPath_);
+    QString path = QFileDialog::getSaveFileName(this, tr("Save Project As"), suggested, kProjectFilter);
+    if (path.isEmpty())
+        return false;
+    if (!path.endsWith(QStringLiteral(".vloom"), Qt::CaseInsensitive))
+        path += QStringLiteral(".vloom");
+    return writeProject(path);
+}
+
+bool MainWindow::writeProject(const QString& path)
+{
+    std::string error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const bool saved = ProjectFile::save(toPath(path), projectData(true), &error);
+    QApplication::restoreOverrideCursor();
+    if (!saved) {
+        QMessageBox::critical(this, tr("Could not save"),
+            tr("The project could not be saved to %1.\n\n%2")
+                .arg(QDir::toNativeSeparators(path), QString::fromStdString(error)));
+        return false;
+    }
+    projectPath_ = toPath(path);
+    markProjectSaved();
+    recent::add(path);
+    rememberFolder(path);
+    statusBar()->showMessage(tr("Saved %1").arg(QFileInfo(path).fileName()), 3000);
+    return true;
+}
+
+void MainWindow::openProject()
+{
+    if (!maybeSaveChanges())
+        return;
+    const QString path
+        = QFileDialog::getOpenFileName(this, tr("Open Project"), projectFolder(), kProjectFilter);
+    if (!path.isEmpty())
+        openProjectFile(path);
+}
+
+void MainWindow::openProjectFile(const QString& path)
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    ProjectFile::ReadResult read = ProjectFile::load(toPath(path));
+    if (!read.data) {
+        QApplication::restoreOverrideCursor();
+        if (!QFileInfo::exists(path))
+            recent::remove(path);
+        QMessageBox::warning(this, tr("Could not open"),
+            tr("%1 could not be opened.\n\n%2")
+                .arg(QDir::toNativeSeparators(path), QString::fromStdString(read.error)));
+        return;
+    }
+    QStringList problems;
+    for (const std::string& warning : read.warnings)
+        problems << QString::fromStdString(warning);
+    applyProject(std::move(*read.data), problems);
+    QApplication::restoreOverrideCursor();
+    projectPath_ = toPath(path);
+    markProjectSaved();
+    recent::add(path);
+    rememberFolder(path);
+    statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(path).fileName()), 3000);
+    if (!problems.isEmpty()) {
+        QMessageBox box(QMessageBox::Information, tr("Opened with changes"),
+            tr("%1 opened, but some things could not be restored.").arg(QFileInfo(path).fileName()),
+            QMessageBox::Ok, this);
+        box.setDetailedText(problems.join(QLatin1Char('\n')));
+        box.exec();
+    }
+}
+
+bool MainWindow::isScannedPlugin(const PluginSlot& slot) const
+{
+    const QString wanted = QString::fromStdString(slot.path);
+    return std::any_of(pluginStore_.plugins.begin(), pluginStore_.plugins.end(), [&](const PluginInfo& info) {
+        return info.format == slot.format && samePath(toQString(info.path), wanted);
+    });
+}
+
+void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
+{
+    stopAndRewind();
+    const double rate = audio_.sampleRate() > 0 ? audio_.sampleRate() : audio_.requestedSampleRate();
+    // Only plugins the user's scan found are loaded: a project file may name
+    // any library, and loading one runs its code.
+    const auto load = [&](PluginSlot& slot, std::span<const std::uint8_t> state) {
+        slot.instance = 0;
+        const QString name = QString::fromStdString(slot.name);
+        if (!isScannedPlugin(slot)) {
+            problems << tr("%1: not among your scanned plugins (Options > Plugin Manager)").arg(name);
+            return;
+        }
+        const PluginHost::Loaded loaded = pluginHost_.loadWithState(
+            slot.format, pathFromUtf8(slot.path), slot.id, slot.name, rate, state);
+        if (loaded.handle == 0) {
+            problems << tr("%1: %2").arg(name, QString::fromStdString(loaded.error));
+            return;
+        }
+        if (!loaded.error.empty())
+            problems << tr("%1: %2").arg(name, QString::fromStdString(loaded.error));
+        slot.instance = loaded.handle;
+    };
+    const auto stateAt = [](const auto& list, std::size_t i) -> std::span<const std::uint8_t> {
+        return i < list.size() ? std::span<const std::uint8_t>(list[i]) : std::span<const std::uint8_t>();
+    };
+    for (std::size_t c = 0; c < incoming.project.channels().size(); ++c)
+        if (auto slot = incoming.project.channels()[c].instrument) {
+            load(*slot, stateAt(incoming.states.instruments, c));
+            incoming.project.setChannelInstrument(c, std::move(slot));
+        }
+    for (std::size_t i = 0; i < incoming.mixer.size(); ++i) {
+        std::vector<PluginSlot> effects = incoming.mixer.track(i).effects;
+        while (incoming.mixer.removeEffect(i, 0)) { }
+        const std::vector<std::vector<std::uint8_t>> none;
+        const auto& states = i < incoming.states.effects.size() ? incoming.states.effects[i] : none;
+        for (std::size_t e = 0; e < effects.size(); ++e) {
+            load(effects[e], stateAt(states, e));
+            incoming.mixer.addEffect(i, std::move(effects[e]));
+        }
+    }
+
+    for (const Channel& channel : incoming.project.channels())
+        if (!channel.samplePath.empty() && !QFileInfo::exists(QString::fromStdString(channel.samplePath)))
+            problems << tr("Sample not found: %1")
+                            .arg(QDir::toNativeSeparators(QString::fromStdString(channel.samplePath)));
+
+    project_ = std::move(incoming.project);
+    mixer_ = std::move(incoming.mixer);
+    transport_->setTempo(incoming.song.tempo);
+    pendingTempo_ = incoming.song.tempo; // sent by refreshFromEngine()
+    transport_->recordAction()->setChecked(false);
+    transport_->keyDisplay()->setRootNote(incoming.song.keyRoot);
+    transport_->keyDisplay()->setScale(incoming.song.scale);
+    pianoRoll_->setKey(incoming.song.keyRoot, incoming.song.scale);
+    rackAudio_.reset();
+    currentPattern_ = 0;
+    currentChannel_ = 0;
+    transport_->songModeAction()->setChecked(incoming.song.songMode); // syncs through songModeChanged
+    syncMixerPanel();
+    syncInsertNames();
+    syncPatternSelector();
+    refreshEditors();
+    selectChannel(0);
+    syncChannelRack();
+    updateMixer();
+    syncEffectCounts();
+    releaseUnusedPlugins(); // the old project's plugins
+    updatePluginIdle();
+}
+
+void MainWindow::syncMixerPanel()
+{
+    while (mixerPanel_->trackCount() > mixer_.size())
+        mixerPanel_->removeInsert(mixerPanel_->trackCount() - 1);
+    while (mixerPanel_->trackCount() < mixer_.size())
+        mixerPanel_->addInsert();
+    for (std::size_t i = 0; i < mixer_.size(); ++i) {
+        const MixerTrack& t = mixer_.track(i);
+        if (i != MixerModel::kMaster)
+            mixerPanel_->setTrackName(i, QString::fromStdString(t.name));
+        mixerPanel_->setTrackColor(i, t.color);
+        mixerPanel_->setTrackValues(i, t.fader, t.pan, t.muted, t.soloed);
+        mixerPanel_->setEffectCount(i, t.effects.size());
+    }
+}
+
+void MainWindow::rebuildRecentMenu()
+{
+    recentMenu_->clear();
+    const QStringList projects = recent::projects();
+    if (projects.isEmpty())
+        recentMenu_->addAction(tr("No recent projects"))->setEnabled(false);
+    for (int i = 0; i < projects.size(); ++i) {
+        const QString path = projects[i];
+        const QFileInfo info(path);
+        // &1 .. &9, &0: keyboard access to the first ten.
+        const QString label = tr("&%1  %2").arg((i + 1) % 10).arg(info.completeBaseName());
+        QAction* action = recentMenu_->addAction(label, this, [this, path] {
+            if (maybeSaveChanges())
+                openProjectFile(path);
+        });
+        action->setToolTip(QDir::toNativeSeparators(path));
+        action->setStatusTip(QDir::toNativeSeparators(path));
+        action->setEnabled(info.exists());
+    }
+    recentMenu_->addSeparator();
+    QAction* clear = recentMenu_->addAction(tr("Clear Recent Projects"), this, [] { recent::clear(); });
+    clear->setEnabled(!projects.isEmpty());
+}
+
+void MainWindow::importAudioFiles()
+{
+    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Import Audio"), projectFolder(),
+        tr("Audio files (*.wav *.mp3 *.flac *.ogg *.aif *.aiff *.m4a *.opus);;All files (*)"));
+    int added = 0;
+    for (const QString& path : files) {
+        if (!isAudioFile(QFileInfo(path).fileName().toStdString()))
+            continue;
+        ++added;
+        // Each becomes a new channel once it has loaded (decoded off the UI thread).
+        loadSampleThen(path, [this, path] { assignSample(project_.channels().size(), path); });
+    }
+    if (!files.isEmpty())
+        rememberFolder(files.front());
+    if (added < files.size())
+        statusBar()->showMessage(tr("%n file(s) skipped: not audio VloomDAW can read.", nullptr,
+                                     static_cast<int>(files.size() - added)),
+            5000);
+}
+
+void MainWindow::exportSong()
+{
+    const double rate = audio_.sampleRate() > 0 ? audio_.sampleRate() : audio_.requestedSampleRate();
+    const bool song = songMode_ || !project_.clips().empty() || !project_.audioClips().empty();
+    std::vector<ChannelRackAudio::LoadError> errors;
+    auto state = rackAudio_.build(project_, currentPattern_, rate, song, errors);
+    if (state == nullptr || vloom::songEndTicks(*state, transport_->tempo()) <= 0) {
+        QMessageBox::information(this, tr("Nothing to export"),
+            tr("The song is empty: place patterns or audio in the playlist, or put steps or notes in the "
+               "pattern."));
+        return;
+    }
+
+    const QString name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
+    QString path = QFileDialog::getSaveFileName(this, tr("Export WAV"),
+        QDir(projectFolder()).filePath(name + QStringLiteral(".wav")), tr("WAV audio (*.wav)"));
+    if (path.isEmpty())
+        return;
+    if (!path.endsWith(QStringLiteral(".wav"), Qt::CaseInsensitive))
+        path += QStringLiteral(".wav");
+    const QStringList formats{tr("24-bit (recommended)"), tr("16-bit (CD)"), tr("32-bit float")};
+    bool ok = false;
+    const QString chosen
+        = QInputDialog::getItem(this, tr("Export WAV"), tr("Sample format:"), formats, 0, false, &ok);
+    if (!ok)
+        return;
+
+    vloom::SongExportOptions options;
+    options.format = chosen == formats[1] ? vloom::WavFormat::Pcm16
+        : chosen == formats[2]            ? vloom::WavFormat::Float32
+                                          : vloom::WavFormat::Pcm24;
+    options.tempo = transport_->tempo();
+    options.masterGain = volumeToGain(transport_->masterVolume())
+        * static_cast<float>(mixer_.effectiveGain(MixerModel::kMaster));
+    options.masterPan = static_cast<float>(mixer_.track(MixerModel::kMaster).pan);
+
+    // The live engine's plugin instances render the export too: the device
+    // stops meanwhile, so only one engine processes them.
+    stopAndRewind();
+    const auto copy = vloom::copyWithOwnVoices(*state);
+    const auto mixer = engineMixerState(mixer_, pluginHost_.resolver());
+    audio_.closeDevice();
+
+    QProgressDialog progress(
+        tr("Exporting %1…").arg(QFileInfo(path).fileName()), tr("Cancel"), 0, 1000, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(300);
+    const vloom::SongExportResult result
+        = vloom::exportSong(path.toStdString(), *copy, mixer.get(), rate, options, [&progress](double done) {
+              progress.setValue(static_cast<int>(done * 1000.0));
+              QApplication::processEvents();
+              return !progress.wasCanceled();
+          });
+    progress.reset();
+    openSelectedDevice();
+
+    rememberFolder(path);
+    if (result.cancelled)
+        statusBar()->showMessage(tr("Export cancelled"), 3000);
+    else if (!result.ok)
+        QMessageBox::critical(this, tr("Could not export"),
+            tr("%1 could not be written.\n\n%2")
+                .arg(QDir::toNativeSeparators(path), QString::fromStdString(result.error)));
+    else
+        statusBar()->showMessage(tr("Exported %1 (%2 s)")
+                                     .arg(QFileInfo(path).fileName())
+                                     .arg(static_cast<double>(result.frames) / rate, 0, 'f', 1),
+            6000);
 }
 
 void MainWindow::togglePlay()

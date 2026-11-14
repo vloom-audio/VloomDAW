@@ -64,8 +64,16 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
     vloom::Engine& engine, const Project& project, std::size_t pattern, double sampleRate, bool song)
 {
     std::vector<LoadError> errors;
+    if (auto state = build(project, pattern, sampleRate, song, errors))
+        engine.setSequencerState(std::move(state));
+    return errors;
+}
+
+std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
+    const Project& project, std::size_t pattern, double sampleRate, bool song, std::vector<LoadError>& errors)
+{
     if (sampleRate <= 0.0 || pattern >= project.patterns().size())
-        return errors;
+        return nullptr;
     if (sampleRate != rate_) {
         // Samples are stored at the engine's rate: load them again.
         samples_.clear();
@@ -169,8 +177,7 @@ std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
                 return false;
         return true;
     });
-    engine.setSequencerState(std::move(state));
-    return errors;
+    return state;
 }
 
 void ChannelRackAudio::reset()

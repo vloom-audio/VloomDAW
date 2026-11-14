@@ -117,7 +117,9 @@ the transport in all three editors.
 |---|---|---|
 | New project | ✅ | `Ctrl/Cmd+N`: stop, rewind, reset tempo |
 | Edit menu: Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, Select All | ⏳ | Menu and shortcuts exist (`Ctrl/Cmd+Z`, `Shift+Ctrl/Cmd+Z`, `Ctrl+Y` on Windows, …) and say when they arrive: undo at the start of M2, the rest with the M2 editing tools. Text fields keep their own keys |
-| Open, Open Recent, Save, Save As, Import, Export | ⏳ | Menu items and shortcuts exist; WAV export in M3, project files and import in M4 |
+| New, Open, Open Recent, Save, Save As | ✅ | `.vloom` project files ([format](project-file.md)): channels, patterns, playlist, mixer, plugins and their settings, song tempo and key. Unsaved changes show as "*" in the title and are asked about before New, Open and quitting. Opening a project loads only plugins your scan found |
+| Import Audio | ✅ | File > Import Audio adds audio files as new channels |
+| Export WAV | ✅ | File > Export WAV renders the song (or the pattern, with an empty playlist) to 24-bit, 16-bit or 32-bit float WAV, plugins included, with progress and cancel; audio output pauses meanwhile |
 
 ## Performance and diagnostics
 

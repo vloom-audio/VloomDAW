@@ -223,6 +223,12 @@ void MixerPanel::moveInsert(std::size_t from, std::size_t to)
     }
 }
 
+void MixerPanel::setTrackValues(std::size_t track, double fader, double pan, bool muted, bool soloed)
+{
+    if (track < trackCount())
+        strips_[static_cast<qsizetype>(track)]->setValues(fader, pan, muted, soloed);
+}
+
 void MixerPanel::setTrackColor(std::size_t track, std::optional<std::uint32_t> color)
 {
     if (track < trackCount())

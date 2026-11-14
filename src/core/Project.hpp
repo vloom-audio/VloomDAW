@@ -146,6 +146,16 @@ public:
     /// A new song: four channels (Kick, Clap, Hat, Snare) and one pattern.
     Project();
 
+    /// A project rebuilt from saved parts (core/ProjectFile). Every value
+    /// goes through the same checks as the setters, so a damaged or hostile
+    /// file cannot make an invalid project: out-of-range values are clamped,
+    /// clips of patterns or channels that do not exist are dropped, steps and
+    /// notes beyond what a pattern can hold are cut off. It always has at
+    /// least one pattern and one playlist track.
+    [[nodiscard]] static Project restored(const std::vector<Channel>& channels,
+        const std::vector<Pattern>& patterns, const std::vector<PlaylistTrack>& tracks,
+        const std::vector<Clip>& clips, const std::vector<AudioClip>& audioClips);
+
     [[nodiscard]] const std::vector<Channel>& channels() const { return channels_; }
     [[nodiscard]] const std::vector<Pattern>& patterns() const { return patterns_; }
     [[nodiscard]] const std::vector<Clip>& clips() const { return clips_; }

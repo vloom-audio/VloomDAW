@@ -44,6 +44,12 @@ public:
     std::vector<LoadError> sync(vloom::Engine& engine, const Project& project, std::size_t pattern,
         double sampleRate, bool song = false);
 
+    /// The state sync() would publish, without publishing it (null while
+    /// `sampleRate` <= 0 or `pattern` does not exist): for exporting the song.
+    /// Load errors are appended to `errors`.
+    [[nodiscard]] std::unique_ptr<vloom::SequencerState> build(const Project& project, std::size_t pattern,
+        double sampleRate, bool song, std::vector<LoadError>& errors);
+
     /// The sample at `path` as the engine plays it (loading it if needed);
     /// null if it cannot be loaded. For the playlist's clip lengths and
     /// waveforms. Uses the rate of the last sync().

@@ -9,6 +9,7 @@
 #include "core/FrameStats.hpp"
 #include "core/MixerModel.hpp"
 #include "core/Project.hpp"
+#include "core/ProjectFile.hpp"
 #include "core/TapTempo.hpp"
 #include "ui/AppSettings.hpp"
 #include "ui/dialogs/SettingsDialog/SettingsDialog.hpp"
@@ -26,6 +27,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -79,6 +81,11 @@ public:
     explicit MainWindow(AudioController& audio, QWidget* parent = nullptr);
     /// Deletes the detached windows (they have no parent).
     ~MainWindow() override;
+
+    /// Opens the project at `path`, without asking to save the current one
+    /// (File > Open and Open Recent ask first; so does the command line's
+    /// caller, which has nothing open yet).
+    void openProjectFile(const QString& path);
 
 protected:
     bool event(QEvent* event) override;
@@ -263,8 +270,41 @@ private:
     void syncEffectCounts();
     /// Runs the plugins' main-thread work while any are loaded.
     void updatePluginIdle();
-    /// Starts over: stops, returns to the start and resets the tempo.
+    /// Starts over (asking to save unsaved changes first).
     void newProject();
+    /// Starts over without asking: an empty project, mixer and song settings.
+    void resetProject();
+
+    // ---- project files (the File menu)
+    void openProject();
+    /// Saves to the project's file, or asks for one; false if not saved.
+    bool saveProject();
+    bool saveProjectAs();
+    bool writeProject(const QString& path);
+    /// Adds audio files as new channels.
+    void importAudioFiles();
+    /// Renders the song (or the current pattern, when the playlist is
+    /// empty) to a WAV file.
+    void exportSong();
+    void rebuildRecentMenu();
+    /// Asks to save unsaved changes; false if the user cancelled.
+    bool maybeSaveChanges();
+    /// The project as a file holds it; plugin states only when asked (they
+    /// are not cheap, and not compared to tell whether the project changed).
+    [[nodiscard]] ProjectData projectData(bool withPluginStates) const;
+    [[nodiscard]] std::string projectSnapshot() const;
+    [[nodiscard]] bool isProjectModified() const;
+    void markProjectSaved();
+    void updateWindowTitle();
+    /// Replaces the project, mixer and song settings with `incoming`, loading the
+    /// plugins it names (only ones found by the plugin scan) with their
+    /// saved settings. What could not be restored is added to `problems`.
+    void applyProject(ProjectData incoming, QStringList& problems);
+    /// Matches the mixer panel's strips to mixer_ (count, names, values).
+    void syncMixerPanel();
+    /// Whether `slot` is a plugin the user's scan found (a project file may
+    /// name any library; only scanned ones are loaded).
+    [[nodiscard]] bool isScannedPlugin(const PluginSlot& slot) const;
     void togglePlay();
     void stopAndRewind();
     void tapTempo();
@@ -315,6 +355,10 @@ private:
     std::map<std::string, std::shared_ptr<const ClipAudio>> clipAudio_;
     std::size_t currentPattern_ = 0;
     std::size_t currentChannel_ = 0;
+    std::filesystem::path projectPath_; ///< the project's file; empty: never saved
+    std::string savedSnapshot_; ///< projectSnapshot() as last saved or opened
+    QMenu* recentMenu_ = nullptr;
+    QTimer* modifiedTimer_ = nullptr; ///< updates the "*" in the window title
 
     TransportBar* transport_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
