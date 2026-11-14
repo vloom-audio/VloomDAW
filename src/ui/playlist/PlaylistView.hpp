@@ -167,6 +167,7 @@ private:
     [[nodiscard]] double pixelsPerTick() const;
     [[nodiscard]] int lengthTicks() const;
     [[nodiscard]] QRect gridRect() const;
+    [[nodiscard]] QRect rulerRect() const;
     [[nodiscard]] double tickAt(int x) const;
     [[nodiscard]] int trackAt(int y) const;
     [[nodiscard]] int trackCount() const;

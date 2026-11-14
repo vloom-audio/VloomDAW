@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Playlist time bar scrub: click or drag the timeline ruler (time bar) on top of
+  the playlist to scrub or relocate playback at any time, without having to switch
+  to the Playback tool (Y).
 - The File menu works:
   - **Projects:** New, Open, Open Recent (with Clear), Save and Save As read
     and write `.vloom` project files, a versioned JSON format

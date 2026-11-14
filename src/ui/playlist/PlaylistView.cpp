@@ -201,6 +201,12 @@ QRect PlaylistView::gridRect() const
         kHeaderWidth, timeline::kRulerHeight, v.width() - kHeaderWidth, v.height() - timeline::kRulerHeight};
 }
 
+QRect PlaylistView::rulerRect() const
+{
+    const QRect v = viewport()->rect();
+    return {kHeaderWidth, 0, std::max(0, v.width() - kHeaderWidth), timeline::kRulerHeight};
+}
+
 double PlaylistView::tickAt(int x) const
 {
     return (x - kHeaderWidth + horizontalScrollBar()->value()) / pixelsPerTick();
@@ -858,10 +864,15 @@ void PlaylistView::mousePressEvent(QMouseEvent* event)
     }
     if (project_ == nullptr)
         return;
-    // Playback: from anywhere right of the headers, the ruler too.
-    if (tool_ == Tool::Playback && event->button() == Qt::LeftButton && pos.x() >= kHeaderWidth) {
+    // Playback: from anywhere right of the headers with the Playback tool,
+    // or from the time bar (ruler) with any tool.
+    const bool inTimeBar = rulerRect().contains(pos);
+    if ((tool_ == Tool::Playback || inTimeBar) && event->button() == Qt::LeftButton
+        && pos.x() >= kHeaderWidth) {
         playing_ = true;
+        viewport()->setCursor(Qt::SplitHCursor);
         lastPlaybackTick_ = std::max(0.0, tickAt(pos.x()));
+        setPlayhead(lastPlaybackTick_);
         emit playbackRequested(lastPlaybackTick_);
         return;
     }
@@ -1009,6 +1020,7 @@ void PlaylistView::mouseMoveEvent(QMouseEvent* event)
         const double tick = std::max(0.0, tickAt(pos.x()));
         if (std::abs(tick - lastPlaybackTick_) * pixelsPerTick() >= 3.0) {
             lastPlaybackTick_ = tick;
+            setPlayhead(tick);
             emit playbackRequested(tick);
         }
         return;
@@ -1091,6 +1103,7 @@ void PlaylistView::mouseReleaseEvent(QMouseEvent* event)
     }
     if (playing_) {
         playing_ = false;
+        updateToolCursor(event->position().toPoint());
         emit playbackReleased();
         return;
     }
@@ -1133,6 +1146,14 @@ void PlaylistView::mouseDoubleClickEvent(QMouseEvent* event)
 {
     syncLayout();
     const QPoint pos = event->position().toPoint();
+    if (rulerRect().contains(pos) && event->button() == Qt::LeftButton) {
+        playing_ = true;
+        viewport()->setCursor(Qt::SplitHCursor);
+        lastPlaybackTick_ = std::max(0.0, tickAt(pos.x()));
+        setPlayhead(lastPlaybackTick_);
+        emit playbackRequested(lastPlaybackTick_);
+        return;
+    }
     if (const int track = resizeEdgeAt(pos); track >= 0 && event->button() == Qt::LeftButton) {
         emit trackHeightChanged(static_cast<std::size_t>(track), PlaylistTrack::kDefaultHeight);
         return;
@@ -1208,6 +1229,10 @@ void PlaylistView::setTool(Tool tool)
 
 void PlaylistView::updateToolCursor(const QPoint& pos)
 {
+    if (rulerRect().contains(pos)) {
+        viewport()->setCursor(Qt::SplitHCursor);
+        return;
+    }
     if (resizeEdgeAt(pos) >= 0) {
         viewport()->setCursor(Qt::SizeVerCursor);
         return;

@@ -424,6 +424,10 @@ private:
     // macOS full screen that keeps the window buttons (see toggleFullScreen()).
     bool coversScreen_ = false;
     QRect geometryBeforeFullScreen_;
+
+    // Playback scrubbing state
+    bool scrubbingPlayback_ = false;
+    bool wasPlayingBeforeScrub_ = false;
 };
 
 } // namespace vloomdaw

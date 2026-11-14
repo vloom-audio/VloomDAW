@@ -1947,16 +1947,25 @@ QWidget* MainWindow::createWorkspace()
             playlist_->refresh();
             songEdited();
         });
-    // Playback tool: song mode, play from the pointer while the button is held.
+    // Playback tool & Time Bar scrub: song mode, play from the pointer while the button is held.
     connect(playlist_, &PlaylistView::playbackRequested, this, [this](double tick) {
         if (!songMode_)
             transport_->songModeAction()->setChecked(true); // syncs through songModeChanged
         auto& engine = audio_.engine();
+        if (!scrubbingPlayback_) {
+            scrubbingPlayback_ = true;
+            wasPlayingBeforeScrub_ = engine.isPlaying();
+        }
         engine.locate(tick);
         if (!engine.isPlaying())
             engine.play();
     });
-    connect(playlist_, &PlaylistView::playbackReleased, this, [this] { audio_.engine().stop(); });
+    connect(playlist_, &PlaylistView::playbackReleased, this, [this] {
+        if (!wasPlayingBeforeScrub_)
+            audio_.engine().stop();
+        scrubbingPlayback_ = false;
+        wasPlayingBeforeScrub_ = false;
+    });
     connect(playlist_, &PlaylistView::clipRemoved, this, [this, songEdited](std::size_t index) {
         project_.removeClip(index);
         playlist_->refresh();
