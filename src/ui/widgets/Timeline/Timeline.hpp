@@ -36,10 +36,15 @@ void paintGrid(QPainter& painter, const QRect& rect, const Scale& scale, int min
     GridStyle style = GridStyle::Dense);
 /// Playhead line at `tick` over `rect` (nothing when it is off screen or < 0).
 void paintPlayhead(QPainter& painter, const QRect& rect, const Scale& scale, double tick);
+/// The playhead's head: a small marker pointing down at the line, at the
+/// bottom of `ruler` (the ruler above the area paintPlayhead() draws in).
+/// Paint it after the ruler.
+void paintPlayheadHead(QPainter& painter, const QRect& ruler, const Scale& scale, double tick);
 /// x of the playhead line (fractional pixels), or NaN when it is not shown.
 [[nodiscard]] double playheadX(const QRect& rect, const Scale& scale, double tick);
-/// Area paintPlayhead() covers at `tick` within `rect` (with pixels to
-/// spare for anti-aliasing), or an empty rect when the line is not shown.
+/// Area paintPlayhead() and paintPlayheadHead() cover at `tick` within
+/// `rect` (with pixels to spare for anti-aliasing), or an empty rect when
+/// the line is not shown.
 /// Use it to repaint only what a moving playhead changes.
 [[nodiscard]] QRect playheadRect(const QRect& rect, const Scale& scale, double tick);
 /// True when the line at `to` looks different from `from` (moved at least a

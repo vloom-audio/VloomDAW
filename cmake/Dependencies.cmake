@@ -8,7 +8,7 @@
 # change on the engine's main reaches VloomDAW only through a PR that bumps it.
 set(VLOOM_ENGINE_DIR "${PROJECT_SOURCE_DIR}/../vloom-engine"
     CACHE PATH "Local vloom-engine checkout, used when it exists")
-set(VLOOM_ENGINE_GIT_TAG "821f68efa635c17991e0bb418dd65e26a748f08a"
+set(VLOOM_ENGINE_GIT_TAG "a52c8a8b305c20171c4302b6169b417d99f2410b"
     CACHE STRING "vloom-engine commit to fetch when no local checkout exists")
 
 if(EXISTS "${VLOOM_ENGINE_DIR}/CMakeLists.txt")
@@ -57,6 +57,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/FFmpeg.cmake)
 
 # ---------------------------------------------------------------- Qt 6
 if(VLOOMDAW_BUILD_APP)
-    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Svg)
+    # Network: only the stem model store downloads anything (ui/stems/StemModelStore).
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Svg Network)
     qt_standard_project_setup()
 endif()
