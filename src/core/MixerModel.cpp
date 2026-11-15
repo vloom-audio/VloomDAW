@@ -62,6 +62,27 @@ bool MixerModel::addEffect(std::size_t index, PluginSlot effect)
     return true;
 }
 
+bool MixerModel::replaceEffect(std::size_t index, std::size_t slot, PluginSlot effect)
+{
+    if (!valid(index) || slot >= tracks_[index].effects.size())
+        return false;
+    tracks_[index].effects[slot] = std::move(effect);
+    return true;
+}
+
+bool MixerModel::moveEffect(std::size_t index, std::size_t from, std::size_t to)
+{
+    if (!valid(index))
+        return false;
+    auto& effects = tracks_[index].effects;
+    if (from >= effects.size() || to >= effects.size() || from == to)
+        return false;
+    auto moved = std::move(effects[from]);
+    effects.erase(effects.begin() + static_cast<std::ptrdiff_t>(from));
+    effects.insert(effects.begin() + static_cast<std::ptrdiff_t>(to), std::move(moved));
+    return true;
+}
+
 bool MixerModel::removeEffect(std::size_t index, std::size_t slot)
 {
     if (!valid(index) || slot >= tracks_[index].effects.size())

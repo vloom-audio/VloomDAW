@@ -304,6 +304,12 @@ QToolButton#muteButton, QToolButton#soloButton {
 QToolButton#muteButton:hover, QToolButton#soloButton:hover { border-color: @textDim; }
 QToolButton#muteButton:checked { background: @accentTint; color: @accent; border-color: @accent; }
 QToolButton#soloButton:checked { background: @playingTint; color: @playing; border-color: @playing; }
+/* A strip's FX rack (slots with bypass switches, FL Studio style). */
+QFrame#fxRack {
+    background: #14171a;
+    border: 1px solid @border;
+    border-radius: 3px;
+}
 /* A strip's FX button (MixerStrip::setEffectCount): accented while the track has effects. */
 QToolButton#stripEffects {
     background: @window;

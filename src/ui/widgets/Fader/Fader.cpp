@@ -16,7 +16,7 @@
 namespace vloomdaw {
 
 namespace {
-constexpr int kCapHeight = 22;
+constexpr int kCapHeight = 18;
 constexpr int kTrackWidth = 4;
 constexpr double kFineFactor = 0.1;
 constexpr double kWheelStep = 0.02;
@@ -26,6 +26,7 @@ Fader::Fader(QWidget* parent)
     : QWidget(parent)
     , value_(kUnityFaderPosition)
 {
+    setMinimumHeight(50);
     setCursor(Qt::SizeVerCursor);
     setFocusPolicy(Qt::NoFocus);
     updateToolTip();
@@ -33,7 +34,13 @@ Fader::Fader(QWidget* parent)
 
 int Fader::travel() const { return std::max(1, height() - kCapHeight); }
 
-int Fader::capCentreY() const { return kCapHeight / 2 + static_cast<int>((1.0 - value_) * travel()); }
+int Fader::capCentreY() const
+{
+    const int minY = kCapHeight / 2;
+    const int maxY = std::max(minY, height() - kCapHeight / 2);
+    const int y = minY + static_cast<int>((1.0 - value_) * travel());
+    return std::clamp(y, minY, maxY);
+}
 
 void Fader::setValue(double position)
 {
@@ -68,22 +75,30 @@ void Fader::paintEvent(QPaintEvent* /*event*/)
     p.setRenderHint(QPainter::Antialiasing);
 
     const int cx = width() / 2;
-    const int trackTop = kCapHeight / 2;
-    const int trackBottom = height() - kCapHeight / 2;
+    const int trackTop = std::clamp(kCapHeight / 2, 0, height() / 2);
+    const int trackBottom = std::max(trackTop, height() - kCapHeight / 2);
 
     // Track, the lit part below the cap, and the unity mark.
     p.setPen(Qt::NoPen);
-    p.setBrush(c.display);
-    p.drawRoundedRect(QRectF(cx - kTrackWidth / 2.0, trackTop, kTrackWidth, trackBottom - trackTop), 2, 2);
-    p.setBrush(c.accent);
-    p.drawRoundedRect(
-        QRectF(cx - kTrackWidth / 2.0, capCentreY(), kTrackWidth, trackBottom - capCentreY()), 2, 2);
-    const int unityY = kCapHeight / 2 + static_cast<int>((1.0 - kUnityFaderPosition) * travel());
-    p.fillRect(QRect(0, unityY, 4, 1), c.textDim);
-    p.fillRect(QRect(width() - 4, unityY, 4, 1), c.textDim);
+    if (trackBottom > trackTop) {
+        p.setBrush(c.display);
+        p.drawRoundedRect(
+            QRectF(cx - kTrackWidth / 2.0, trackTop, kTrackWidth, trackBottom - trackTop), 2, 2);
+        const int capY = std::clamp(capCentreY(), trackTop, trackBottom);
+        if (trackBottom > capY) {
+            p.setBrush(c.accent);
+            p.drawRoundedRect(QRectF(cx - kTrackWidth / 2.0, capY, kTrackWidth, trackBottom - capY), 2, 2);
+        }
+        const int unityY = std::clamp(
+            kCapHeight / 2 + static_cast<int>((1.0 - kUnityFaderPosition) * travel()), trackTop, trackBottom);
+        p.fillRect(QRect(0, unityY, 4, 1), c.textDim);
+        p.fillRect(QRect(width() - 4, unityY, 4, 1), c.textDim);
+    }
 
     // Cap with a centre line.
-    const QRectF cap(1, capCentreY() - kCapHeight / 2.0, width() - 2, kCapHeight);
+    const int capH = std::min(height(), kCapHeight);
+    const int capTop = std::clamp(capCentreY() - capH / 2, 0, std::max(0, height() - capH));
+    const QRectF cap(1, capTop, width() - 2, capH);
     p.setPen(QPen(c.border, 1));
     p.setBrush(c.raised);
     p.drawRoundedRect(cap, 3, 3);
@@ -98,8 +113,9 @@ void Fader::mousePressEvent(QMouseEvent* event)
     }
     // A press off the cap jumps it there; then drag relative.
     const double y = event->position().y();
-    if (std::abs(y - capCentreY()) > kCapHeight / 2.0)
-        changeByUser(1.0 - (y - kCapHeight / 2.0) / travel());
+    const int t = travel();
+    if (t > 0 && std::abs(y - capCentreY()) > kCapHeight / 2.0)
+        changeByUser(std::clamp(1.0 - (y - kCapHeight / 2.0) / t, 0.0, 1.0));
     dragging_ = true;
     dragStartY_ = y;
     dragStartValue_ = value_;
@@ -109,7 +125,10 @@ void Fader::mouseMoveEvent(QMouseEvent* event)
 {
     if (!dragging_)
         return;
-    double perPixel = 1.0 / travel();
+    const int t = travel();
+    if (t <= 0)
+        return;
+    double perPixel = 1.0 / t;
     if (event->modifiers().testFlag(Qt::ShiftModifier))
         perPixel *= kFineFactor;
     changeByUser(dragStartValue_ + (dragStartY_ - event->position().y()) * perPixel);

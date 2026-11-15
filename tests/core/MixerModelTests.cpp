@@ -202,6 +202,24 @@ TEST_CASE("Mixer tracks hold an effect chain", "[mixer]")
     REQUIRE(mixer.track(3).effects.size() == 1);
     CHECK(mixer.track(3).effects[0].name == "Delay");
     CHECK_FALSE(mixer.removeEffect(3, 1));
+
+    PluginSlot chorus;
+    chorus.name = "Chorus";
+    chorus.instance = 3;
+    CHECK(mixer.replaceEffect(3, 0, chorus));
+    CHECK(mixer.track(3).effects[0].name == "Chorus");
+    CHECK_FALSE(mixer.replaceEffect(3, 5, chorus));
+
+    CHECK(mixer.addEffect(3, delay));
+    REQUIRE(mixer.track(3).effects.size() == 2);
+    CHECK(mixer.track(3).effects[0].name == "Chorus");
+    CHECK(mixer.track(3).effects[1].name == "Delay");
+
+    CHECK(mixer.moveEffect(3, 0, 1));
+    CHECK(mixer.track(3).effects[0].name == "Delay");
+    CHECK(mixer.track(3).effects[1].name == "Chorus");
+    CHECK_FALSE(mixer.moveEffect(3, 0, 0));
+    CHECK_FALSE(mixer.moveEffect(3, 0, 5));
 }
 
 TEST_CASE("An insert takes at most kMaxEffects effects", "[mixer]")

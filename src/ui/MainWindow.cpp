@@ -9,6 +9,7 @@
 #include "core/BrowserFilter.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/NoteNames.hpp"
+#include "core/PluginMetadata.hpp"
 #include "core/PositionFormat.hpp"
 #include "core/ProcessMemory.hpp"
 #include "core/Scales.hpp"
@@ -31,6 +32,7 @@
 #include "ui/playlist/PlaylistView.hpp"
 #include "ui/plugins/PluginEditorWindow.hpp"
 #include "ui/plugins/PluginManagerDialog.hpp"
+#include "ui/plugins/PluginPickerPopup.hpp"
 #include "ui/plugins/PluginsPanel.hpp"
 #include "ui/widgets/ActivityBar/ActivityBar.hpp"
 #include "ui/widgets/DetachButton/DetachButton.hpp"
@@ -147,7 +149,7 @@ constexpr QLatin1StringView kSidebarPageKey{"mainWindow/sidebarPage"};
 
 constexpr int kDefaultSidebarWidth = 260;
 constexpr int kThemeApplyMs = 200; ///< full restyle once theme edits pause this long
-constexpr int kDefaultMixerHeight = 300;
+constexpr int kDefaultMixerHeight = 380;
 constexpr std::size_t kMixerInserts = 16;
 constexpr double kDefaultTempo = 120.0; ///< BPM of a new project
 
@@ -1347,7 +1349,7 @@ void MainWindow::setMixerVisible(bool visible)
 QWidget* MainWindow::createMixer()
 {
     mixerPanel_ = new MixerPanel(mixer_.size() - 1, this);
-    mixerPanel_->setMinimumHeight(200);
+    mixerPanel_->setMinimumHeight(350);
     connect(mixerPanel_, &MixerPanel::closeRequested, this, [this] { setMixerVisible(false); });
     connect(
         mixerPanel_, &MixerPanel::detachRequested, this, [this] { setMixerDetached(!isMixerDetached()); });
@@ -1387,12 +1389,33 @@ QWidget* MainWindow::createMixer()
         syncEffectCounts();
     });
     connect(mixerPanel_, &MixerPanel::effectsMenuRequested, this, &MainWindow::showEffectsMenu);
+    connect(mixerPanel_, &MixerPanel::effectBypassToggled, this,
+        [this](std::size_t track, std::size_t slot, bool bypassed) {
+            mixer_.setEffectBypassed(track, slot, bypassed);
+            updateMixer();
+            syncEffectCounts();
+        });
+    connect(mixerPanel_, &MixerPanel::effectClicked, this, [this](std::size_t track, std::size_t slot) {
+        if (track >= mixer_.size())
+            return;
+        if (slot < mixer_.track(track).effects.size()) {
+            const auto& effect = mixer_.track(track).effects[slot];
+            openPluginEditor(effect.instance,
+                tr("%1 - %2").arg(
+                    QString::fromStdString(effect.name), QString::fromStdString(mixer_.track(track).name)));
+        } else {
+            showEffectChooserMenu(track, slot, QCursor::pos());
+        }
+    });
+    connect(mixerPanel_, &MixerPanel::effectMenuRequested, this, &MainWindow::showEffectSlotContextMenu);
+    connect(mixerPanel_, &MixerPanel::pluginDroppedOnSlot, this, &MainWindow::handlePluginDroppedOnSlot);
     connect(mixerPanel_, &MixerPanel::pluginDropped, this,
         [this](std::size_t track, std::size_t plugin) { addPluginToInsert(plugin, track); });
     connect(mixerPanel_, &MixerPanel::soloToggled, this, [this](std::size_t track, bool soloed) {
         mixer_.setSoloed(track, soloed);
         updateMixer();
     });
+    syncEffectCounts();
     mixerPanel_->hide();
     return mixerPanel_;
 }
@@ -1947,16 +1970,35 @@ QWidget* MainWindow::createWorkspace()
             playlist_->refresh();
             songEdited();
         });
-    // Playback tool: song mode, play from the pointer while the button is held.
+    // Playback tool & Time Bar scrub: song mode, play from the pointer while the button is held.
     connect(playlist_, &PlaylistView::playbackRequested, this, [this](double tick) {
         if (!songMode_)
             transport_->songModeAction()->setChecked(true); // syncs through songModeChanged
         auto& engine = audio_.engine();
-        engine.locate(tick);
-        if (!engine.isPlaying())
-            engine.play();
+        if (!scrubbingPlayback_) {
+            scrubbingPlayback_ = true;
+            // isPlaying() follows the audio thread: right after a scrub (a
+            // double-click) it still says "playing" while that scrub's stop
+            // is on its way.
+            wasPlayingBeforeScrub_ = engine.isPlaying() && !scrubStopPending_;
+            scrubStopPending_ = false;
+            scrubPlaySent_ = false;
+        }
+        // A full command queue drops these; the next move sends them again.
+        (void)engine.locate(tick);
+        if (!wasPlayingBeforeScrub_ && !scrubPlaySent_)
+            scrubPlaySent_ = engine.play();
     });
-    connect(playlist_, &PlaylistView::playbackReleased, this, [this] { audio_.engine().stop(); });
+    connect(playlist_, &PlaylistView::playbackReleased, this, [this] {
+        if (scrubbingPlayback_ && !wasPlayingBeforeScrub_) {
+            // refreshFromEngine() sends the stop again if the queue was full.
+            scrubStopPending_ = true;
+            scrubStopSent_ = audio_.engine().stop();
+        }
+        scrubbingPlayback_ = false;
+        wasPlayingBeforeScrub_ = false;
+        scrubPlaySent_ = false;
+    });
     connect(playlist_, &PlaylistView::clipRemoved, this, [this, songEdited](std::size_t index) {
         project_.removeClip(index);
         playlist_->refresh();
@@ -2256,6 +2298,14 @@ void MainWindow::restoreWindowState()
     restoreState(settings.value(kStateKey).toByteArray());
     splitter_->restoreState(settings.value(kSplitterKey).toByteArray());
     workspaceSplitter_->restoreState(settings.value(kMixerSplitterKey).toByteArray());
+    // Ensure the mixer has enough height to cleanly show all FX slots and the fader without overlapping.
+    if (workspaceSplitter_->sizes().size() >= 2 && mixerPanel_ != nullptr) {
+        const int minH = mixerPanel_->minimumHeight();
+        if (workspaceSplitter_->sizes()[1] < minH) {
+            const int total = workspaceSplitter_->sizes()[0] + workspaceSplitter_->sizes()[1];
+            workspaceSplitter_->setSizes({std::max(100, total - minH), minH});
+        }
+    }
     setMixerVisible(settings.value(kMixerOpenKey, false).toBool());
     if (settings.value(kMixerDetachedKey, false).toBool())
         setMixerDetached(true);
@@ -2704,6 +2754,114 @@ void MainWindow::showEffectsMenu(std::size_t track, const QPoint& globalPos)
     menu.exec(globalPos);
 }
 
+void MainWindow::replacePluginInInsert(std::size_t plugin, std::size_t track, std::size_t slot)
+{
+    if (track >= mixer_.size() || slot >= mixer_.track(track).effects.size())
+        return;
+    const auto newSlot = loadPlugin(plugin, vloom::PluginInfo::Kind::Effect);
+    if (!newSlot)
+        return;
+    mixer_.replaceEffect(track, slot, *newSlot);
+    updateMixer();
+    releaseUnusedPlugins();
+    syncEffectCounts();
+    openPluginEditor(newSlot->instance,
+        tr("%1 - %2").arg(
+            QString::fromStdString(newSlot->name), QString::fromStdString(mixer_.track(track).name)));
+}
+
+void MainWindow::moveEffectInInsert(std::size_t track, std::size_t from, std::size_t to)
+{
+    if (track >= mixer_.size() || !mixer_.moveEffect(track, from, to))
+        return;
+    updateMixer();
+    syncEffectCounts();
+}
+
+void MainWindow::showEffectSlotContextMenu(std::size_t track, std::size_t slot, const QPoint& globalPos)
+{
+    if (track >= mixer_.size())
+        return;
+    if (slot >= mixer_.track(track).effects.size()) {
+        showEffectChooserMenu(track, slot, globalPos);
+        return;
+    }
+    const PluginSlot& effect = mixer_.track(track).effects[slot];
+    const QString effectName = QString::fromStdString(effect.name);
+    const QString trackName = QString::fromStdString(mixer_.track(track).name);
+
+    QMenu menu(this);
+    const auto instance = pluginHost_.instance(effect.instance);
+    QAction* open
+        = menu.addAction(tr("Open Editor"), this, [this, handle = effect.instance, effectName, trackName] {
+              openPluginEditor(handle, tr("%1 - %2").arg(effectName, trackName));
+          });
+    open->setEnabled(instance != nullptr && instance->processor().hasEditor());
+
+    QAction* bypass = menu.addAction(tr("Bypass"), this, [this, track, slot](bool on) {
+        mixer_.setEffectBypassed(track, slot, on);
+        updateMixer();
+        syncEffectCounts();
+    });
+    bypass->setCheckable(true);
+    bypass->setChecked(effect.bypassed);
+
+    menu.addSeparator();
+
+    QAction* moveUp = menu.addAction(tr("Move Up"), this, [this, track, slot] {
+        if (slot > 0)
+            moveEffectInInsert(track, slot, slot - 1);
+    });
+    moveUp->setEnabled(slot > 0);
+
+    QAction* moveDown = menu.addAction(tr("Move Down"), this, [this, track, slot] {
+        if (slot + 1 < mixer_.track(track).effects.size())
+            moveEffectInInsert(track, slot, slot + 1);
+    });
+    moveDown->setEnabled(slot + 1 < mixer_.track(track).effects.size());
+
+    menu.addSeparator();
+
+    menu.addAction(tr("Replace…"), this,
+        [this, track, slot, globalPos] { showEffectChooserMenu(track, slot, globalPos); });
+
+    menu.addSeparator();
+    menu.addAction(tr("Remove"), this, [this, track, slot] {
+        mixer_.removeEffect(track, slot);
+        updateMixer();
+        releaseUnusedPlugins();
+        syncEffectCounts();
+    });
+
+    menu.exec(globalPos);
+}
+
+void MainWindow::showEffectChooserMenu(std::size_t track, std::size_t slot, const QPoint& globalPos)
+{
+    if (track >= mixer_.size())
+        return;
+
+    auto* picker = new PluginPickerPopup(pluginStore_, PluginPickerPopup::Filter::Effect, this);
+    connect(picker, &PluginPickerPopup::pluginSelected, this, [this, track, slot](std::size_t pluginIndex) {
+        if (slot < mixer_.track(track).effects.size())
+            replacePluginInInsert(pluginIndex, track, slot);
+        else
+            addPluginToInsert(pluginIndex, track);
+    });
+    connect(picker, &PluginPickerPopup::morePluginsRequested, this, &MainWindow::showPluginManager);
+    picker->showAt(globalPos);
+}
+
+void MainWindow::handlePluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin)
+{
+    if (track >= mixer_.size())
+        return;
+    if (slot < mixer_.track(track).effects.size())
+        replacePluginInInsert(plugin, track, slot);
+    else
+        addPluginToInsert(plugin, track);
+}
+
 void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
 {
     if (const auto it = pluginEditors_.find(handle); it != pluginEditors_.end() && !it->second.isNull()) {
@@ -2757,8 +2915,10 @@ void MainWindow::releaseUnusedPlugins()
 
 void MainWindow::syncEffectCounts()
 {
-    for (std::size_t i = 0; i < mixer_.size(); ++i)
+    for (std::size_t i = 0; i < mixer_.size(); ++i) {
+        mixerPanel_->setTrackEffects(i, mixer_.track(i).effects);
         mixerPanel_->setEffectCount(i, mixer_.track(i).effects.size());
+    }
 }
 
 void MainWindow::updatePluginIdle()
@@ -3266,6 +3426,7 @@ void MainWindow::exportSong()
 void MainWindow::togglePlay()
 {
     auto& engine = audio_.engine();
+    scrubStopPending_ = false; // the user's own play or stop wins
     if (engine.isPlaying())
         engine.stop();
     else
@@ -3275,6 +3436,7 @@ void MainWindow::togglePlay()
 void MainWindow::stopAndRewind()
 {
     auto& engine = audio_.engine();
+    scrubStopPending_ = false;
     engine.stop();
     engine.locate(0.0);
 }
@@ -3320,6 +3482,14 @@ void MainWindow::refreshFromEngine()
     auto& engine = audio_.engine();
     engine.collectGarbage(); // free channel-rack states the audio thread is done with
     watchDevice();
+
+    if (scrubStopPending_) {
+        // A scrub's stop: sent again if the queue was full, done once heard.
+        if (!scrubStopSent_)
+            scrubStopSent_ = engine.stop();
+        else if (!engine.isPlaying())
+            scrubStopPending_ = false;
+    }
 
     // Nothing to show while minimised; still send pending changes and drain
     // the meters below so they do not show a stale peak when restored.

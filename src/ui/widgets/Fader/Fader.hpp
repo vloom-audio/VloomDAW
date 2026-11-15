@@ -19,8 +19,8 @@ public:
 
     [[nodiscard]] double value() const { return value_; }
 
-    [[nodiscard]] QSize sizeHint() const override { return {22, 160}; }
-    [[nodiscard]] QSize minimumSizeHint() const override { return {18, 60}; }
+    [[nodiscard]] QSize sizeHint() const override { return {22, 120}; }
+    [[nodiscard]] QSize minimumSizeHint() const override { return {18, 50}; }
 
 public slots:
     /// Sets the position (clamped) without emitting valueChanged().

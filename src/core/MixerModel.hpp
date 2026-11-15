@@ -36,8 +36,9 @@ public:
     static constexpr std::size_t kMaster = 0;
     /// Most inserts: as many as the engine routes (vloom::kMaxInserts).
     static constexpr std::size_t kMaxInserts = 125;
-    /// Most effects on one insert.
-    static constexpr std::size_t kMaxEffects = 10;
+    /// Most effects on one insert: the slots of the mixer's FX rack. A project
+    /// file with more opens with the first ones and a warning.
+    static constexpr std::size_t kMaxEffects = 9;
     /// Longest insert name, in bytes (UTF-8).
     static constexpr std::size_t kMaxNameLength = 64;
 
@@ -74,6 +75,10 @@ public:
     /// Appends `effect` to track `index`'s chain (the master's too). False
     /// for an index out of range or a full chain (kMaxEffects).
     bool addEffect(std::size_t index, PluginSlot effect);
+    /// Replaces effect `slot` of track `index`; false if out of range.
+    bool replaceEffect(std::size_t index, std::size_t slot, PluginSlot effect);
+    /// Moves effect `from` to position `to` on track `index`; false if out of range.
+    bool moveEffect(std::size_t index, std::size_t from, std::size_t to);
     /// Removes effect `slot` of insert `index`; false if there is none.
     bool removeEffect(std::size_t index, std::size_t slot);
     /// Bypasses (or un-bypasses) effect `slot` of insert `index`.

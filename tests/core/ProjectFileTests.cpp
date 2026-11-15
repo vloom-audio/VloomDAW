@@ -292,6 +292,26 @@ TEST_CASE("Hostile values in a project are clamped or left out", "[project-file]
     CHECK_FALSE(read.warnings.empty());
 }
 
+TEST_CASE("An insert with more effects than the mixer takes opens with the first ones and a warning",
+    "[project-file]")
+{
+    // Earlier builds took one more effect per insert; such a file still opens.
+    std::string effects;
+    for (std::size_t i = 0; i <= MixerModel::kMaxEffects; ++i)
+        effects += std::string(i == 0 ? "" : ",")
+            + R"({"format":"clap","path":"fx.clap","id":"fx","name":"FX )" + std::to_string(i) + R"("})";
+    const auto read = ProjectFile::read(
+        R"({"format":"vloomdaw-project","version":1,"mixer":[{},{"effects":[)" + effects + "]}]}", kFolder);
+    REQUIRE(read.data);
+    const auto& kept = read.data->mixer.track(1).effects;
+    REQUIRE(kept.size() == MixerModel::kMaxEffects);
+    CHECK(kept.front().name == "FX 0");
+    CHECK(kept.back().name == "FX " + std::to_string(MixerModel::kMaxEffects - 1));
+    REQUIRE(read.data->states.effects.size() == 2);
+    CHECK(read.data->states.effects[1].size() == MixerModel::kMaxEffects);
+    CHECK_FALSE(read.warnings.empty());
+}
+
 TEST_CASE("Projects are saved to and opened from files, under any name", "[project-file]")
 {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();

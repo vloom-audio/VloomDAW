@@ -18,8 +18,8 @@ class LevelMeter : public QWidget {
 public:
     explicit LevelMeter(QWidget* parent = nullptr);
 
-    [[nodiscard]] QSize sizeHint() const override { return {14, 160}; }
-    [[nodiscard]] QSize minimumSizeHint() const override { return {10, 60}; }
+    [[nodiscard]] QSize sizeHint() const override { return {14, 120}; }
+    [[nodiscard]] QSize minimumSizeHint() const override { return {10, 50}; }
 
 public slots:
     /// Linear peaks since the last tick (0 = silence, 1 = 0 dBFS).

@@ -3,6 +3,7 @@
 #include "ui/mixer/MixerStrip.hpp"
 
 #include "core/Decibels.hpp"
+#include "ui/mixer/MixerSlotRack.hpp"
 #include "ui/plugins/PluginDrag.hpp"
 #include "ui/widgets/ColorMenu/ColorMenu.hpp"
 #include "ui/widgets/Fader/Fader.hpp"
@@ -26,7 +27,7 @@ namespace vloomdaw {
 
 namespace {
 
-constexpr int kInsertWidth = 64;
+constexpr int kInsertWidth = 68;
 constexpr int kMasterWidth = 76;
 
 QString panText(double percent)
@@ -45,17 +46,19 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     setObjectName(QStringLiteral("mixerStrip"));
     setProperty("master", kind == Kind::Master); // styled differently in Theme
     setFixedWidth(kind == Kind::Master ? kMasterWidth : kInsertWidth);
+    setMinimumHeight(310);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(5, 6, 5, 6);
-    layout->setSpacing(6);
+    layout->setContentsMargins(4, 3, 4, 3);
+    layout->setSpacing(2);
 
     name_ = new QLabel(this);
     name_->setObjectName(QStringLiteral("stripName"));
     name_->setAlignment(Qt::AlignCenter);
+    name_->setFixedHeight(18);
     layout->addWidget(name_);
     // Takes the strip's width whatever the text: a long name is cut, not widening it.
-    name_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    name_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     name_->installEventFilter(this); // re-cut on resize / font; inserts: double-click to rename
 
     pan_ = new Knob(tr("PAN"), -100.0, 100.0, 0.0, this);
@@ -65,20 +68,14 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     layout->addWidget(pan_, 0, Qt::AlignHCenter);
 
     {
-        // The track's effects: a menu of them (open, bypass, remove).
-        // Plugins dragged from the Plugins panel onto the strip are added.
-        effects_ = new QToolButton(this);
-        effects_->setObjectName(QStringLiteral("stripEffects"));
-        effects_->setFocusPolicy(Qt::NoFocus);
-        effects_->setToolTip(kind == Kind::Master
-                ? tr("Effects on the whole mix: drag a plugin from the Plugins panel onto the master")
-                : tr("Effects: drag a plugin from the Plugins panel onto this insert"));
-        effects_->setAccessibleName(tr("Effects"));
-        effects_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-        connect(effects_, &QToolButton::clicked, this,
-            [this] { emit effectsMenuRequested(effects_->mapToGlobal(QPoint(0, effects_->height()))); });
-        layout->addWidget(effects_);
-        setEffectCount(0);
+        // The track's 10-slot FX rack (FL Studio style).
+        // Each row has a bypass switch button on the left and effect button on the right.
+        fxRack_ = new MixerSlotRack(this);
+        connect(fxRack_, &MixerSlotRack::bypassToggled, this, &MixerStrip::effectBypassToggled);
+        connect(fxRack_, &MixerSlotRack::slotClicked, this, &MixerStrip::effectClicked);
+        connect(fxRack_, &MixerSlotRack::slotMenuRequested, this, &MixerStrip::effectMenuRequested);
+        connect(fxRack_, &MixerSlotRack::pluginDropped, this, &MixerStrip::pluginDroppedOnSlot);
+        layout->addWidget(fxRack_, 0, Qt::AlignHCenter);
         setAcceptDrops(true);
     }
 
@@ -99,11 +96,12 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     db_ = new QLabel(this);
     db_->setObjectName(QStringLiteral("stripDb"));
     db_->setAlignment(Qt::AlignCenter);
+    db_->setFixedHeight(16);
     layout->addWidget(db_);
     showDb(fader_->value());
 
     auto* buttons = new QHBoxLayout;
-    buttons->setSpacing(3);
+    buttons->setSpacing(2);
     const auto addToggle = [&](const QString& text, const QString& objectName, const QString& tip) {
         auto* b = new QToolButton(this);
         b->setText(text);
@@ -112,6 +110,7 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
         b->setFocusPolicy(Qt::NoFocus);
         b->setToolTip(tip);
         b->setAccessibleName(tip);
+        b->setFixedHeight(20);
         buttons->addWidget(b);
         return b;
     };
@@ -126,9 +125,14 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     number_ = new QLabel(this);
     number_->setObjectName(QStringLiteral("stripNumber"));
     number_->setAlignment(Qt::AlignCenter);
+    number_->setFixedHeight(16);
     layout->addWidget(number_);
     setLabel(name, number);
 }
+
+QSize MixerStrip::minimumSizeHint() const { return {width(), 310}; }
+
+QSize MixerStrip::sizeHint() const { return {width(), 360}; }
 
 void MixerStrip::setValues(double fader, double pan, bool muted, bool soloed)
 {
@@ -145,26 +149,24 @@ void MixerStrip::setValues(double fader, double pan, bool muted, bool soloed)
     showDb(fader_->value());
 }
 
-void MixerStrip::setEffectCount(std::size_t count)
+void MixerStrip::setEffects(const std::vector<PluginSlot>& effects)
 {
-    if (effects_ == nullptr)
-        return;
-    effects_->setText(count == 0 ? tr("FX") : tr("FX %1").arg(count));
-    effects_->setProperty("active", count > 0); // styled in Theme
-    effects_->style()->unpolish(effects_);
-    effects_->style()->polish(effects_);
+    if (fxRack_ != nullptr)
+        fxRack_->setEffects(effects);
 }
+
+void MixerStrip::setEffectCount(std::size_t count) { Q_UNUSED(count); }
 
 void MixerStrip::dragEnterEvent(QDragEnterEvent* event)
 {
-    if (effects_ != nullptr && droppedPlugin(event->mimeData()))
+    if (droppedPlugin(event->mimeData()))
         event->acceptProposedAction();
 }
 
 void MixerStrip::dropEvent(QDropEvent* event)
 {
     const auto plugin = droppedPlugin(event->mimeData());
-    if (effects_ == nullptr || !plugin)
+    if (!plugin)
         return;
     event->acceptProposedAction();
     emit pluginDropped(*plugin);

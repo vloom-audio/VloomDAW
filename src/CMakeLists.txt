@@ -109,6 +109,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp
     ui/mixer/MixerPanel.cpp
     ui/mixer/MixerPanel.hpp
+    ui/mixer/MixerSlotRack.cpp
+    ui/mixer/MixerSlotRack.hpp
     ui/mixer/MixerStrip.cpp
     ui/mixer/MixerStrip.hpp
     ui/pianoroll/PianoRollView.cpp
@@ -121,6 +123,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/PluginEditorWindow.hpp
     ui/plugins/PluginManagerDialog.cpp
     ui/plugins/PluginManagerDialog.hpp
+    ui/plugins/PluginPickerPopup.cpp
+    ui/plugins/PluginPickerPopup.hpp
     ui/plugins/PluginProber.cpp
     ui/plugins/PluginProber.hpp
     ui/plugins/PluginsPanel.cpp
