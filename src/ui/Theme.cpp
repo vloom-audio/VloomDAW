@@ -346,6 +346,69 @@ QLabel#statusPill[running="true"] { background: @playingTint; color: @playing; }
 QLabel#statusPill[running="false"] { background: @dangerTint; color: @text; }
 QLabel#themeWarning { background: @dangerTint; color: @text; border-radius: 6px; padding: 6px 10px; }
 
+/* Editors of the built-in plugins (ui/plugins/EqEditorWindow). */
+QWidget#eqEditor { background: @base; }
+QFrame#pluginEditorHeader { background: @base; border: none; border-bottom: 1px solid @panel; }
+QFrame#pluginEditorHeader QToolButton {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 4px;
+}
+QFrame#pluginEditorHeader QToolButton:checked { background: @accentTint; border-color: @accent; }
+QFrame#pluginEditorHeader QToolButton#presetStep,
+QFrame#pluginEditorHeader QToolButton#presetName { background: transparent; border: none; }
+QFrame#pluginEditorHeader QToolButton#presetName { min-width: 170px; padding: 4px 10px; }
+QFrame#pluginEditorHeader QToolButton#presetStep:hover,
+QFrame#pluginEditorHeader QToolButton#presetName:hover { background: @raised; }
+QFrame#pluginEditorHeader QToolButton#presetName::menu-indicator { image: none; width: 0; }
+QFrame#slotGroup { border: 1px solid @border; border-radius: 7px; }
+QFrame#slotGroup QToolButton {
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    color: @textDim;
+    font-weight: 700;
+    padding: 3px 8px;
+}
+QFrame#slotGroup QToolButton:checked { background: @border; border: none; color: @text; }
+QLabel#pluginEditorTitle { font-weight: 700; }
+QWidget#synthEditor { background: @base; }
+QWidget#synthEditor QFrame#pluginEditorHeader QToolButton#presetName { min-width: 130px; }
+QFrame#synthCard { background: @window; border: 1px solid @border; border-radius: 10px; }
+QLabel#synthCardTitle { font-weight: 700; }
+QLabel#synthValue { font-size: 8pt; font-weight: 600; }
+QLabel#synthHint { color: @textDim; }
+QToolButton#synthFlag {
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @textDim;
+    font-size: 8pt;
+    font-weight: 700;
+    padding: 1px 6px;
+}
+QToolButton#synthTab {
+    border: none;
+    border-radius: 5px;
+    color: @textDim;
+    padding: 2px 9px;
+}
+QToolButton#synthTab:checked { background: @base; color: @text; font-weight: 700; }
+QSpinBox#synthNumber {
+    background: @base;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 0 2px;
+}
+QToolButton#synthFlag:checked { background: @accentTint; border-color: @accent; color: @text; }
+QLabel#pluginEditorHint { color: @textDim; border-top: 1px solid @panel; padding: 7px 12px; }
+QFrame#eqBandPanel { background: @panel; border: 1px solid @border; border-radius: 12px; }
+QFrame#eqBandPanel QLabel#eqBandName { font-weight: 700; }
+QFrame#eqBandPanel QLabel#eqBandShape { color: @textDim; }
+QFrame#eqBandPanel QLabel#parameterValue { font-weight: 600; }
+QFrame#eqBandPanel QToolButton { border: 1px solid @border; border-radius: 6px; padding: 4px; }
+QFrame#eqBandPanel QToolButton:hover { background: @raised; }
+
 QWidget#emptyState QLabel#emptyTitle { font-size: 22pt; font-weight: 600; }
 QWidget#emptyState QLabel#emptyHint { color: @textDim; }
 

@@ -52,7 +52,9 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
   - `steps`: the number of step pads, 1 .. 256;
   - `channels`: one entry per channel, in channel order, each holding:
     - `steps`: a string with one character per pad, `x` = on, `.` = off;
-    - `notes`: a list of `[key, start, length]`, in ticks (960 per beat).
+    - `notes`: a list of `[key, start, length]`, in ticks (960 per beat),
+      or `[key, start, length, velocity]` when the velocity (1 .. 127) is
+      not the default of 100.
 - **Track (playlist):**
   - `name` and `named` (false: shown as "Track N");
   - `muted`, `solo` and `collapsed`;

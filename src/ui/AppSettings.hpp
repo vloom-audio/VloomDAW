@@ -26,6 +26,9 @@ struct AppSettings {
     QString browserFolder; ///< the one shown
     bool browserAutoPreview = true; ///< play files as the arrow keys reach them
 
+    // Stem extractor
+    QString stemModel; ///< id of the model in use (core/StemModels); empty: none chosen yet
+
     // General
     PositionMode startPositionMode = PositionMode::BarsBeats;
     bool metronomeOnStartup = true;

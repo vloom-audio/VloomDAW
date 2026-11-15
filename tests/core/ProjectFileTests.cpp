@@ -50,7 +50,7 @@ ProjectData sample()
     p.setStep(0, 0, 0, true);
     p.setStep(0, 0, 4, true);
     p.addNote(0, 3, Note{64, 0, 480});
-    p.addNote(0, 3, Note{67, 960, 240});
+    p.addNote(0, 3, Note{67, 960, 240, 64}); // with a velocity of its own
     const std::size_t second = p.addPattern();
     p.setPatternName(second, "Chorus");
     p.setStepCount(second, 32);

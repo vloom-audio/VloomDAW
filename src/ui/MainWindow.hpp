@@ -8,6 +8,7 @@
 #include "core/DeviceWatch.hpp"
 #include "core/FrameStats.hpp"
 #include "core/MixerModel.hpp"
+#include "core/NoteHistory.hpp"
 #include "core/Project.hpp"
 #include "core/ProjectFile.hpp"
 #include "core/TapTempo.hpp"
@@ -19,6 +20,7 @@
 #include <vloom/engine/io/AudioDevice.hpp>
 
 #include <QElapsedTimer>
+#include <QList>
 #include <QMainWindow>
 #include <QPoint>
 #include <QPointer>
@@ -43,6 +45,7 @@ class QLabel;
 class QSplitter;
 class QStackedWidget;
 class QMenu;
+class QProgressDialog;
 class QPaintEvent;
 class QResizeEvent;
 class QShowEvent;
@@ -68,6 +71,8 @@ class PianoRollView;
 class PlaylistView;
 struct ClipAudio;
 class PluginManagerDialog;
+class StemSeparator;
+struct StemFile;
 class PluginEditorWindow;
 class PluginsPanel;
 class TransportBar;
@@ -159,6 +164,15 @@ private:
     void startLoader();
     /// Audio clip `index`'s menu (fit to tempo) at `globalPos`.
     void showAudioClipMenu(std::size_t index, const QPoint& globalPos);
+    /// Splits audio clip `index`'s sample into stems with the model in use
+    /// (asking for one in the model store when none is), then places them.
+    void extractStems(std::size_t index);
+    /// Puts the stems on new tracks under `clip`'s, as clips like it, each
+    /// through a channel of its own, and mutes `clip`. Loads them first
+    /// (`next`: the one to load now).
+    void placeStems(const AudioClip& clip, const QList<StemFile>& stems, int next = 0);
+    /// Opens the model store. True when a model is in use afterwards.
+    bool showStemModels();
     /// Fits audio clip `index` to the song's tempo with `fit` (or stops),
     /// detecting its sample's tempo first when it has none.
     void setAudioClipFit(std::size_t index, AudioClip::Fit fit);
@@ -233,6 +247,10 @@ private:
     /// Sends the channel rack of the current pattern to the engine and
     /// reports samples that could not be loaded.
     void syncChannelRack();
+    /// Whether the Edit menu's commands go to the piano roll: it is the editor in front.
+    [[nodiscard]] bool pianoRollActive() const;
+    /// Takes the newest piano roll edit back, or (`redo`) makes it again, and shows where.
+    void stepNoteHistory(bool redo);
     /// Ticks where the song ends: the end of its last clip, rounded up to a
     /// bar; 0 for an empty playlist. Audio clips count at the current tempo.
     [[nodiscard]] int songEndTicks();
@@ -275,6 +293,9 @@ private:
     void handlePluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin);
     /// Opens (or raises) the editor of loaded plugin `handle`.
     void openPluginEditor(std::uint64_t handle, const QString& title);
+    /// Bypasses effect `slot` of insert `track` or turns it back on, and shows
+    /// it in the mixer and in the effect's open editor.
+    void setEffectBypassed(std::size_t track, std::size_t slot, bool bypassed);
     /// Drops the plugins the project no longer uses (the engine was sent
     /// states without them), closing their editors.
     void releaseUnusedPlugins();
@@ -344,8 +365,9 @@ private:
     Project project_;
     PluginHost pluginHost_; ///< the plugins the project uses, loaded
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
-    /// By plugin handle: a PluginEditorWindow, or a ParameterEditorWindow for
-    /// a plugin without an editor of its own.
+    /// By plugin handle: a PluginEditorWindow, or for a plugin without an
+    /// editor of its own an EqEditorWindow (the built-in equalizer), a
+    /// SynthEditorWindow (the built-in synthesizer) or a ParameterEditorWindow.
     std::map<std::uint64_t, QPointer<QWidget>> pluginEditors_;
     QTimer* pluginIdleTimer_ = nullptr; ///< runs the plugins' main-thread work (PluginHost::idle())
     /// Instruments loaded while no device ran: activated at the requested
@@ -392,6 +414,8 @@ private:
     SamplePreviewer* previewer_ = nullptr; ///< plays the browser's files
     PluginsPanel* pluginsPanel_ = nullptr;
     PluginManagerDialog* pluginManager_ = nullptr; ///< created on first use
+    StemSeparator* stemSeparator_ = nullptr; ///< created on first use
+    QProgressDialog* stemProgress_ = nullptr; ///< while stems are being extracted
     PluginStore pluginStore_;
     AppSettings settings_;
     DeviceWatch deviceWatch_;
@@ -409,6 +433,11 @@ private:
     QStackedWidget* workspace_ = nullptr;
     ChannelRackView* channelRack_ = nullptr;
     PianoRollView* pianoRoll_ = nullptr;
+    NoteHistory noteHistory_; ///< undo and redo of the piano roll's edits
+    /// The notes before the piano roll edit under way (a drag sends many changes: one step to undo).
+    std::optional<std::vector<Note>> noteEditBefore_;
+    NoteHistory::Target noteEditTarget_; ///< and whose notes they are
+    std::shared_ptr<vloom::PluginInstance> previewInstrument_; ///< sounding a key of the piano roll
     PlaylistView* playlist_ = nullptr;
     PanelFrame* channelRackFrame_ = nullptr;
     PanelFrame* pianoRollFrame_ = nullptr;

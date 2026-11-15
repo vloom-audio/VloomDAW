@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include <QColor>
 #include <QString>
 #include <QWidget>
 
@@ -28,6 +29,10 @@ public:
     void setValueText(std::function<QString(double)> format);
     /// What the knob does, shown above the value in the tool tip.
     void setDescription(const QString& text);
+    /// Diameter of the dial in pixels (26 unless set): bigger in plugin editors.
+    void setDialSize(int pixels);
+    /// Colour of the lit arc; an invalid colour (the default) is the theme's accent.
+    void setArcColor(const QColor& color);
 
     [[nodiscard]] QSize sizeHint() const override;
     [[nodiscard]] QSize minimumSizeHint() const override { return sizeHint(); }
@@ -63,6 +68,8 @@ private:
     bool dragging_ = false;
     double dragStartY_ = 0.0;
     double dragStartValue_ = 0.0;
+    int dial_;
+    QColor arc_;
 };
 
 } // namespace vloomdaw

@@ -21,6 +21,7 @@ constexpr QLatin1StringView kMetronomeOnStartup{"general/metronomeOnStartup"};
 constexpr QLatin1StringView kBrowserFolders{"browser/folders"};
 constexpr QLatin1StringView kBrowserFolder{"browser/current"};
 constexpr QLatin1StringView kBrowserAutoPreview{"browser/autoPreview"};
+constexpr QLatin1StringView kStemModel{"stems/model"};
 constexpr QLatin1StringView kThemePalette{"theme/palette"};
 constexpr QLatin1StringView kThemeAccent{"theme/accent"};
 constexpr QLatin1StringView kThemeHue{"theme/hue"};
@@ -75,6 +76,7 @@ AppSettings AppSettings::load()
     }
     a.browserFolder = s.value(kBrowserFolder, a.browserFolders.value(0)).toString();
     a.browserAutoPreview = s.value(kBrowserAutoPreview, a.browserAutoPreview).toBool();
+    a.stemModel = s.value(kStemModel).toString().left(64);
     return a;
 }
 
@@ -90,6 +92,7 @@ void AppSettings::save() const
     s.setValue(kBrowserFolders, browserFolders);
     s.setValue(kBrowserFolder, browserFolder);
     s.setValue(kBrowserAutoPreview, browserAutoPreview);
+    s.setValue(kStemModel, stemModel);
     s.setValue(kThemePalette, QString::fromStdString(theme.paletteId));
     s.setValue(kThemeAccent, QString::fromStdString(theme.accentId));
     s.setValue(kThemeHue, theme.adjustments.hue);

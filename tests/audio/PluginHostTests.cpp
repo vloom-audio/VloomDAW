@@ -72,6 +72,32 @@ TEST_CASE("The plugin to load is found by id, then by name, then as a file's onl
     CHECK(pickPlugin({}, {}, "Synth").plugin == nullptr);
 }
 
+TEST_CASE("The built-in synth is listed as an instrument and plays notes", "[plugins]")
+{
+    const std::vector<PluginInfo> builtins = builtinPlugins();
+    const auto synth = std::find_if(
+        builtins.begin(), builtins.end(), [](const PluginInfo& info) { return info.path == "vloom.synth"; });
+    REQUIRE(synth != builtins.end());
+    CHECK(synth->name == "Synth");
+    CHECK(synth->category == "Instrument"); // what the lists and the picker go by
+    CHECK(synth->format == PluginFormat::Builtin);
+
+    PluginHost host;
+    const PluginHost::Loaded loaded = host.load(PluginFormat::Builtin, {}, "vloom.synth", "Synth", 48000.0);
+    REQUIRE(loaded.handle != 0);
+    CHECK(loaded.info.kind == vloom::PluginInfo::Kind::Instrument);
+    const auto instance = host.instance(loaded.handle);
+    REQUIRE(instance != nullptr);
+    CHECK_FALSE(instance->processor().hasEditor()); // the app draws its editor
+
+    // A note in, sound out (rendered here: nothing reaches an audio device).
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    const std::array<vloom::NoteEvent, 1> note{vloom::NoteEvent{0, vloom::NoteEvent::Type::On, 60, 1.0f}};
+    instance->process(left.data(), right.data(), 512, vloom::TransportInfo{}, note);
+    CHECK(*std::max_element(left.begin(), left.end()) > 0.01f);
+}
+
 TEST_CASE("The built-in effects are listed and load without a file", "[plugins]")
 {
     const std::vector<PluginInfo> builtins = builtinPlugins();

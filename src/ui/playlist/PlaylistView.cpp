@@ -553,8 +553,10 @@ void PlaylistView::paintEvent(QPaintEvent* event)
 
     timeline::paintPlayhead(p, grid, scale, playhead_);
     const QRect ruler(kHeaderWidth, 0, grid.width(), timeline::kRulerHeight);
-    if (event->rect().intersects(ruler))
+    if (event->rect().intersects(ruler)) {
         timeline::paintRuler(p, ruler, scale);
+        timeline::paintPlayheadHead(p, ruler, scale, playhead_);
+    }
 
     // Track headers (skipped when only the grid needs repainting).
     const QRect headers(0, timeline::kRulerHeight, kHeaderWidth, grid.height());

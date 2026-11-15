@@ -113,6 +113,67 @@ TEST_CASE("The channel rack plays the current pattern's steps with each channel'
     CHECK(onsets(audio) == expected);
 }
 
+TEST_CASE("Piano roll notes play, and a note past the step pads makes the pattern longer", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.addNote(0, 0, Note{60, 2 * kTicksPerStep, kTicksPerStep});
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    CHECK(rack.sync(engine, project, 0, kRate).empty());
+    engine.play();
+    // One bar: the note plays again when the pattern comes round.
+    CHECK(onsets(render(engine, 2.6)) == std::vector<std::size_t>{2 * kStepFrames, 18 * kStepFrames});
+
+    // A note in bar 2: the pattern is two bars now.
+    project.addNote(0, 0, Note{60, kTicksPerBar + 4 * kTicksPerStep, kTicksPerStep});
+    vloom::Engine longer;
+    prepare(longer);
+    ChannelRackAudio again;
+    CHECK(again.sync(longer, project, 0, kRate).empty());
+    longer.play();
+    CHECK(onsets(render(longer, 2.6)) == std::vector<std::size_t>{2 * kStepFrames, 20 * kStepFrames});
+}
+
+TEST_CASE("A note's velocity sets how loud it plays", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.addNote(0, 0, Note{60, 0, kTicksPerStep, 120});
+    project.addNote(0, 0, Note{60, 4 * kTicksPerStep, kTicksPerStep, 60});
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    CHECK(rack.sync(engine, project, 0, kRate).empty());
+    engine.play();
+    const auto audio = render(engine, 1.0);
+    const float loud = std::abs(audio[0]);
+    const float soft = std::abs(audio[4 * kStepFrames * 2]);
+    REQUIRE(soft > 0.0f);
+    CHECK(loud / soft == Catch::Approx(2.0).epsilon(0.01));
+}
+
+TEST_CASE("Song mode plays the notes of the pattern clips", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.addNote(0, 0, Note{60, 3 * kTicksPerStep, kTicksPerStep});
+    project.addClip(Clip{0, 0, kTicksPerBar});
+
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    CHECK(rack.sync(engine, project, 0, kRate, true).empty());
+    engine.play();
+    CHECK(onsets(render(engine, 3.9)) == std::vector<std::size_t>{19 * kStepFrames});
+}
+
 TEST_CASE("Muting and step edits reach the engine on the next sync", "[audio]")
 {
     const Samples samples;

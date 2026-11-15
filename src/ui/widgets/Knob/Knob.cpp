@@ -53,6 +53,7 @@ Knob::Knob(const QString& caption, double minimum, double maximum, double defaul
     , default_(std::clamp(defaultValue, minimum, maximum))
     , value_(default_)
     , format_([](double v) { return QString::number(v, 'f', 1); })
+    , dial_(kDial)
 {
     setCursor(Qt::SizeVerCursor);
     setFocusPolicy(Qt::NoFocus);
@@ -74,8 +75,21 @@ void Knob::setDescription(const QString& text)
 QSize Knob::sizeHint() const
 {
     const QFontMetrics caption(captionFont(font()));
-    const int width = std::max(kDial + 4, caption.horizontalAdvance(caption_) + 4);
-    return {width, kDial + kCaptionGap + caption.height()};
+    const int width = std::max(dial_ + 4, caption.horizontalAdvance(caption_) + 4);
+    return {width, dial_ + kCaptionGap + caption.height()};
+}
+
+void Knob::setDialSize(int pixels)
+{
+    dial_ = std::max(kDial, pixels);
+    updateGeometry();
+    update();
+}
+
+void Knob::setArcColor(const QColor& color)
+{
+    arc_ = color;
+    update();
 }
 
 void Knob::setValue(double value)
@@ -118,13 +132,13 @@ void Knob::paintEvent(QPaintEvent* /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    const QRectF dial((width() - kDial) / 2.0, 0.0, kDial, kDial);
-    constexpr double kTrack = 2.5;
-    const QRectF arcRect = dial.adjusted(kTrack / 2, kTrack / 2, -kTrack / 2, -kTrack / 2);
+    const QRectF dial((width() - dial_) / 2.0, 0.0, dial_, dial_);
+    const double track = std::max(2.5, dial_ * 0.07);
+    const QRectF arcRect = dial.adjusted(track / 2, track / 2, -track / 2, -track / 2);
 
     // Track, then the lit part: from the left end, or from the centre when
     // the range spans zero.
-    QPen pen(c.border, kTrack, Qt::SolidLine, Qt::RoundCap);
+    QPen pen(c.border, track, Qt::SolidLine, Qt::RoundCap);
     p.setPen(pen);
     p.drawArc(arcRect, static_cast<int>(kStartAngle * 16), static_cast<int>(-kSweep * 16));
 
@@ -133,13 +147,14 @@ void Knob::paintEvent(QPaintEvent* /*event*/)
     const double from = kStartAngle - origin * kSweep;
     const double span = -(fraction() - origin) * kSweep;
     if (std::abs(span) > 0.5) {
-        pen.setColor(c.accent);
+        pen.setColor(arc_.isValid() ? arc_ : c.accent);
         p.setPen(pen);
         p.drawArc(arcRect, static_cast<int>(from * 16), static_cast<int>(span * 16));
     }
 
     // Body and pointer.
-    const QRectF body = dial.adjusted(5, 5, -5, -5);
+    const double inset = dial_ * 5.0 / kDial; // room for the arc around the body
+    const QRectF body = dial.adjusted(inset, inset, -inset, -inset);
     p.setPen(QPen(c.border, 1));
     p.setBrush(c.raised);
     p.drawEllipse(body);
@@ -154,7 +169,7 @@ void Knob::paintEvent(QPaintEvent* /*event*/)
     // Caption.
     p.setFont(captionFont(font()));
     p.setPen(c.textDim);
-    const QRectF captionRect(0, kDial + kCaptionGap, width(), height() - kDial - kCaptionGap);
+    const QRectF captionRect(0, dial_ + kCaptionGap, width(), height() - dial_ - kCaptionGap);
     p.drawText(captionRect, Qt::AlignHCenter | Qt::AlignTop, caption_);
 }
 

@@ -12,6 +12,51 @@ and the project uses [Semantic Versioning](https://semver.org/).
   app (vloom-engine #27). The same box hung the Windows CI job.
 
 ### Added
+- Piano roll: its notes play, in pattern mode and in the playlist's pattern
+  clips, through the channel's sample or instrument. A pattern is as long as
+  its notes reach (in whole bars), also when that is past its step pads.
+- Piano roll: note velocity (1 .. 127, saved with the project), with a lane
+  along the bottom to set it; softer notes are drawn darker.
+- Piano roll: selection (click, Ctrl+click, Ctrl+drag for a box, Select All),
+  moving and resizing the selected notes together, Shift+drag to copy, cut,
+  copy, paste (where the mouse points), duplicate, delete, quantize to the
+  snap, arrow keys to move, and right-drag to delete. The Edit menu's
+  commands act on the piano roll.
+- Piano roll: undo and redo of note edits (200 steps).
+- Piano roll: the keyboard on the left, and a note while it is placed or
+  moved, sound through the channel's instrument plugin.
+- Synth editor: a power button (the channel's instrument on or off, saved
+  with the project), presets (seven that come with the app, and your own) and
+  a volume knob in the header.
+- Stem extractor: right-click an audio clip, Stem Extractor… splits its
+  sample into stems (drums, bass, other, vocals; guitar and piano with the
+  six-stem model) and places them on new tracks under the clip, which is
+  muted. The stems are WAV files next to the sample and are reused the next
+  time. It runs in a helper process (`vloomdaw-stems`, demucs.cpp and Eigen,
+  both pinned), on the processor only, and takes several times the length of
+  the audio; it needs AVX2 on x86-64.
+- Stem models (Options > Stem Models…): the model store. Pick which Demucs
+  model to download (HT Demucs, HT Demucs 6, HT Demucs FT, Hybrid Demucs v3;
+  55 to 336 MB) and which to use. Nothing is downloaded until you ask; files
+  come over HTTPS from a fixed revision on huggingface.co and are checked
+  against their SHA-256 when downloaded and before every use.
+- Playlist and piano roll: the playhead has a head in the ruler.
+- Synth: a built-in wavetable synthesizer (from vloom-dsp), listed with the
+  instruments. Drop it on the channel rack like any instrument plugin. Its
+  editor shows the sub oscillator, the noise, the two wavetable oscillators
+  with a picture of their table and the filter (drag the point on its response
+  for cutoff and resonance); under them four macro knobs, three envelopes and
+  four LFOs (a tab each) and the voicing (16 voices, or mono with legato and
+  glide). A keyboard along the bottom plays it by hand, and the Matrix page
+  lists what each envelope, LFO and macro moves.
+- EQ editor: the built-in EQ opens as its response curve instead of a row of
+  knobs. Each section is a numbered point: drag it sideways for frequency and
+  up or down for gain, scroll over it for Q, double-click to flatten it or to
+  switch a cut. A panel over the curve has the selected section's knobs, and
+  the power button bypasses the effect. Behind the curve is the spectrum of
+  what the EQ puts out. The header has presets (seven that come with the app,
+  and your own: "Save Preset As...", kept in the app's data folder) and two
+  settings, A and B, to switch between and compare.
 - Built-in effects: the effects that come with VloomDAW (EQ and Gain, from
   vloom-dsp) are listed with the scanned plugins, in the Plugins panel and
   the mixer's plugin picker. They have no editor of their own: a window with

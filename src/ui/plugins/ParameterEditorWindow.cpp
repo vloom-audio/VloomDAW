@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/plugins/ParameterEditorWindow.hpp"
 
+#include "ui/plugins/ParameterText.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
 
 #include <vloom/engine/plugin/PluginInstance.hpp>
@@ -28,17 +29,7 @@ bool isFrequency(const vloom::ParameterInfo& parameter)
 /// How `value` reads, with the parameter's unit.
 QString valueText(const vloom::ParameterInfo& parameter, double value)
 {
-    if (parameter.unit == "Hz")
-        return value >= 1000.0 ? QStringLiteral("%1 kHz").arg(value / 1000.0, 0, 'f', 2)
-                               : QStringLiteral("%1 Hz").arg(value, 0, 'f', value < 100.0 ? 1 : 0);
-    if (parameter.unit == "dB")
-        return QStringLiteral("%1%2 dB")
-            .arg(value > 0.0 ? QStringLiteral("+") : QString())
-            .arg(value, 0, 'f', 1);
-    const QString number = QString::number(value, 'f', 2);
-    return parameter.unit.empty()
-        ? number
-        : QStringLiteral("%1 %2").arg(number, QString::fromStdString(parameter.unit));
+    return parameterValueText(parameter.unit, value);
 }
 
 /// A knob's position (0 .. 1) for a frequency, in octaves, and back.
