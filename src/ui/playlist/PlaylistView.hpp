@@ -94,7 +94,7 @@ public:
     /// What placing, moving, trimming and cutting clips snap to. Auto: the
     /// finest grid line far enough apart at the zoom to aim at (a 1/32 note
     /// when zoomed far in, up to a bar when zoomed out). Shift snaps to steps
-    /// whatever this is. Step: a 16th note; HalfStep: a 32nd note.
+    /// whatever this is, and Alt does not snap at all. Step: a 16th note; HalfStep: a 32nd note.
     enum class Snap { Auto, Bar, Beat, Step, HalfStep };
     void setSnap(Snap snap)
     {
@@ -234,7 +234,8 @@ private:
     /// Zooms so ticks `from`..`to` fill the grid.
     void zoomToRange(double from, double to);
     void updateToolCursor(const QPoint& pos);
-    /// The snap grid in ticks for an edit made with `modifiers` held.
+    /// The snap grid in ticks for an edit made with `modifiers` held (Alt: 1,
+    /// no snapping; Shift: a step).
     [[nodiscard]] int snapTicks(Qt::KeyboardModifiers modifiers) const;
     /// The whole sample of an audio clip in ticks at the tempo; 0 when unknown.
     [[nodiscard]] int sampleTicks(const AudioClip& clip) const;

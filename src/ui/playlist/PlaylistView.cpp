@@ -1445,7 +1445,8 @@ void PlaylistView::resizeClipTo(double tick, int grid)
     const int length = audio ? audioLength(resizeStartAudio_) : project_->clipLength(resizeStartClip_);
     const int whole = audio ? sampleTicks(resizeStartAudio_) : 0; // 0: no limit (a pattern repeats)
     const int end = start + length;
-    const int shortest = std::min(grid, kTicksPerStep); // a clip snapped to 32nd notes can be one long
+    // A clip snapped to 32nd notes can be one long; no shorter with Alt (free).
+    const int shortest = std::clamp(grid, kTicksPerStep / 2, kTicksPerStep);
     int newStart = start;
     int newLength = length;
     if (resizeRight_) {
@@ -1477,6 +1478,8 @@ void PlaylistView::resizeClipTo(double tick, int grid)
 
 int PlaylistView::snapTicks(Qt::KeyboardModifiers modifiers) const
 {
+    if (modifiers.testFlag(Qt::AltModifier))
+        return 1; // free: every tick
     if (modifiers.testFlag(Qt::ShiftModifier))
         return kTicksPerStep;
     switch (snap_) {
@@ -1508,9 +1511,12 @@ void PlaylistView::sliceAcross(int tick, int fromTrack, int toTrack)
 {
     const int top = std::min(fromTrack, toTrack);
     const int bottom = std::max(fromTrack, toTrack);
+    // Both parts are at least a 32nd note long, the shortest a clip is
+    // trimmed to: a free cut (Alt) next to an edge leaves no sliver.
+    constexpr int kShortest = kTicksPerStep / 2;
     const auto crosses = [&](int track, int start, int length) {
-        return track >= top && track <= bottom && trackHeight(track) > 0 && start < tick
-            && tick < start + length;
+        return track >= top && track <= bottom && trackHeight(track) > 0 && tick - start >= kShortest
+            && start + length - tick >= kShortest;
     };
     // New parts are appended: the indices of the clips looked at stay valid.
     const std::size_t clipCount = project_->clips().size();
