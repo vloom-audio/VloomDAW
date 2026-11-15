@@ -5,9 +5,12 @@
 #include <QByteArray>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 class QProcess;
@@ -38,6 +41,9 @@ struct StemFile {
 /// files are checked against their SHA-256 and the audio is decoded; after
 /// it the stems are written as WAV files. Those two steps run on a worker
 /// thread. One job at a time.
+///
+/// Nothing here makes the UI thread wait: cancel() tells the running step to
+/// stop and ends the helper, and both finish by themselves.
 class StemSeparator : public QObject {
     Q_OBJECT
 
@@ -69,13 +75,25 @@ private:
     void helperFinished(bool crashed, int exitCode);
     void converted(int run, const QList<StemFile>& stems, const QString& error);
     void fail(const QString& reason);
-    void runOnWorker(std::function<void()> work);
-    void joinWorker();
+    /// What a step on the worker thread is told and gives back. The thread
+    /// writes it; the UI thread reads it once the thread has finished.
+    struct Step {
+        std::atomic<bool> cancelled{false}; ///< set by the UI thread: stop at the next check
+        QString error;
+        std::int64_t frames = 0;
+        QList<StemFile> stems;
+    };
+    /// Runs `work` on a thread of its own, then `then` on this thread (not
+    /// when this object is gone by then).
+    void runOnWorker(std::function<void()> work, std::function<void()> then);
 
     StemJob job_;
-    std::unique_ptr<QTemporaryDir> work_; ///< the helper's input and output
+    /// The helper's input and output. Shared with the step or helper using
+    /// it, so it outlives a job that was given up until they have stopped.
+    std::shared_ptr<QTemporaryDir> work_;
     QProcess* process_ = nullptr;
-    QThread* worker_ = nullptr;
+    std::shared_ptr<Step> step_; ///< the step running now, if any
+    QList<QPointer<QThread>> workers_; ///< threads that may still be running
     QByteArray pending_; ///< helper output not yet a whole line
     QString helperError_;
     std::int64_t frames_ = 0;
