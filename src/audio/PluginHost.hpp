@@ -41,7 +41,11 @@ struct PluginPick {
 [[nodiscard]] PluginPick pickPlugin(
     const std::vector<vloom::PluginInfo>& plugins, std::string_view id, std::string_view name);
 
-/// The CLAP and VST 3 plugins the project uses, loaded in-process (ADR 0006
+/// The effects that come with VloomDAW (vloom-engine's built-in processors),
+/// as the plugin lists show them: format Builtin, the id as path, a category.
+[[nodiscard]] std::vector<PluginInfo> builtinPlugins();
+
+/// The CLAP, VST 3 and built-in plugins the project uses, loaded in-process (ADR 0006
 /// of vloom-engine: a crashing plugin takes the app down). Each instance has
 /// a handle the project stores (PluginSlot::instance). Libraries are opened
 /// once per file and kept while the app runs.
@@ -64,7 +68,8 @@ public:
 
     /// Loads the plugin of the library at `path` that pickPlugin() chooses
     /// for `id` and `name`, and activates it at `sampleRate` for blocks of
-    /// vloom::kMaxBlockFrames.
+    /// vloom::kMaxBlockFrames. Built-in: the one with `id` (`path` is not
+    /// used).
     [[nodiscard]] Loaded load(PluginFormat format, const std::filesystem::path& path, std::string_view id,
         std::string_view name, double sampleRate);
 

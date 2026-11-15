@@ -4,7 +4,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -68,4 +70,44 @@ TEST_CASE("The plugin to load is found by id, then by name, then as a file's onl
     const std::vector<vloom::PluginInfo> one{plugin("com.a.synth", "Synth")};
     CHECK(pickPlugin(one, {}, "synth-file").plugin == &one[0]);
     CHECK(pickPlugin({}, {}, "Synth").plugin == nullptr);
+}
+
+TEST_CASE("The built-in effects are listed and load without a file", "[plugins]")
+{
+    const std::vector<PluginInfo> builtins = builtinPlugins();
+    const auto eq = std::find_if(
+        builtins.begin(), builtins.end(), [](const PluginInfo& info) { return info.path == "vloom.eq"; });
+    REQUIRE(eq != builtins.end());
+    CHECK(eq->name == "EQ");
+    CHECK(eq->format == PluginFormat::Builtin);
+    CHECK(eq->category == "EQ");
+    CHECK(eq->probe == PluginInfo::Probe::Ok);
+    for (const PluginInfo& info : builtins)
+        CHECK(info.format == PluginFormat::Builtin);
+
+    PluginHost host;
+    const PluginHost::Loaded loaded = host.load(PluginFormat::Builtin, {}, "vloom.eq", "EQ", 48000.0);
+    REQUIRE(loaded.handle != 0);
+    CHECK(loaded.info.id == "vloom.eq");
+    CHECK(loaded.info.kind == vloom::PluginInfo::Kind::Effect);
+    const auto instance = host.instance(loaded.handle);
+    REQUIRE(instance != nullptr);
+    CHECK_FALSE(instance->processor().hasEditor());
+    REQUIRE_FALSE(instance->processor().parameters().empty());
+
+    // Its settings travel as a state, like a plugin's.
+    const vloom::ParameterInfo gain = instance->processor().parameters()[3]; // the low shelf's gain
+    CHECK(instance->setParameter(gain.id, 6.0));
+    CHECK(instance->processor().parameterValue(gain.id) == 6.0);
+    const std::vector<std::uint8_t> state = instance->processor().saveState();
+    const PluginHost::Loaded again
+        = host.loadWithState(PluginFormat::Builtin, {}, "vloom.eq", "EQ", 48000.0, state);
+    REQUIRE(again.handle != 0);
+    CHECK(again.error.empty());
+    CHECK(host.instance(again.handle)->processor().parameterValue(gain.id) == 6.0);
+
+    const PluginHost::Loaded unknown
+        = host.load(PluginFormat::Builtin, {}, "vloom.nothing", "Nothing", 48000.0);
+    CHECK(unknown.handle == 0);
+    CHECK_FALSE(unknown.error.empty());
 }

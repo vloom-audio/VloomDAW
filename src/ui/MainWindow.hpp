@@ -344,7 +344,9 @@ private:
     Project project_;
     PluginHost pluginHost_; ///< the plugins the project uses, loaded
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
-    std::map<std::uint64_t, QPointer<PluginEditorWindow>> pluginEditors_; ///< by plugin handle
+    /// By plugin handle: a PluginEditorWindow, or a ParameterEditorWindow for
+    /// a plugin without an editor of its own.
+    std::map<std::uint64_t, QPointer<QWidget>> pluginEditors_;
     QTimer* pluginIdleTimer_ = nullptr; ///< runs the plugins' main-thread work (PluginHost::idle())
     /// Instruments loaded while no device ran: activated at the requested
     /// rate and not sent to the engine yet (the rack is published only with

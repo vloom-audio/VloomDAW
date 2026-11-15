@@ -302,6 +302,12 @@ void PluginsPanel::showContextMenu(const QPoint& pos)
     QMenu menu(this);
     menu.addAction(tr("Add to Channel Rack"), this, [this, index] { emit addToRackRequested(index); });
     menu.addAction(tr("Add to Mixer…"), this, [this, index] { emit addToMixerRequested(index); });
+    if (plugin.format == PluginFormat::Builtin) {
+        // Its category is the app's: a choice would not outlive the session
+        // (built-ins are not part of the saved scan).
+        menu.exec(tree_->viewport()->mapToGlobal(pos));
+        return;
+    }
     menu.addSeparator();
     QMenu* setMenu = menu.addMenu(tr("Set category"));
     for (const std::string& category : pluginCategories()) {

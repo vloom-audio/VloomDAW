@@ -312,6 +312,41 @@ TEST_CASE("An insert with more effects than the mixer takes opens with the first
     CHECK_FALSE(read.warnings.empty());
 }
 
+TEST_CASE("A built-in effect is saved by its id, without a path", "[project-file]")
+{
+    ProjectData data;
+    data.mixer = MixerModel(1);
+    PluginSlot eq;
+    eq.format = PluginFormat::Builtin;
+    eq.id = "vloom.eq";
+    eq.name = "EQ";
+    REQUIRE(data.mixer.addEffect(1, eq));
+    data.states.effects = {{}, {{'V', 'L', 'B', '1', 0, 0, 0, 0}}};
+
+    const std::string text = ProjectFile::write(data, kFolder);
+    CHECK(text.find("\"builtin\"") != std::string::npos);
+    const auto read = ProjectFile::read(text, kFolder);
+    REQUIRE(read.data);
+    CHECK(read.warnings.empty());
+    REQUIRE(read.data->mixer.track(1).effects.size() == 1);
+    const PluginSlot& opened = read.data->mixer.track(1).effects[0];
+    CHECK(opened.format == PluginFormat::Builtin);
+    CHECK(opened.id == "vloom.eq");
+    CHECK(opened.path.empty());
+    CHECK(read.data->states.effects[1] == data.states.effects[1]);
+
+    // A path in the file is not kept (nothing is loaded from it), and a
+    // built-in without an id is left out.
+    const auto odd = ProjectFile::read(R"({"format":"vloomdaw-project","version":1,"mixer":[{"effects":[
+        {"format":"builtin","path":"C:/evil.dll","id":"vloom.eq","name":"EQ"},
+        {"format":"builtin","path":"x","id":"","name":"No id"}]}]})",
+        kFolder);
+    REQUIRE(odd.data);
+    REQUIRE(odd.data->mixer.track(0).effects.size() == 1);
+    CHECK(odd.data->mixer.track(0).effects[0].path.empty());
+    CHECK_FALSE(odd.warnings.empty());
+}
+
 TEST_CASE("Projects are saved to and opened from files, under any name", "[project-file]")
 {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();

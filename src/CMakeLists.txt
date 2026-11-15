@@ -119,6 +119,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/playlist/PlaylistView.hpp
     ui/plugins/PluginDrag.cpp
     ui/plugins/PluginDrag.hpp
+    ui/plugins/ParameterEditorWindow.cpp
+    ui/plugins/ParameterEditorWindow.hpp
     ui/plugins/PluginEditorWindow.cpp
     ui/plugins/PluginEditorWindow.hpp
     ui/plugins/PluginManagerDialog.cpp

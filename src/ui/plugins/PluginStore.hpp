@@ -21,8 +21,15 @@ struct PluginStore {
     /// vendor and category. Off: file names only, no plugin code runs.
     bool probePlugins = true;
 
+    /// load() and save() leave out built-in effects: setBuiltins() adds them.
     [[nodiscard]] static PluginStore load();
     void save() const;
+
+    /// Lists `builtins` (PluginFormat::Builtin) after the scanned plugins,
+    /// in place of the built-ins listed before.
+    void setBuiltins(const std::vector<PluginInfo>& builtins);
+    /// This store without its built-ins: what a scan starts from.
+    [[nodiscard]] PluginStore scanned() const;
 
     /// The default folders of this OS followed by the user's.
     [[nodiscard]] std::vector<PluginFolder> scanFolders() const;

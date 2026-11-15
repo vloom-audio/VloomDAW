@@ -73,7 +73,18 @@ fs::path environmentPath(const char* name)
 
 } // namespace
 
-std::string_view formatName(PluginFormat format) { return format == PluginFormat::Vst3 ? "VST3" : "CLAP"; }
+std::string_view formatName(PluginFormat format)
+{
+    switch (format) {
+    case PluginFormat::Vst3:
+        return "VST3";
+    case PluginFormat::Builtin:
+        return "Built-in";
+    case PluginFormat::Clap:
+        break;
+    }
+    return "CLAP";
+}
 
 std::vector<PluginFolder> defaultPluginFolders()
 {

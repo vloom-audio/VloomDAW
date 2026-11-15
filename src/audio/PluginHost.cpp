@@ -3,6 +3,7 @@
 #include "audio/PluginHost.hpp"
 
 #include <vloom/engine/mixer/MixerState.hpp>
+#include <vloom/engine/plugin/BuiltinProcessors.hpp>
 #include <vloom/engine/plugin/ClapHost.hpp>
 #include <vloom/engine/plugin/Vst3Host.hpp>
 
@@ -71,6 +72,32 @@ PluginHost::Loaded create(const std::shared_ptr<Library>& library, std::string_v
 
 } // namespace
 
+std::vector<PluginInfo> builtinPlugins()
+{
+    // What each does, for the lists' categories (core/PluginMetadata).
+    const auto category = [](std::string_view id) -> std::string {
+        if (id == "vloom.eq")
+            return "EQ";
+        return "Utility";
+    };
+    std::vector<PluginInfo> list;
+    for (const vloom::PluginInfo& builtin : vloom::builtinProcessors()) {
+        if (builtin.kind != vloom::PluginInfo::Kind::Effect)
+            continue; // the lists and the rack know built-in effects only
+        PluginInfo info;
+        info.name = builtin.name;
+        info.format = PluginFormat::Builtin;
+        info.path = builtin.id;
+        info.vendor = builtin.vendor;
+        info.category = category(builtin.id);
+        info.version = builtin.version;
+        info.tags = "Fx";
+        info.probe = PluginInfo::Probe::Ok;
+        list.push_back(std::move(info));
+    }
+    return list;
+}
+
 PluginHost::~PluginHost()
 {
     // Editors close before their instances go (ADR 0009).
@@ -84,9 +111,18 @@ PluginHost::Loaded PluginHost::load(PluginFormat format, const std::filesystem::
 {
     std::string error;
     std::unique_ptr<vloom::AudioProcessor> processor;
-    Loaded loaded = format == PluginFormat::Clap
-        ? create(openCached(clap_, path, error), id, name, error, processor)
-        : create(openCached(vst3_, path, error), id, name, error, processor);
+    Loaded loaded;
+    if (format == PluginFormat::Builtin) {
+        processor = vloom::createBuiltinProcessor(id);
+        if (processor != nullptr)
+            loaded.info = processor->info();
+        else
+            loaded.error = "this version of VloomDAW has no built-in effect \"" + std::string(id) + "\"";
+    } else {
+        loaded = format == PluginFormat::Clap
+            ? create(openCached(clap_, path, error), id, name, error, processor)
+            : create(openCached(vst3_, path, error), id, name, error, processor);
+    }
     if (processor == nullptr)
         return loaded;
 

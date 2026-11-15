@@ -15,7 +15,7 @@ namespace vloomdaw {
 /// in the PluginHost (src/audio), found by `instance`.
 struct PluginSlot {
     PluginFormat format = PluginFormat::Clap;
-    std::string path; ///< UTF-8 path of the .clap / .vst3 file or bundle
+    std::string path; ///< UTF-8 path of the .clap / .vst3 file or bundle; built-in: empty
     std::string id; ///< the plugin's id in that library (the engine's PluginInfo::id)
     std::string name; ///< shown to the user
     bool bypassed = false; ///< passes audio through, unprocessed
