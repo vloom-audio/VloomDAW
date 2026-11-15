@@ -438,6 +438,9 @@ private:
     // Playback scrubbing state
     bool scrubbingPlayback_ = false;
     bool wasPlayingBeforeScrub_ = false;
+    bool scrubPlaySent_ = false; ///< the engine took this scrub's play
+    bool scrubStopPending_ = false; ///< a scrub's stop the engine has not acted on yet
+    bool scrubStopSent_ = false; ///< the engine took that stop
 };
 
 } // namespace vloomdaw

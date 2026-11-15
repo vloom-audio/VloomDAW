@@ -15,6 +15,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Playlist time bar scrub: click or drag the timeline ruler (time bar) on top of
   the playlist to scrub or relocate playback at any time, without having to switch
   to the Playback tool (Y).
+- Mixer FX rack: each strip shows its insert's effects as slots with bypass
+  switches, and an empty slot opens a plugin picker. An insert takes 9
+  effects (was 10); a project saved with 10 opens with the first 9 and a
+  warning.
 - The File menu works:
   - **Projects:** New, Open, Open Recent (with Clear), Save and Save As read
     and write `.vloom` project files, a versioned JSON format

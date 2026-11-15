@@ -52,7 +52,7 @@ const QStringList kStandardCategoryOrder = {
 
 int categoryRank(const QString& name)
 {
-    const int idx = kStandardCategoryOrder.indexOf(name);
+    const auto idx = static_cast<int>(kStandardCategoryOrder.indexOf(name));
     return idx >= 0 ? idx : 100;
 }
 
@@ -485,9 +485,9 @@ void PluginPickerPopup::buildTreeView()
     }
 
     connect(treeWidget_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int /*col*/) {
-        const QVariant data = item->data(0, Qt::UserRole);
-        if (data.isValid()) {
-            emit pluginSelected(data.toULongLong());
+        const QVariant index = item->data(0, Qt::UserRole);
+        if (index.isValid()) {
+            emit pluginSelected(index.toULongLong());
             close();
         }
     });

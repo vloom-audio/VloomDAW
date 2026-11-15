@@ -39,7 +39,7 @@ public:
     void setColor(std::optional<std::uint32_t> color);
     /// Shows how many effects the track has (kept for compatibility).
     void setEffectCount(std::size_t count);
-    /// Shows the track's effects in the 10-slot FX rack.
+    /// Shows the track's effects in the FX rack.
     void setEffects(const std::vector<PluginSlot>& effects);
     /// Shows saved settings (a project was opened) without signalling them back.
     void setValues(double fader, double pan, bool muted, bool soloed);
@@ -91,7 +91,7 @@ private:
     QLabel* number_ = nullptr;
     QToolButton* mute_ = nullptr;
     QToolButton* solo_ = nullptr; ///< inserts only
-    MixerSlotRack* fxRack_ = nullptr; ///< the 10-slot FX rack
+    MixerSlotRack* fxRack_ = nullptr; ///< one slot per effect
     std::optional<std::uint32_t> color_;
 };
 

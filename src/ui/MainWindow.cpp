@@ -1977,17 +1977,27 @@ QWidget* MainWindow::createWorkspace()
         auto& engine = audio_.engine();
         if (!scrubbingPlayback_) {
             scrubbingPlayback_ = true;
-            wasPlayingBeforeScrub_ = engine.isPlaying();
+            // isPlaying() follows the audio thread: right after a scrub (a
+            // double-click) it still says "playing" while that scrub's stop
+            // is on its way.
+            wasPlayingBeforeScrub_ = engine.isPlaying() && !scrubStopPending_;
+            scrubStopPending_ = false;
+            scrubPlaySent_ = false;
         }
-        engine.locate(tick);
-        if (!engine.isPlaying())
-            engine.play();
+        // A full command queue drops these; the next move sends them again.
+        (void)engine.locate(tick);
+        if (!wasPlayingBeforeScrub_ && !scrubPlaySent_)
+            scrubPlaySent_ = engine.play();
     });
     connect(playlist_, &PlaylistView::playbackReleased, this, [this] {
-        if (!wasPlayingBeforeScrub_)
-            audio_.engine().stop();
+        if (scrubbingPlayback_ && !wasPlayingBeforeScrub_) {
+            // refreshFromEngine() sends the stop again if the queue was full.
+            scrubStopPending_ = true;
+            scrubStopSent_ = audio_.engine().stop();
+        }
         scrubbingPlayback_ = false;
         wasPlayingBeforeScrub_ = false;
+        scrubPlaySent_ = false;
     });
     connect(playlist_, &PlaylistView::clipRemoved, this, [this, songEdited](std::size_t index) {
         project_.removeClip(index);
@@ -3416,6 +3426,7 @@ void MainWindow::exportSong()
 void MainWindow::togglePlay()
 {
     auto& engine = audio_.engine();
+    scrubStopPending_ = false; // the user's own play or stop wins
     if (engine.isPlaying())
         engine.stop();
     else
@@ -3425,6 +3436,7 @@ void MainWindow::togglePlay()
 void MainWindow::stopAndRewind()
 {
     auto& engine = audio_.engine();
+    scrubStopPending_ = false;
     engine.stop();
     engine.locate(0.0);
 }
@@ -3470,6 +3482,14 @@ void MainWindow::refreshFromEngine()
     auto& engine = audio_.engine();
     engine.collectGarbage(); // free channel-rack states the audio thread is done with
     watchDevice();
+
+    if (scrubStopPending_) {
+        // A scrub's stop: sent again if the queue was full, done once heard.
+        if (!scrubStopSent_)
+            scrubStopSent_ = engine.stop();
+        else if (!engine.isPlaying())
+            scrubStopPending_ = false;
+    }
 
     // Nothing to show while minimised; still send pending changes and drain
     // the meters below so they do not show a stale peak when restored.

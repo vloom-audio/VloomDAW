@@ -36,7 +36,8 @@ public:
     static constexpr std::size_t kMaster = 0;
     /// Most inserts: as many as the engine routes (vloom::kMaxInserts).
     static constexpr std::size_t kMaxInserts = 125;
-    /// Most effects on one insert.
+    /// Most effects on one insert: the slots of the mixer's FX rack. A project
+    /// file with more opens with the first ones and a warning.
     static constexpr std::size_t kMaxEffects = 9;
     /// Longest insert name, in bytes (UTF-8).
     static constexpr std::size_t kMaxNameLength = 64;

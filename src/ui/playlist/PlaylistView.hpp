@@ -168,6 +168,8 @@ private:
     [[nodiscard]] int lengthTicks() const;
     [[nodiscard]] QRect gridRect() const;
     [[nodiscard]] QRect rulerRect() const;
+    /// Ends a held playback (Playback tool, time bar): playbackReleased().
+    void endPlayback();
     [[nodiscard]] double tickAt(int x) const;
     [[nodiscard]] int trackAt(int y) const;
     [[nodiscard]] int trackCount() const;

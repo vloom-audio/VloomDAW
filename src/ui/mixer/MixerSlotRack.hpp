@@ -15,17 +15,17 @@ namespace vloomdaw {
 
 class MixerSlotRow;
 
-/// An FX slot rack displaying 10 vertical plugin slots for one mixer strip,
-/// matching FL Studio's insert slot rack. Each row features a left switch
-/// button (green ▶ when active, dim ▶ when bypassed, ■ when empty) and
-/// an effect slot button displaying the effect name (or empty dash).
+/// An FX slot rack displaying one plugin slot per effect an insert takes (MixerModel::kMaxEffects) for one
+/// mixer strip, matching FL Studio's insert slot rack. Each row features a left switch button (green ▶ when
+/// active, dim ▶ when bypassed, ■ when empty) and an effect slot button displaying the effect name (or empty
+/// dash).
 class MixerSlotRack : public QFrame {
     Q_OBJECT
 
 public:
     explicit MixerSlotRack(QWidget* parent = nullptr);
 
-    /// Updates all 10 slots with the track's effects.
+    /// Updates every slot with the track's effects.
     void setEffects(const std::vector<PluginSlot>& effects);
 
 signals:

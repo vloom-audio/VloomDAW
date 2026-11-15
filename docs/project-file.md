@@ -97,8 +97,8 @@ A project file can come from anyone, so reading it is defensive:
 - **Size and nesting:** the file is at most 256 MiB, and JSON nesting at
   most 32 deep (checked before parsing).
 - **Counts:** 1000 channels, 999 patterns, 500 tracks, 100 000 clips of each
-  kind, 100 000 notes per channel and pattern, 125 inserts, 10 effects per
-  insert, and 64 MiB per plugin state. Past these the rest is left out with
+  kind, 100 000 notes per channel and pattern, 125 inserts, 9 effects per
+  insert (the mixer's FX rack has 9 slots), and 64 MiB per plugin state. Past these the rest is left out with
   a warning.
 - **Values:** every value is range-checked and goes through the model's own
   setters (`Project::restored()`). A clip of a pattern or channel that does
