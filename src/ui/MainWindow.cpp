@@ -1798,7 +1798,7 @@ QWidget* MainWindow::createWorkspace()
             {PlaylistView::Tool::Mute, "tool-mute", tr("Mute"), QKeySequence(Qt::Key_M),
                 tr("Mute: click or drag over clips to mute or unmute them")},
             {PlaylistView::Tool::Slice, "tool-slice", tr("Slice"), QKeySequence(Qt::Key_C),
-                tr("Slice: click, or drag across tracks, to cut every clip the line crosses (Shift: step)")},
+                tr("Slice: click, or drag across tracks, to cut every clip the line crosses (Shift: step; Alt: free)")},
             {PlaylistView::Tool::Select, "tool-select", tr("Select"), QKeySequence(Qt::Key_E),
                 tr("Select: drag a box (Ctrl adds), drag the selection to move it, Delete removes it")},
             {PlaylistView::Tool::Zoom, "tool-zoom", tr("Zoom"), QKeySequence(Qt::Key_Z),
@@ -1851,7 +1851,7 @@ QWidget* MainWindow::createWorkspace()
         auto* snap = new QComboBox(playlistFrame_);
         snap->setObjectName(QStringLiteral("playlistSnap"));
         snap->setFocusPolicy(Qt::NoFocus);
-        snap->setToolTip(tr("Snap: what clips line up to when placed, moved, trimmed or cut (Shift: steps)"));
+        snap->setToolTip(tr("Snap: what clips line up to when placed, moved, trimmed or cut (Shift: steps; Alt: free)"));
         snap->setAccessibleName(tr("Snap"));
         snap->addItem(tr("Snap: Auto"), static_cast<int>(PlaylistView::Snap::Auto));
         snap->addItem(tr("Snap: Bar"), static_cast<int>(PlaylistView::Snap::Bar));

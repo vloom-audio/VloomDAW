@@ -1445,7 +1445,8 @@ void PlaylistView::resizeClipTo(double tick, int grid)
     const int length = audio ? audioLength(resizeStartAudio_) : project_->clipLength(resizeStartClip_);
     const int whole = audio ? sampleTicks(resizeStartAudio_) : 0; // 0: no limit (a pattern repeats)
     const int end = start + length;
-    const int shortest = std::min(grid, kTicksPerStep); // a clip snapped to 32nd notes can be one long
+    // A clip snapped to 32nd notes can be one long; no shorter with Alt (free).
+    const int shortest = std::clamp(grid, kTicksPerStep / 2, kTicksPerStep);
     int newStart = start;
     int newLength = length;
     if (resizeRight_) {
@@ -1477,6 +1478,8 @@ void PlaylistView::resizeClipTo(double tick, int grid)
 
 int PlaylistView::snapTicks(Qt::KeyboardModifiers modifiers) const
 {
+    if (modifiers.testFlag(Qt::AltModifier))
+        return 1; // free: every tick
     if (modifiers.testFlag(Qt::ShiftModifier))
         return kTicksPerStep;
     switch (snap_) {

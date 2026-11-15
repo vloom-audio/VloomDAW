@@ -12,6 +12,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   app (vloom-engine #27). The same box hung the Windows CI job.
 
 ### Added
+- Playlist: hold Alt while moving, trimming or slicing a clip to do it
+  freely, without snapping to the grid.
 - Playlist time bar scrub: click or drag the timeline ruler (time bar) on top of
   the playlist to scrub or relocate playback at any time, without having to switch
   to the Playback tool (Y).
