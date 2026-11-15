@@ -6,6 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Windows: a plugin file that cannot be loaded (not a plugin, or missing its
+  own DLLs) no longer shows a system "Bad Image" message box that stops the
+  app (vloom-engine #27). The same box hung the Windows CI job.
+
 ### Added
 - The File menu works:
   - **Projects:** New, Open, Open Recent (with Clear), Save and Save As read
