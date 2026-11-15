@@ -1511,9 +1511,12 @@ void PlaylistView::sliceAcross(int tick, int fromTrack, int toTrack)
 {
     const int top = std::min(fromTrack, toTrack);
     const int bottom = std::max(fromTrack, toTrack);
+    // Both parts are at least a 32nd note long, the shortest a clip is
+    // trimmed to: a free cut (Alt) next to an edge leaves no sliver.
+    constexpr int kShortest = kTicksPerStep / 2;
     const auto crosses = [&](int track, int start, int length) {
-        return track >= top && track <= bottom && trackHeight(track) > 0 && start < tick
-            && tick < start + length;
+        return track >= top && track <= bottom && trackHeight(track) > 0 && tick - start >= kShortest
+            && start + length - tick >= kShortest;
     };
     // New parts are appended: the indices of the clips looked at stay valid.
     const std::size_t clipCount = project_->clips().size();
