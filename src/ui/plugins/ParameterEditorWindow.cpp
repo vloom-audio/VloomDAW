@@ -72,7 +72,7 @@ ParameterEditorWindow::ParameterEditorWindow(
     QVBoxLayout* column = nullptr;
     std::string columnGroup;
     bool headed = false; // the column has its heading
-    const auto heading = [this](QWidget* widget) {
+    const auto heading = [](QWidget* widget) {
         widget->setObjectName(QStringLiteral("parameterGroup"));
         QFont font = widget->font();
         font.setBold(true);
