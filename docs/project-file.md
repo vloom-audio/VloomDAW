@@ -85,7 +85,9 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
   "id": "…", "name": "Pro-L 2", "bypassed": false, "state": "base64…" }
 ```
 
-- `format`: `clap` or `vst3`.
+- `format`: `clap`, `vst3`, or `builtin` for an effect that comes with
+  VloomDAW (`"id": "vloom.eq"`). A built-in has no `path`; one in the file
+  is ignored.
 - `id`: the plugin's id in its library (vloom-engine's `PluginInfo::id`).
 - `state`: what the plugin's `saveState()` returned, as base64. It may be
   missing; the plugin then starts at its defaults.

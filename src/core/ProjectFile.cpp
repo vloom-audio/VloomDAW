@@ -121,7 +121,15 @@ std::string_view fitName(AudioClip::Fit fit)
 
 std::string_view pluginFormatText(PluginFormat format)
 {
-    return format == PluginFormat::Clap ? "clap" : "vst3";
+    switch (format) {
+    case PluginFormat::Clap:
+        return "clap";
+    case PluginFormat::Builtin:
+        return "builtin";
+    case PluginFormat::Vst3:
+        break;
+    }
+    return "vst3";
 }
 
 std::optional<std::string> colorText(const std::optional<std::uint32_t>& color)
@@ -289,6 +297,8 @@ std::optional<PluginSlot> readPlugin(const Json& object, Reader& in, std::vector
         slot.format = PluginFormat::Clap;
     else if (format == "vst3")
         slot.format = PluginFormat::Vst3;
+    else if (format == "builtin")
+        slot.format = PluginFormat::Builtin;
     else {
         in.warn("A plugin of an unknown format was left out");
         return std::nullopt;
@@ -297,7 +307,9 @@ std::optional<PluginSlot> readPlugin(const Json& object, Reader& in, std::vector
     slot.id = in.text(object, "id", kMaxIdBytes);
     slot.name = in.text(object, "name", kMaxNameBytes);
     slot.bypassed = Reader::flag(object, "bypassed");
-    if (slot.path.empty() || slot.id.empty()) {
+    if (slot.format == PluginFormat::Builtin)
+        slot.path.clear(); // it has no file; nothing is loaded from a path
+    if ((slot.path.empty() && slot.format != PluginFormat::Builtin) || slot.id.empty()) {
         in.warn("A plugin without a path or id was left out");
         return std::nullopt;
     }

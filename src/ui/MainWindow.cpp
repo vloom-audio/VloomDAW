@@ -30,6 +30,7 @@
 #include "ui/mixer/MixerPanel.hpp"
 #include "ui/pianoroll/PianoRollView.hpp"
 #include "ui/playlist/PlaylistView.hpp"
+#include "ui/plugins/ParameterEditorWindow.hpp"
 #include "ui/plugins/PluginEditorWindow.hpp"
 #include "ui/plugins/PluginManagerDialog.hpp"
 #include "ui/plugins/PluginPickerPopup.hpp"
@@ -1567,6 +1568,7 @@ void MainWindow::createCentralArea()
 
     // Plugins: only what the user's last scan found; nothing scans on its own.
     pluginStore_ = PluginStore::load();
+    pluginStore_.setBuiltins(builtinPlugins()); // the effects that come with the app
     pluginsPanel_ = new PluginsPanel(sidePanels_);
     pluginsPanel_->setStore(pluginStore_);
     connect(pluginsPanel_, &PluginsPanel::managerRequested, this, &MainWindow::showPluginManager);
@@ -1581,7 +1583,7 @@ void MainWindow::createCentralArea()
             pluginStore_.save();
             pluginsPanel_->setStore(pluginStore_);
             if (pluginManager_ != nullptr)
-                pluginManager_->setStore(pluginStore_); // its next scan starts from this
+                pluginManager_->setStore(pluginStore_.scanned()); // its next scan starts from this
         });
     connect(pluginsPanel_, &PluginsPanel::addToRackRequested, this,
         [this](std::size_t plugin) { addPluginToRack(plugin, project_.channels().size()); });
@@ -1798,7 +1800,8 @@ QWidget* MainWindow::createWorkspace()
             {PlaylistView::Tool::Mute, "tool-mute", tr("Mute"), QKeySequence(Qt::Key_M),
                 tr("Mute: click or drag over clips to mute or unmute them")},
             {PlaylistView::Tool::Slice, "tool-slice", tr("Slice"), QKeySequence(Qt::Key_C),
-                tr("Slice: click, or drag across tracks, to cut every clip the line crosses (Shift: step; Alt: free)")},
+                tr("Slice: click, or drag across tracks, to cut every clip the line crosses (Shift: step; "
+                   "Alt: free)")},
             {PlaylistView::Tool::Select, "tool-select", tr("Select"), QKeySequence(Qt::Key_E),
                 tr("Select: drag a box (Ctrl adds), drag the selection to move it, Delete removes it")},
             {PlaylistView::Tool::Zoom, "tool-zoom", tr("Zoom"), QKeySequence(Qt::Key_Z),
@@ -1851,7 +1854,8 @@ QWidget* MainWindow::createWorkspace()
         auto* snap = new QComboBox(playlistFrame_);
         snap->setObjectName(QStringLiteral("playlistSnap"));
         snap->setFocusPolicy(Qt::NoFocus);
-        snap->setToolTip(tr("Snap: what clips line up to when placed, moved, trimmed or cut (Shift: steps; Alt: free)"));
+        snap->setToolTip(
+            tr("Snap: what clips line up to when placed, moved, trimmed or cut (Shift: steps; Alt: free)"));
         snap->setAccessibleName(tr("Snap"));
         snap->addItem(tr("Snap: Auto"), static_cast<int>(PlaylistView::Snap::Auto));
         snap->addItem(tr("Snap: Bar"), static_cast<int>(PlaylistView::Snap::Bar));
@@ -2399,9 +2403,10 @@ void MainWindow::showPluginManager()
         // Kept for the session (hidden on close) so a running scan survives
         // closing the window.
         pluginManager_ = new PluginManagerDialog(this);
-        pluginManager_->setStore(pluginStore_);
+        pluginManager_->setStore(pluginStore_.scanned()); // it manages files; built-ins have none
         connect(pluginManager_, &PluginManagerDialog::storeChanged, this, [this](const PluginStore& store) {
             pluginStore_ = store;
+            pluginStore_.setBuiltins(builtinPlugins());
             pluginStore_.save();
             pluginsPanel_->setStore(pluginStore_);
         });
@@ -2638,7 +2643,11 @@ std::optional<PluginSlot> MainWindow::loadPlugin(std::size_t plugin, vloom::Plug
     statusBar()->repaint(); // shown while the plugin loads
     const double rate = audio_.sampleRate() > 0 ? audio_.sampleRate() : audio_.requestedSampleRate();
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const PluginHost::Loaded loaded = pluginHost_.load(info.format, info.path, {}, info.name, rate);
+    // A built-in is found by its id, which its path holds.
+    const bool builtin = info.format == PluginFormat::Builtin;
+    const PluginHost::Loaded loaded = builtin
+        ? pluginHost_.load(info.format, {}, info.path.string(), info.name, rate)
+        : pluginHost_.load(info.format, info.path, {}, info.name, rate);
     QApplication::restoreOverrideCursor();
     if (loaded.handle == 0) {
         statusBar()->showMessage(
@@ -2657,8 +2666,10 @@ std::optional<PluginSlot> MainWindow::loadPlugin(std::size_t plugin, vloom::Plug
     statusBar()->showMessage(tr("%1 loaded").arg(name), 3000);
     PluginSlot slot;
     slot.format = info.format;
-    const std::u8string path = info.path.u8string();
-    slot.path.assign(path.begin(), path.end());
+    if (!builtin) {
+        const std::u8string path = info.path.u8string();
+        slot.path.assign(path.begin(), path.end());
+    }
     slot.id = loaded.info.id;
     slot.name = loaded.info.name.empty() ? info.name : loaded.info.name;
     slot.instance = loaded.handle;
@@ -2871,8 +2882,21 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
         return;
     }
     const auto instance = pluginHost_.instance(handle);
-    if (instance == nullptr || !instance->processor().hasEditor())
+    if (instance == nullptr)
         return;
+    if (!instance->processor().hasEditor()) {
+        // No editor of its own (the built-in effects): a knob per parameter.
+        if (instance->processor().parameters().empty())
+            return;
+        auto* controls = new ParameterEditorWindow(instance, title, this);
+        connect(controls, &ParameterEditorWindow::edited, this, [this] {
+            pluginsEdited_ = true; // unsaved changes
+            setWindowModified(true);
+        });
+        pluginEditors_[handle] = controls;
+        controls->show();
+        return;
+    }
     auto* editor = new PluginEditorWindow(instance, title, this);
     connect(editor, &PluginEditorWindow::edited, this, [this] {
         pluginsEdited_ = true; // unsaved changes
@@ -3210,6 +3234,8 @@ void MainWindow::showLauncher()
 
 bool MainWindow::isScannedPlugin(const PluginSlot& slot) const
 {
+    if (slot.format == PluginFormat::Builtin)
+        return true; // part of the app: no file of the project's choosing is loaded
     const QString wanted = QString::fromStdString(slot.path);
     return std::any_of(pluginStore_.plugins.begin(), pluginStore_.plugins.end(), [&](const PluginInfo& info) {
         return info.format == slot.format && samePath(toQString(info.path), wanted);

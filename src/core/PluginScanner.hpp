@@ -10,9 +10,12 @@
 
 namespace vloomdaw {
 
-enum class PluginFormat { Vst3, Clap };
+/// Builtin: an effect that comes with VloomDAW (vloom-engine's built-in
+/// processors). It has no file: its PluginInfo::path holds its id, e.g.
+/// "vloom.eq".
+enum class PluginFormat { Vst3, Clap, Builtin };
 
-[[nodiscard]] std::string_view formatName(PluginFormat format); ///< "VST3", "CLAP"
+[[nodiscard]] std::string_view formatName(PluginFormat format); ///< "VST3", "CLAP", "Built-in"
 
 /// A plugin. scanPluginFolders() fills in what the file system tells
 /// (name from the file, vendor from the install folder); a probe of the
@@ -23,7 +26,7 @@ struct PluginInfo {
 
     std::string name; ///< file name without its extension until probed, e.g. "Vital"
     PluginFormat format = PluginFormat::Vst3;
-    std::filesystem::path path; ///< the .vst3 / .clap file or bundle folder
+    std::filesystem::path path; ///< the .vst3 / .clap file or bundle folder; built-in: its id
     std::string vendor; ///< factory vendor, else the install folder ("FabFilter/..."), else empty
     std::string category = "Uncategorized"; ///< see pluginCategories()
     std::string version;

@@ -12,6 +12,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   app (vloom-engine #27). The same box hung the Windows CI job.
 
 ### Added
+- Built-in effects: the effects that come with VloomDAW (EQ and Gain, from
+  vloom-dsp) are listed with the scanned plugins, in the Plugins panel and
+  the mixer's plugin picker. They have no editor of their own: a window with
+  a knob per parameter opens instead, a column per band. Projects save them
+  by id (`"format": "builtin"`).
 - Playlist: hold Alt while moving, trimming or slicing a clip to do it
   freely, without snapping to the grid.
 - Playlist time bar scrub: click or drag the timeline ruler (time bar) on top of

@@ -8,6 +8,8 @@
 #include <QSettings>
 #include <QString>
 
+#include <vector>
+
 namespace vloomdaw {
 
 namespace {
@@ -76,7 +78,7 @@ PluginStore PluginStore::load()
         info.probeError = text(s, "probeError");
         info.userCategory = text(s, "userCategory");
         info.userInstrumentType = text(s, "userType");
-        if (!info.name.empty())
+        if (!info.name.empty() && info.format != PluginFormat::Builtin)
             store.plugins.push_back(std::move(info));
     }
     s.endArray();
@@ -99,9 +101,10 @@ void PluginStore::save() const
 {
     QSettings s;
     s.remove(kPlugins);
-    s.beginWriteArray(kPlugins, static_cast<int>(plugins.size()));
-    for (int i = 0; i < static_cast<int>(plugins.size()); ++i) {
-        const PluginInfo& info = plugins[static_cast<std::size_t>(i)];
+    const std::vector<PluginInfo> files = scanned().plugins; // built-ins are not a scan's
+    s.beginWriteArray(kPlugins, static_cast<int>(files.size()));
+    for (int i = 0; i < static_cast<int>(files.size()); ++i) {
+        const PluginInfo& info = files[static_cast<std::size_t>(i)];
         s.setArrayIndex(i);
         s.setValue(QStringLiteral("name"), QString::fromStdString(info.name));
         s.setValue(QStringLiteral("format"), formatKey(info.format));
@@ -129,6 +132,19 @@ void PluginStore::save() const
         s.setValue(QStringLiteral("path"), toQString(extraFolders[static_cast<std::size_t>(i)].path));
     }
     s.endArray();
+}
+
+void PluginStore::setBuiltins(const std::vector<PluginInfo>& builtins)
+{
+    std::erase_if(plugins, [](const PluginInfo& info) { return info.format == PluginFormat::Builtin; });
+    plugins.insert(plugins.end(), builtins.begin(), builtins.end());
+}
+
+PluginStore PluginStore::scanned() const
+{
+    PluginStore store = *this;
+    std::erase_if(store.plugins, [](const PluginInfo& info) { return info.format == PluginFormat::Builtin; });
+    return store;
 }
 
 std::vector<PluginFolder> PluginStore::scanFolders() const
