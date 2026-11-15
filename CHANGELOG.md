@@ -6,6 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Windows: a plugin file that cannot be loaded (not a plugin, or missing its
+  own DLLs) no longer shows a system "Bad Image" message box that stops the
+  app (vloom-engine #27). The same box hung the Windows CI job.
+
 ### Added
 - Playlist time bar scrub: click or drag the timeline ruler (time bar) on top of
   the playlist to scrub or relocate playback at any time, without having to switch
