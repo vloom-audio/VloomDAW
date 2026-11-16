@@ -21,6 +21,7 @@
 #include <QToolButton>
 
 #include <algorithm>
+#include <cmath>
 
 namespace vloomdaw {
 

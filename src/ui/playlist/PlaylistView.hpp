@@ -39,8 +39,8 @@ struct PeakMip {
 struct ClipAudio {
     double seconds = 0.0; ///< length
     double peakSeconds = 0.01; ///< time each entry of `peaks` covers
-    std::vector<float> peaks; ///< largest absolute sample per peakSeconds, both channels
-    std::vector<PeakMip> mips; ///< coarser mip levels (8x, 64x, 512x) built on the loader thread
+    std::vector<float> peaks{}; ///< largest absolute sample per peakSeconds, both channels
+    std::vector<PeakMip> mips{}; ///< coarser mip levels (8x, 64x, 512x) built on the loader thread
     bool loading = false; ///< decoding in the background: show placeholder until ready
 };
 

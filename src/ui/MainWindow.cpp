@@ -849,7 +849,7 @@ const ClipAudio* MainWindow::clipAudio(const std::string& path)
     if (const auto sample = rackAudio_.cachedSample(path); sample && sample->sampleRate() > 0.0)
         return clipAudio_.emplace(path, makeClipAudio(*sample)).first->second.get();
     if (rackAudio_.isLoading(path)) {
-        static const ClipAudio kLoading{.loading = true};
+        static const ClipAudio kLoading{0.0, 0.01, {}, {}, true};
         return &kLoading;
     }
     static const ClipAudio kUnknown{};
@@ -880,7 +880,9 @@ void MainWindow::loadSampleThen(
 
     pendingLoads_[file].emplace_back(std::move(then), std::move(onFailed));
     rackAudio_.setLoading(file, true);
-    clipAudio_[file] = std::make_shared<ClipAudio>(ClipAudio{.loading = true});
+    auto loadingClip = std::make_shared<ClipAudio>();
+    loadingClip->loading = true;
+    clipAudio_[file] = std::move(loadingClip);
 
     startLoader();
     ++loading_;
