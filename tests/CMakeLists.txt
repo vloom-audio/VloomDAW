@@ -32,7 +32,9 @@ add_executable(vloomdaw_tests
     core/ScalesTests.cpp
     core/TapTempoTests.cpp
     core/ThemePresetsTests.cpp
-    core/TransportLayoutTests.cpp)
+    core/TrackRoutingTests.cpp
+    core/TransportLayoutTests.cpp
+    core/UndoHistoryTests.cpp)
 
 target_link_libraries(vloomdaw_tests PRIVATE vloomdaw_core Catch2::Catch2WithMain)
 vloomdaw_copy_ffmpeg_dlls(vloomdaw_tests)

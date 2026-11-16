@@ -1,15 +1,15 @@
 # VloomDAW is split into three layers. Dependencies only point downwards:
 #
 #   app/   VloomDAW executable: main(), wiring
-#     │
+#     โ”
 #   ui/    vloomdaw_ui   (Qt Widgets) windows and widgets, no audio logic
-#     │
+#     โ”
 #   core/, audio/        vloomdaw_core (no Qt) logic and engine glue, unit-tested
 
 # ---------------------------------------------------------------- core (no Qt)
 add_library(vloomdaw_core STATIC)
 target_sources(vloomdaw_core PRIVATE
-    # core — pure logic: formatting, (later) project model, commands, undo
+    # core โ€” pure logic: formatting, (later) project model, commands, undo
     core/AudioFormat.cpp
     core/BrowserFilter.cpp
     core/Decibels.cpp
@@ -29,9 +29,11 @@ target_sources(vloomdaw_core PRIVATE
     core/Scales.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
+    core/TrackRouting.cpp
     core/TransportLayout.cpp
+    core/UndoHistory.cpp
 
-    # audio — owns the engine and the hardware device
+    # audio โ€” owns the engine and the hardware device
     audio/AudioController.cpp
     audio/ChannelRackAudio.cpp
     audio/FileDecoder.cpp

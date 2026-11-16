@@ -8,10 +8,12 @@
 #include <vloom/engine/Engine.hpp>
 #include <vloom/engine/sequencer/SequencerState.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -54,9 +56,15 @@ public:
     /// null if it cannot be loaded. For the playlist's clip lengths and
     /// waveforms. Uses the rate of the last sync().
     [[nodiscard]] std::shared_ptr<const vloom::SampleBuffer> sample(const std::string& path);
+    /// The already-loaded sample at `path`, or null without loading from disk.
+    [[nodiscard]] std::shared_ptr<const vloom::SampleBuffer> cachedSample(const std::string& path) const;
 
     /// Whether the sample at `path` is loaded at `sampleRate` already.
     [[nodiscard]] bool hasSample(const std::string& path, double sampleRate) const;
+    /// Marks `path` as being decoded on a background thread so sync() does not
+    /// block the UI thread trying to load it synchronously meanwhile.
+    void setLoading(const std::string& path, bool loading);
+    [[nodiscard]] bool isLoading(const std::string& path) const;
     /// Takes a sample loaded elsewhere (on a background thread) at
     /// `sampleRate` for `path`, so the next sync() does not load it again.
     /// Ignored when the rack is at another rate.
@@ -70,7 +78,11 @@ public:
     void setSourceResolver(SourceResolver resolver) { resolver_ = std::move(resolver); }
 
     /// The song's tempo, for audio clips fitted to it (AudioClip::fit).
-    void setTempo(double bpm) { tempo_ = bpm > 0.0 ? bpm : tempo_; }
+    void setTempo(double bpm)
+    {
+        if (std::isfinite(bpm) && bpm > 0.0)
+            tempo_ = bpm;
+    }
     /// Gives an audio clip fitted by stretching its stretched sample: the
     /// sample at `path` made `ratio` times as long, or null while it is not
     /// ready (the clip then plays resampled meanwhile, its pitch following).
@@ -93,6 +105,7 @@ private:
     std::vector<std::shared_ptr<vloom::ChannelVoices>> voices_; ///< index = channel
     std::map<std::string, std::shared_ptr<const vloom::SampleBuffer>> samples_; ///< by path, at rate_
     std::map<std::string, std::string> failed_; ///< path -> error, at rate_
+    std::set<std::string> loading_; ///< paths currently decoding on a background thread
     SourceResolver resolver_;
     StretchProvider stretch_;
     PluginResolver plugins_;
