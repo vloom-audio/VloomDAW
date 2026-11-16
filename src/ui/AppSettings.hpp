@@ -28,6 +28,10 @@ struct AppSettings {
 
     // Stem extractor
     QString stemModel; ///< id of the model in use (core/StemModels); empty: none chosen yet
+    bool stemUseGpu = true; ///< run models that can on the graphics card
+    int stemOverlap = 25; ///< ONNX models: percent of each piece shared with the next (25, 50 or 75)
+    bool stemMuteOriginal = true; ///< mute a clip once its stems are placed under it
+    bool stemFasterOffered = false; ///< asked once whether to leave a slow model for a faster one
 
     // General
     PositionMode startPositionMode = PositionMode::BarsBeats;

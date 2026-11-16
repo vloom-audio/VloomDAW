@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <memory>
 
+class QCheckBox;
 class QCryptographicHash;
 class QFile;
 class QLabel;
@@ -32,15 +33,18 @@ class StemModelStore : public QDialog {
 
 public:
     /// `chosen`: the id of the model in use (may be empty or unknown).
-    explicit StemModelStore(const QString& chosen, QWidget* parent = nullptr);
+    /// `useGpu`: whether models that can run on the graphics card.
+    explicit StemModelStore(const QString& chosen, bool useGpu, QWidget* parent = nullptr);
     ~StemModelStore() override;
 
     /// The model in use: one that is installed, or empty.
     [[nodiscard]] QString chosen() const { return chosen_; }
+    [[nodiscard]] bool useGpu() const;
 
 signals:
     /// The user picked another model to use (or the one in use was removed).
     void chosenChanged(const QString& id);
+    void useGpuChanged(bool on);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -64,6 +68,7 @@ private:
     QProgressBar* progress_ = nullptr;
     QPushButton* downloadButton_ = nullptr;
     QPushButton* removeButton_ = nullptr;
+    QCheckBox* gpu_ = nullptr; ///< null in builds without a graphics-card path
     QPushButton* useButton_ = nullptr;
 
     // The download under way, one file after another.

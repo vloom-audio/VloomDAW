@@ -50,7 +50,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
   own DLLs) no longer shows a system "Bad Image" message box that stops the
   app (vloom-engine #27). The same box hung the Windows CI job.
 
+### Changed
+- File > Export WAV… is now File > Export…: one dialog for the file, the
+  format and its options, instead of a file dialog followed by a question.
+
 ### Added
+- Export to FLAC (16 or 24-bit), MP3, Ogg Vorbis and M4A (AAC, 96 to
+  320 kbps) besides WAV; stereo or mono; dithering on or off; with or without
+  the tail after the song's end; "show the file when it is done". The export
+  dialog shows the song's length and about how large the file will be, and
+  remembers its choices. Tags (title, artist, album, year, genre, comment)
+  are written into the file in every format; the title starts as the
+  project's name, and the artist and genre are remembered. MP3 and Ogg Vorbis need an FFmpeg built with LAME and
+  libvorbis (the Windows build has them; the static macOS and Linux release
+  builds do not, and grey those formats out).
 - Studio One-style Plugins Side Browser & Plug-in Thumbnails (`PluginsPanel`,
   `PluginThumbnails`, `PluginEditorWindow`, `ParameterEditorWindow`):
   - Segmented **`Instruments`** and **`FX`** top tabs with live counts, sort/group
@@ -134,6 +147,44 @@ and the project uses [Semantic Versioning](https://semver.org/).
   snap, arrow keys to move, and right-drag to delete. The Edit menu's
   commands act on the piano roll.
 - Piano roll: undo and redo of note edits (200 steps).
+- Stem extractor on the graphics card (Windows): the new HT Demucs model runs
+  through ONNX Runtime with DirectML on any DirectX 12 card (NVIDIA, AMD,
+  Intel). On a GTX 1650, 20 s of audio took 10 s all told, where the
+  processor-only path took over 100 s. Without a usable card, or when the
+  card fails or its result does not add up to the song, the processor takes
+  over by itself (and is still several times faster than before). ONNX
+  versions of HT Demucs 6 and HT Demucs FT run on the processor. The model
+  store shows what each model runs on and has a switch for the graphics
+  card. The earlier demucs.cpp models stay, as "compact". Windows builds now
+  ship `onnxruntime.dll` (MIT) and `DirectML.dll` (Microsoft's own licence,
+  redistributable, not open source) next to the helper.
+- Stem extractor: four MDX-Net models from Ultimate Vocal Remover (MIT; thanks
+  to UVR and its developers) in the Windows model store. Each gives one stem
+  and the rest of the song: Vocals (Voc FT), Instrumental (Inst HQ 3),
+  Karaoke (the lead vocal out, backing vocals kept) and De-Reverb (FoxJoy's).
+  The first three run on the graphics card (20 s of audio in 5 to 7 s on a
+  GTX 1650, 11 to 17 s on the processor); De-Reverb needs more memory than a
+  4 GB card has and runs on the processor. Results match UVR's own method to
+  one part in a million. They come from UVR's releases on github.com, each
+  file checked against its SHA-256.
+- Stem extractor: a card that runs short of memory gives values that are not
+  numbers; these now count as a failure and the processor takes over, where
+  they could have come out as silence.
+- Stem extractor: with a model from before the faster engine, the app asks
+  once whether to pick a faster one; the store marks those "Processor (slow)".
+- Settings > Stem Extractor (also Options > Stem Extractor Settings…): the
+  model in use among those downloaded, the way to the model store, the
+  graphics card switch, the overlap, and whether the clip is muted once its
+  stems are placed (it was always muted).
+- Stem extractor: Overlap (25, 50 or 75 %): how much of each piece given to
+  the model is shared with the next. More gives smoother joins and takes
+  longer (on a GTX 1650, 20 s of audio: 7, 8 and 12 s with an MDX-Net model).
+  For the ONNX models; stems made with another overlap are kept as their own
+  set. The segment length is fixed by the model files and is shown, not set.
+- Settings > Theme: the presets sit four to a row across the card, the
+  adjustment knobs are larger, a stray line under them is gone, and the page
+  fits the window without scrolling. Settings pages that do scroll have a
+  scroll bar in the theme's colours.
 - Piano roll: the keyboard on the left, and a note while it is placed or
   moved, sound through the channel's instrument plugin.
 - Synth editor: a power button (the channel's instrument on or off, saved

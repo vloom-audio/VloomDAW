@@ -5,6 +5,7 @@
 #include "ui/Theme.hpp"
 #include "ui/dialogs/SettingsDialog/AudioSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp"
+#include "ui/dialogs/SettingsDialog/StemSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp"
 
 #include <QDialogButtonBox>
@@ -29,7 +30,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     setObjectName(QStringLiteral("settingsDialog"));
     setWindowTitle(tr("Settings"));
     setMinimumSize(760, 520);
-    resize(880, 700);
+    resize(900, 780);
 
     // Navigation: a heading and one entry per page, with an icon.
     auto* navBox = new QWidget(this);
@@ -69,6 +70,9 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     theme_ = new ThemeSettingsPage(this);
     addPage(QStringLiteral("palette"), tr("Theme"), tr("Colours of the whole app. Changes show at once."),
         theme_);
+    stems_ = new StemSettingsPage(this);
+    addPage(QStringLiteral("stems"), tr("Stem Extractor"),
+        tr("The model that splits audio clips into stems, and what runs it."), stems_);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::close);

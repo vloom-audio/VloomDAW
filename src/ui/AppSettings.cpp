@@ -22,6 +22,10 @@ constexpr QLatin1StringView kBrowserFolders{"browser/folders"};
 constexpr QLatin1StringView kBrowserFolder{"browser/current"};
 constexpr QLatin1StringView kBrowserAutoPreview{"browser/autoPreview"};
 constexpr QLatin1StringView kStemModel{"stems/model"};
+constexpr QLatin1StringView kStemUseGpu{"stems/useGpu"};
+constexpr QLatin1StringView kStemFasterOffered{"stems/fasterOffered"};
+constexpr QLatin1StringView kStemMuteOriginal{"stems/muteOriginal"};
+constexpr QLatin1StringView kStemOverlap{"stems/overlap"};
 constexpr QLatin1StringView kThemePalette{"theme/palette"};
 constexpr QLatin1StringView kThemeAccent{"theme/accent"};
 constexpr QLatin1StringView kThemeHue{"theme/hue"};
@@ -77,6 +81,10 @@ AppSettings AppSettings::load()
     a.browserFolder = s.value(kBrowserFolder, a.browserFolders.value(0)).toString();
     a.browserAutoPreview = s.value(kBrowserAutoPreview, a.browserAutoPreview).toBool();
     a.stemModel = s.value(kStemModel).toString().left(64);
+    a.stemUseGpu = s.value(kStemUseGpu, a.stemUseGpu).toBool();
+    a.stemOverlap = std::clamp(s.value(kStemOverlap, a.stemOverlap).toInt(), 25, 75);
+    a.stemMuteOriginal = s.value(kStemMuteOriginal, a.stemMuteOriginal).toBool();
+    a.stemFasterOffered = s.value(kStemFasterOffered, a.stemFasterOffered).toBool();
     return a;
 }
 
@@ -93,6 +101,10 @@ void AppSettings::save() const
     s.setValue(kBrowserFolder, browserFolder);
     s.setValue(kBrowserAutoPreview, browserAutoPreview);
     s.setValue(kStemModel, stemModel);
+    s.setValue(kStemUseGpu, stemUseGpu);
+    s.setValue(kStemOverlap, stemOverlap);
+    s.setValue(kStemMuteOriginal, stemMuteOriginal);
+    s.setValue(kStemFasterOffered, stemFasterOffered);
     s.setValue(kThemePalette, QString::fromStdString(theme.paletteId));
     s.setValue(kThemeAccent, QString::fromStdString(theme.accentId));
     s.setValue(kThemeHue, theme.adjustments.hue);

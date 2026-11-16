@@ -32,8 +32,10 @@ target_sources(vloomdaw_core PRIVATE
     core/ProjectFile.cpp
     core/SampleFolder.cpp
     core/Scales.cpp
+    core/MdxSpectrogram.cpp
     core/StemChunks.cpp
     core/StemModels.cpp
+    core/StemSpectrogram.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
     core/TrackRouting.cpp
@@ -44,6 +46,7 @@ target_sources(vloomdaw_core PRIVATE
     audio/AudioController.cpp
     audio/ChannelRackAudio.cpp
     audio/FileDecoder.cpp
+    audio/FileEncoder.cpp
     audio/TempoDetector.cpp
     audio/TimeStretch.cpp
     audio/MixerAudio.cpp
@@ -52,6 +55,10 @@ target_sources(vloomdaw_core PRIVATE
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vloomdaw_core PUBLIC vloom::engine vloom::dsp PRIVATE vloomdaw::ffmpeg signalsmith-stretch nlohmann_json::nlohmann_json)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
+if(VLOOMDAW_STEMS_ONNX)
+    # The model store offers the ONNX models only where the helper can run them.
+    target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_STEMS_ONNX)
+endif()
 vloom_set_warnings(vloomdaw_core)
 
 # ---------------------------------------------------------------- plugin probe (no Qt)
@@ -112,6 +119,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/browser/SearchResultsModel.hpp
     ui/channelrack/ChannelRackView.cpp
     ui/channelrack/ChannelRackView.hpp
+    ui/dialogs/ExportDialog.cpp
+    ui/dialogs/ExportDialog.hpp
     ui/dialogs/SettingsDialog/AudioSettingsPage.cpp
     ui/dialogs/SettingsDialog/AudioSettingsPage.hpp
     ui/dialogs/SettingsDialog/GeneralSettingsPage.cpp
@@ -120,6 +129,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/dialogs/SettingsDialog/SettingsCard.hpp
     ui/dialogs/SettingsDialog/SettingsDialog.cpp
     ui/dialogs/SettingsDialog/SettingsDialog.hpp
+    ui/dialogs/SettingsDialog/StemSettingsPage.cpp
+    ui/dialogs/SettingsDialog/StemSettingsPage.hpp
     ui/dialogs/SettingsDialog/ThemeSettingsPage.cpp
     ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp
     ui/mixer/MixerPanel.cpp
@@ -254,6 +265,7 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/speaker-mute.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/step-back.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/step-forward.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/stems.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/stop.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/thumbnail.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-delete.svg
@@ -332,6 +344,16 @@ if(NOT APPLE)
 endif()
 # Windows: FFmpeg's DLLs (LGPL) go next to the app, with FFmpeg's licence.
 # macOS and Linux release builds link a static FFmpeg (scripts/build-ffmpeg.sh).
+# The stem separator's ONNX Runtime and DirectML, with their licences.
+if(VLOOMDAW_STEMS_ONNX)
+    install(FILES ${VLOOMDAW_ONNX_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
+    list(GET VLOOMDAW_ONNX_LICENSES 0 _ort_license)
+    list(GET VLOOMDAW_ONNX_LICENSES 1 _ort_notices)
+    list(GET VLOOMDAW_ONNX_LICENSES 2 _dml_license)
+    install(FILES "${_ort_license}" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME OnnxRuntime-LICENSE.txt)
+    install(FILES "${_ort_notices}" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME OnnxRuntime-ThirdPartyNotices.txt)
+    install(FILES "${_dml_license}" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME DirectML-LICENSE.txt)
+endif()
 if(WIN32 AND VLOOMDAW_FFMPEG_DLLS)
     install(FILES ${VLOOMDAW_FFMPEG_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
     if(EXISTS "${FFMPEG_ROOT}/LICENSE.txt")

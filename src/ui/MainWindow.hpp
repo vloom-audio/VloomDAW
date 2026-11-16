@@ -180,6 +180,8 @@ private:
     void placeStems(const AudioClip& clip, const QList<StemFile>& stems, int next = 0);
     /// Opens the model store. True when a model is in use afterwards.
     bool showStemModels();
+    /// Settings → Stem Extractor shows what is downloaded and chosen now.
+    void refreshStemSettings();
     /// Fits audio clip `index` to the song's tempo with `fit` (or stops),
     /// detecting its sample's tempo first when it has none.
     void setAudioClipFit(std::size_t index, AudioClip::Fit fit);
