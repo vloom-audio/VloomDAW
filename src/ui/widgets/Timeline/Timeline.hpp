@@ -34,7 +34,8 @@ enum class GridStyle {
 /// stronger. Lines closer than a few pixels are skipped.
 void paintGrid(QPainter& painter, const QRect& rect, const Scale& scale, int minorTicks,
     GridStyle style = GridStyle::Dense);
-/// Playhead line at `tick` over `rect` (nothing when it is off screen or < 0).
+/// Playhead line (and ruler marker head when `rect` covers the ruler) at
+/// `tick` over `rect` (nothing when it is off screen or < 0).
 void paintPlayhead(QPainter& painter, const QRect& rect, const Scale& scale, double tick);
 /// The playhead's head: a small marker pointing down at the line, at the
 /// bottom of `ruler` (the ruler above the area paintPlayhead() draws in).

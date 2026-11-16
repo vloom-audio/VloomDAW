@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/plugins/PluginStore.hpp"
 
+#include "core/ProjectFile.hpp"
 #include "ui/FilePaths.hpp"
 
 #include <QFile>
@@ -78,7 +79,9 @@ PluginStore PluginStore::load()
         info.probeError = text(s, "probeError");
         info.userCategory = text(s, "userCategory");
         info.userInstrumentType = text(s, "userType");
-        if (!info.name.empty() && info.format != PluginFormat::Builtin)
+        info.enabled = s.value(QStringLiteral("enabled"), true).toBool();
+        info.favorite = s.value(QStringLiteral("favorite"), false).toBool();
+        if (!info.name.empty() && info.format != PluginFormat::Builtin && !isNetworkPath(info.path))
             store.plugins.push_back(std::move(info));
     }
     s.endArray();
@@ -89,9 +92,12 @@ PluginStore PluginStore::load()
     for (int i = 0; i < folders; ++i) {
         s.setArrayIndex(i);
         const QString path = s.value(QStringLiteral("path")).toString();
-        if (!path.isEmpty())
-            store.extraFolders.push_back(
-                {formatFromKey(s.value(QStringLiteral("format")).toString()), toPath(path)});
+        if (isLocalPath(path)) {
+            const std::filesystem::path fsPath = toPath(path);
+            if (!isNetworkPath(fsPath))
+                store.extraFolders.push_back(
+                    {formatFromKey(s.value(QStringLiteral("format")).toString()), fsPath});
+        }
     }
     s.endArray();
     return store;
@@ -119,6 +125,8 @@ void PluginStore::save() const
         s.setValue(QStringLiteral("probeError"), QString::fromStdString(info.probeError));
         s.setValue(QStringLiteral("userCategory"), QString::fromStdString(info.userCategory));
         s.setValue(QStringLiteral("userType"), QString::fromStdString(info.userInstrumentType));
+        s.setValue(QStringLiteral("enabled"), info.enabled);
+        s.setValue(QStringLiteral("favorite"), info.favorite);
     }
     s.endArray();
     s.setValue(kLastScan, lastScan);

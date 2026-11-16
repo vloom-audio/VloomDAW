@@ -115,6 +115,7 @@ void paintPlayhead(QPainter& painter, const QRect& rect, const Scale& scale, dou
     // Anti-aliased at its exact position, so it glides instead of stepping
     // a whole pixel at a time.
     painter.save();
+    painter.setClipRect(rect);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.fillRect(QRectF(x - 1.0, rect.top(), 2.0, rect.height()), Theme::colors().playing);
     painter.restore();
@@ -148,7 +149,7 @@ QRect playheadRect(const QRect& rect, const Scale& scale, double tick)
     if (std::isnan(x))
         return {};
     // As wide as the head, the widest part.
-    const int half = static_cast<int>(kPlayheadHeadHalfWidth) + 2;
+    const int half = static_cast<int>(kPlayheadHeadHalfWidth) + 3;
     return {static_cast<int>(std::floor(x)) - half, rect.top(), 2 * half + 1, rect.height()};
 }
 

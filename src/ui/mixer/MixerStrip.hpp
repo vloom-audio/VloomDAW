@@ -12,6 +12,7 @@
 #include <vector>
 
 class QLabel;
+class QResizeEvent;
 class QToolButton;
 
 namespace vloomdaw {
@@ -21,9 +22,9 @@ class Knob;
 class LevelMeter;
 class MixerSlotRack;
 
-/// One mixer track: name, pan knob, level meter, fader, dB readout, mute
-/// and solo, like a track in FL Studio's mixer. A pure view: it emits what
-/// the user did; MixerPanel adds the track number.
+/// One mixer track: name, pan knob, FX rack, level meter, fader, dB readout,
+/// mute and solo. Emits user interactions; MixerPanel manages strip ordering
+/// and selection state.
 class MixerStrip : public QFrame {
     Q_OBJECT
 
@@ -37,10 +38,22 @@ public:
     void setLabel(const QString& name, const QString& number);
     /// The user's colour (0xRRGGBB), drawn as a bar along the top; nullopt: none.
     void setColor(std::optional<std::uint32_t> color);
+    /// Marks this strip as the currently selected mixer channel (Fender Studio style).
+    void setSelected(bool selected);
+    [[nodiscard]] bool isSelected() const { return selected_; }
     /// Shows how many effects the track has (kept for compatibility).
     void setEffectCount(std::size_t count);
     /// Shows the track's effects in the FX rack.
     void setEffects(const std::vector<PluginSlot>& effects);
+    [[nodiscard]] bool hasEffects() const { return effectCount_ > 0; }
+    /// Toggles wider strip & FX slot layout (68 px vs 88 px).
+    void setWideMode(bool wide);
+    /// Shows or hides the FX slot rack so faders can use the full strip height.
+    void setFxRackVisible(bool visible);
+    /// Marks what kind of channel routes into this insert strip for footer filtering.
+    void setSourceFlags(bool hasAudio, bool hasInstrument);
+    [[nodiscard]] bool hasAudioSource() const { return hasAudioSource_; }
+    [[nodiscard]] bool hasInstrumentSource() const { return hasInstrumentSource_; }
     /// Shows saved settings (a project was opened) without signalling them back.
     void setValues(double fader, double pan, bool muted, bool soloed);
     [[nodiscard]] std::optional<std::uint32_t> color() const { return color_; }
@@ -52,12 +65,15 @@ public slots:
     void setSilenced(bool silenced);
 
 signals:
+    void clicked();
     void faderChanged(double position); ///< 0..1, see faderToGain()
     void panChanged(double pan); ///< -1 left .. +1 right
     void muteToggled(bool muted);
     void soloToggled(bool soloed);
     /// The name was double-clicked (inserts only): the user wants to rename.
     void renameRequested();
+    /// The top colour bar was clicked: open the colour picker at `globalPos`.
+    void colorPickRequested(const QPoint& globalPos);
     /// The FX button was clicked: show the track's effects at `globalPos`.
     void effectsMenuRequested(const QPoint& globalPos);
     /// An effect slot's bypass switch was clicked.
@@ -73,6 +89,8 @@ signals:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -81,6 +99,7 @@ private:
     void showDb(double position);
     /// Shows fullName_ in name_, cut with "…" to the room it has.
     void elideName();
+    void syncFxSlotCount();
 
     LevelMeter* meter_ = nullptr;
     Fader* fader_ = nullptr;
@@ -89,10 +108,17 @@ private:
     QLabel* name_ = nullptr;
     QString fullName_;
     QLabel* number_ = nullptr;
+    QLabel* route_ = nullptr;
     QToolButton* mute_ = nullptr;
     QToolButton* solo_ = nullptr; ///< inserts only
-    MixerSlotRack* fxRack_ = nullptr; ///< one slot per effect
+    MixerSlotRack* fxRack_ = nullptr; ///< scrollable FX slots
+    Kind kind_ = Kind::Insert;
+    std::size_t effectCount_ = 0;
+    bool wideMode_ = false;
+    bool hasAudioSource_ = false;
+    bool hasInstrumentSource_ = false;
     std::optional<std::uint32_t> color_;
+    bool selected_ = false;
 };
 
 } // namespace vloomdaw

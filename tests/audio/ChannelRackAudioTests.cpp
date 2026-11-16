@@ -5,6 +5,7 @@
 #include <vloom/engine/plugin/PluginInstance.hpp>
 #include <vloom/engine/render/OfflineRenderer.hpp>
 #include <vloom/engine/render/WavWriter.hpp>
+#include <vloom/engine/sample/SampleLoader.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -13,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -528,4 +530,62 @@ TEST_CASE("A channel whose plugin is not loaded plays its sample", "[audio]")
     rack.sync(engine, project, 0, kRate);
     engine.play();
     CHECK(onsets(render(engine, 0.05)) == std::vector<std::size_t>{0});
+}
+
+TEST_CASE("Samples marked as loading in the background do not block sync until stored", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    project.setStep(0, 0, 0, true);
+
+    int resolverCalls = 0;
+    vloom::Engine engine;
+    prepare(engine);
+    ChannelRackAudio rack;
+    rack.setSourceResolver([&](const std::string& path, double, std::string*) {
+        ++resolverCalls;
+        return path;
+    });
+
+    rack.setLoading(samples.impulse, true);
+    CHECK(rack.isLoading(samples.impulse));
+    CHECK(rack.sync(engine, project, 0, kRate).empty());
+    CHECK(resolverCalls == 0); // never loaded synchronously on the UI thread while loading
+
+    std::string err;
+    auto loaded = vloom::loadSample(samples.impulse, kRate, &err);
+    REQUIRE(loaded != nullptr);
+    rack.store(samples.impulse, loaded, kRate);
+    CHECK_FALSE(rack.isLoading(samples.impulse));
+    CHECK(rack.cachedSample(samples.impulse) == loaded);
+
+    CHECK(rack.sync(engine, project, 0, kRate).empty());
+    CHECK(resolverCalls == 0);
+    engine.play();
+    CHECK(onsets(render(engine, 0.05)) == std::vector<std::size_t>{0});
+}
+
+TEST_CASE(
+    "ChannelRackAudio rejects non-finite tempo so fitted audio clips never receive infinite rate", "[audio]")
+{
+    const Samples samples;
+    Project project;
+    project.setChannelSample(0, samples.impulse);
+    AudioClip clip{0, 0, 0};
+    clip.fit = AudioClip::Fit::Resample;
+    clip.sourceBpm = 120.0;
+    project.addAudioClip(clip);
+
+    ChannelRackAudio rack;
+    rack.setTempo(120.0);
+    rack.setTempo(std::numeric_limits<double>::infinity());
+    rack.setTempo(std::numeric_limits<double>::quiet_NaN());
+
+    std::vector<ChannelRackAudio::LoadError> errors;
+    const auto state = rack.build(project, 0, kRate, true, errors);
+    REQUIRE(state != nullptr);
+    REQUIRE(state->audioClips.size() == 1);
+    CHECK(std::isfinite(state->audioClips[0].rate));
+    CHECK(state->audioClips[0].rate == 1.0);
 }

@@ -31,6 +31,12 @@ TEST_CASE("Setters clamp and ignore bad input", "[mixer]")
     CHECK(mixer.track(1).pan == -1.0);
     mixer.setPan(1, std::numeric_limits<double>::quiet_NaN());
     CHECK(mixer.track(1).pan == -1.0);
+    mixer.setFader(1, 0.5);
+    mixer.setFader(1, std::numeric_limits<double>::infinity());
+    mixer.setFader(1, -std::numeric_limits<double>::infinity());
+    CHECK(mixer.track(1).fader == 0.5);
+    mixer.setPan(1, std::numeric_limits<double>::infinity());
+    CHECK(mixer.track(1).pan == -1.0);
     mixer.setFader(99, 0.1); // out of range: no effect, no throw
     CHECK(mixer.effectiveGain(99) == 0.0);
 }

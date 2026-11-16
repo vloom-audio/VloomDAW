@@ -66,8 +66,31 @@ struct ProbeOutput {
 /// they set the category, else the one from the plugin's tags.
 [[nodiscard]] std::string effectiveInstrumentType(const PluginInfo& plugin);
 
-/// Copies the user's categories from an earlier scan to the same plugins in
-/// a new one (same format, path and name), so scans never undo them.
+/// Copies the user's categories, enabled state and favourites from an earlier
+/// scan to the same plugins in a new one (same format, path and name), so scans
+/// never undo them.
 void carryUserCategories(std::vector<PluginInfo>& fresh, const std::vector<PluginInfo>& earlier);
+
+/// High-level group for filtering: "Instrument" or "Effect".
+[[nodiscard]] std::string pluginMainGroup(const PluginInfo& plugin);
+
+/// Producer sub-categories (plain text, no icons/emojis), in display order.
+[[nodiscard]] const std::vector<std::string>& pluginSubCategories();
+
+/// Detects a practical sub-category for `plugin` (e.g. "Drums / Perc",
+/// "Guitar / Bass", "EQ / Filter", "Dynamics", "Reverb") from user overrides,
+/// factory tags and plugin/vendor names.
+[[nodiscard]] std::string detectPluginSubCategory(const PluginInfo& plugin);
+
+/// Deterministic 16-character hex key identifying a plugin's saved thumbnail
+/// across sessions, case-insensitive on path and name and normalized across
+/// directory separators. Never throws on ill-formed path code units.
+[[nodiscard]] std::string pluginThumbnailId(
+    PluginFormat format, const std::filesystem::path& path, std::string_view name);
+[[nodiscard]] std::string pluginThumbnailId(const PluginInfo& plugin);
+
+/// True iff `thumbId` is a strict 16-character ASCII hex digest (safe to use
+/// directly as a `<thumbId>.png` file stem with zero path-traversal risk).
+[[nodiscard]] bool isValidPluginThumbnailId(std::string_view thumbId) noexcept;
 
 } // namespace vloomdaw

@@ -32,6 +32,7 @@ constexpr int kPopupHeight = 540;
 constexpr int kColumnCount = 3;
 
 const QStringList kStandardCategoryOrder = {
+    QStringLiteral("Favorites"),
     QStringLiteral("Dynamics"),
     QStringLiteral("EQ"),
     QStringLiteral("Filter"),
@@ -114,6 +115,8 @@ void PluginPickerPopup::collectEntries()
     allEntries_.clear();
     for (std::size_t i = 0; i < store_.plugins.size(); ++i) {
         const auto& p = store_.plugins[i];
+        if (!p.enabled)
+            continue;
         const std::string cat = effectiveCategory(p);
         if (filter_ == Filter::Effect && cat == "Instrument")
             continue;
@@ -128,6 +131,7 @@ void PluginPickerPopup::collectEntries()
         entry.vendor = QString::fromStdString(p.vendor);
         entry.category = QString::fromStdString(cat.empty() ? "Uncategorized" : cat);
         entry.tags = QString::fromStdString(p.tags);
+        entry.favorite = p.favorite;
         allEntries_.push_back(std::move(entry));
     }
 
@@ -135,13 +139,22 @@ void PluginPickerPopup::collectEntries()
     std::sort(allEntries_.begin(), allEntries_.end(),
         [](const Entry& a, const Entry& b) { return a.name.localeAwareCompare(b.name) < 0; });
 
-    // Group by category
+    // Group by category (plus Favorites group when any entry is marked favorite)
+    std::vector<Entry*> favList;
     std::map<QString, std::vector<Entry*>> catMap;
     for (auto& entry : allEntries_) {
+        if (entry.favorite)
+            favList.push_back(&entry);
         catMap[entry.category].push_back(&entry);
     }
 
     groups_.clear();
+    if (!favList.empty()) {
+        CategoryGroup favGroup;
+        favGroup.name = tr("Favorites");
+        favGroup.entries = std::move(favList);
+        groups_.push_back(std::move(favGroup));
+    }
     for (auto& [name, list] : catMap) {
         CategoryGroup group;
         group.name = name;
@@ -355,7 +368,7 @@ void PluginPickerPopup::buildCategoriesView()
             });
 
             gLayout->addWidget(btn);
-            entry->buttonWidget = btn;
+            entry->buttonWidgets.push_back(btn);
         }
 
         group.groupWidget = groupWidget;
@@ -506,23 +519,23 @@ void PluginPickerPopup::filterPlugins(const QString& rawQuery)
         for (auto* entry : group.entries) {
             const bool matches = query.isEmpty() || entry->name.toLower().contains(query)
                 || entry->vendor.toLower().contains(query) || entry->tags.toLower().contains(query);
-            if (entry->buttonWidget != nullptr)
-                entry->buttonWidget->setVisible(matches);
-            if (matches) {
+            for (QWidget* btn : entry->buttonWidgets)
+                btn->setVisible(matches);
+            if (matches)
                 visibleInGroup++;
-                visibleCount++;
-            }
         }
         if (group.groupWidget != nullptr)
             group.groupWidget->setVisible(visibleInGroup > 0);
     }
 
-    // Filter Simple View
+    // Filter Simple View (and count unique matching plugins)
     for (auto& entry : allEntries_) {
         const bool matches = query.isEmpty() || entry.name.toLower().contains(query)
             || entry.vendor.toLower().contains(query) || entry.tags.toLower().contains(query);
         if (entry.simpleWidget != nullptr)
             entry.simpleWidget->setVisible(matches);
+        if (matches)
+            visibleCount++;
     }
 
     // Filter Tree View

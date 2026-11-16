@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdint>
+#include <exception>
 #include <utility>
 
 namespace vloomdaw {
@@ -236,14 +238,205 @@ void carryUserCategories(std::vector<PluginInfo>& fresh, const std::vector<Plugi
 {
     for (PluginInfo& plugin : fresh) {
         for (const PluginInfo& old : earlier) {
-            if (old.userCategory.empty() || old.format != plugin.format || old.path != plugin.path
-                || old.name != plugin.name)
+            if (old.format != plugin.format || old.path != plugin.path || old.name != plugin.name)
                 continue;
-            plugin.userCategory = old.userCategory;
-            plugin.userInstrumentType = old.userInstrumentType;
+            if (!old.userCategory.empty()) {
+                plugin.userCategory = old.userCategory;
+                plugin.userInstrumentType = old.userInstrumentType;
+            }
+            plugin.enabled = old.enabled;
+            plugin.favorite = old.favorite;
             break;
         }
     }
+}
+
+std::string pluginMainGroup(const PluginInfo& plugin)
+{
+    return effectiveCategory(plugin) == "Instrument" ? "Instrument" : "Effect";
+}
+
+const std::vector<std::string>& pluginSubCategories()
+{
+    static const std::vector<std::string> list{
+        "Drums / Perc",
+        "Piano / Keys",
+        "Guitar / Bass",
+        "Strings / Orch",
+        "Sampler / ROMpler",
+        "Synth / Lead",
+        "Reverb",
+        "Delay / Echo",
+        "Pitch / Vocal",
+        "EQ / Filter",
+        "Dynamics",
+        "Amp / Drive",
+        "Modulation",
+        "Channel / Master",
+        "Spatial / Imaging",
+        "Utility / Meter",
+        "Other FX",
+    };
+    return list;
+}
+
+namespace {
+
+bool containsAny(std::string_view haystack, std::initializer_list<std::string_view> needles)
+{
+    for (const std::string_view needle : needles) {
+        if (!needle.empty() && haystack.find(needle) != std::string_view::npos)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+std::string detectPluginSubCategory(const PluginInfo& plugin)
+{
+    const std::string cat = effectiveCategory(plugin);
+    const std::string n = lower(plugin.name);
+    const std::string v = lower(plugin.vendor);
+    const std::vector<std::string> tags = tagList(plugin.tags);
+    const auto hasTag
+        = [&](std::string_view t) { return std::find(tags.begin(), tags.end(), t) != tags.end(); };
+
+    if (cat == "Instrument") {
+        // Explicit user instrument type wins when chosen manually.
+        if (plugin.userCategory == "Instrument" && !plugin.userInstrumentType.empty()) {
+            const std::string& ut = plugin.userInstrumentType;
+            if (ut == "Drums")
+                return "Drums / Perc";
+            if (ut == "Keys")
+                return "Piano / Keys";
+            if (ut == "Sampler")
+                return "Sampler / ROMpler";
+            if (ut == "Synth")
+                return "Synth / Lead";
+        }
+
+        if (hasTag("drum") || hasTag("drum-machine")
+            || containsAny(n,
+                {"drum", "ezdrummer", "superior", "addictive drums", "ssd", "bfd", "battery", "groove agent",
+                    "atlas", "kick", "snare", "perc", "mt-power", "sitala"}))
+            return "Drums / Perc";
+
+        if (containsAny(n,
+                {"guitar", "ample", "realguitar", "realstrat", "reallpc", "realrick", "realeight",
+                    "shreddage", "odin", "strum", "modo bass", "ezbass", "trilian", "sublab", "scarbee",
+                    "virtual guitarist", "virtual bassist", "prominy", "electri6ity", "bass"}))
+            return "Guitar / Bass";
+
+        if (hasTag("piano")
+            || containsAny(n,
+                {"piano", "keys", "keyscape", "pianoteq", "ezkeys", "addictive keys", "noire", "alicia",
+                    "grand", "rhodes", "wurli", "organ", "b-3", "clav", "epiano", "ravenscroft", "ivory"}))
+            return "Piano / Keys";
+
+        if (containsAny(n,
+                {"orchestra", "strings", "violin", "cello", "brass", "choir", "symphobia", "philharmonik",
+                    "bbc symphony", "swam"}))
+            return "Strings / Orch";
+
+        if (hasTag("sampler")
+            || containsAny(n,
+                {"kontakt", "halion", "falcon", "uvi", "omnisphere", "nexus", "xpand", "zenology", "jv-1080",
+                    "xv-5080", "purity", "sampletank", "arcade", "serato sample", "decent sampler", "sampler",
+                    "rompler"}))
+            return "Sampler / ROMpler";
+
+        return "Synth / Lead";
+    }
+
+    // Effects: check user category override first, then probed category + producer name heuristics.
+    if (!plugin.userCategory.empty() && plugin.userCategory != "Other"
+        && plugin.userCategory != "Uncategorized") {
+        if (cat == "Reverb")
+            return "Reverb";
+        if (cat == "Delay")
+            return "Delay / Echo";
+        if (cat == "Pitch")
+            return "Pitch / Vocal";
+        if (cat == "EQ" || cat == "Filter")
+            return "EQ / Filter";
+        if (cat == "Dynamics")
+            return "Dynamics";
+        if (cat == "Amp" || cat == "Distortion")
+            return "Amp / Drive";
+        if (cat == "Modulation")
+            return "Modulation";
+        if (cat == "Mastering" || cat == "Restoration")
+            return "Channel / Master";
+        if (cat == "Spatial")
+            return "Spatial / Imaging";
+        if (cat == "Analyzer" || cat == "Utility")
+            return "Utility / Meter";
+    }
+
+    if (cat == "Pitch"
+        || containsAny(n,
+            {"autotune", "auto-tune", "melodyne", "waves tune", "metatune", "crispytuner", "graillon",
+                "alterboy", "vocalign", "nectar", "cla vocals", "rvox", "deesser", "de-esser", "sibilance",
+                "pro-ds", "vocal", "doubler", "harmony"})
+        || containsAny(v, {"antares", "celemony", "synchro arts"}))
+        return "Pitch / Vocal";
+
+    if (cat == "Reverb"
+        || containsAny(n,
+            {"reverb", "valhalla", "pro-r", "lexicon", "altiverb", "seventh heaven", "raum", "tai chi",
+                "plate", "hall", "room", "shimmer", "ambience"}))
+        return "Reverb";
+
+    if (cat == "Delay"
+        || containsAny(n, {"delay", "echo", "echoboy", "timeless", "repeater", "replika", "h-delay"}))
+        return "Delay / Echo";
+
+    if (cat == "EQ" || cat == "Filter"
+        || containsAny(n,
+            {"pro-q", "equalizer", "pultec", "eqp-1a", "meq", "1073", "1081", "maag", "kirchhoff", "api 550",
+                "api 560", "volcano", "soothe", "smooth operator", "gullfoss", "teote", "tonal balance",
+                " eq", "-eq", "eq ", "filter"}))
+        return "EQ / Filter";
+
+    if (cat == "Dynamics"
+        || containsAny(n,
+            {"comp", "pro-c", "pro-l", "pro-g", "pro-mb", "1176", "la-2a", "la2a", "cla-76", "cla-2a",
+                "cla-3a", "distressor", "fairchild", "dbx", "limiter", "maximizer", "gate", "transient",
+                "ott", "shadow hills", "api 2500", "glue"}))
+        return "Dynamics";
+
+    if (cat == "Amp" || cat == "Distortion"
+        || containsAny(n,
+            {"amp", "guitar rig", "amplitube", "archetype", "helix", "bias", "th-u", "tonex", "cab",
+                "saturat", "saturn", "decapitator", "distort", "overdrive", "fuzz", "tube", "tape", "j37",
+                "kramer", "studer", "oxide", "black box", "rc-20", "thermal", "trash"})
+        || containsAny(v, {"neural dsp", "ik multimedia"}))
+        return "Amp / Drive";
+
+    if (cat == "Modulation"
+        || containsAny(n,
+            {"chorus", "flanger", "phaser", "tremolo", "vibrato", "rotary", "leslie", "microshift", "modulat",
+                "shaperbox", "kickstart"}))
+        return "Modulation";
+
+    if (cat == "Mastering" || cat == "Restoration"
+        || containsAny(n,
+            {"ozone", "master", "channel", "scheps omni", "ssl", "console", "cla mixhub", "abbey road",
+                "linmb", "denoise", "declick", "dehum", "dereverb", "rx "}))
+        return "Channel / Master";
+
+    if (cat == "Spatial"
+        || containsAny(n, {"imager", "wider", "stereo", "binaural", "atmos", "surround", "dearvr"}))
+        return "Spatial / Imaging";
+
+    if (cat == "Analyzer" || cat == "Utility"
+        || containsAny(n,
+            {"meter", "span", "insight", "youlean", "loudness", "analyzer", "spectrum", "tuner", "gain",
+                "trim", "phase", "correlat", "oscilloscope"}))
+        return "Utility / Meter";
+
+    return "Other FX";
 }
 
 std::string normalizeVendor(std::string_view vendor)
@@ -274,6 +467,75 @@ std::string normalizeVendor(std::string_view vendor)
         }
     }
     return out;
+}
+
+std::string pluginThumbnailId(PluginFormat format, const std::filesystem::path& path, std::string_view name)
+{
+    std::string rawPath;
+    try {
+        const std::u8string u8 = path.generic_u8string();
+        rawPath.assign(u8.begin(), u8.end());
+    } catch (const std::exception&) {
+#if defined(_WIN32)
+        for (wchar_t wc : path.native()) {
+            rawPath.push_back(static_cast<char>(wc & 0xFF));
+            rawPath.push_back(static_cast<char>((wc >> 8) & 0xFF));
+        }
+#else
+        rawPath = path.native();
+#endif
+    }
+
+    std::string normPath;
+    normPath.reserve(rawPath.size());
+    for (unsigned char ch : rawPath) {
+        char c = static_cast<char>(ch);
+        if (c == '\\')
+            c = '/';
+        normPath.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    while (normPath.size() > 1 && normPath.back() == '/')
+        normPath.pop_back();
+
+    const char* fmtPrefix = "vst3|";
+    if (format == PluginFormat::Clap)
+        fmtPrefix = "clap|";
+    else if (format == PluginFormat::Builtin)
+        fmtPrefix = "builtin|";
+
+    const std::string key = std::string(fmtPrefix) + normPath + "|" + lower(name);
+
+    // 64-bit FNV-1a digest rendered as 16 lowercase hex digits.
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (unsigned char byte : key) {
+        hash ^= static_cast<std::uint64_t>(byte);
+        hash *= 1099511628211ULL;
+    }
+
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string hex(16, '0');
+    for (int i = 15; i >= 0; --i) {
+        hex[static_cast<std::size_t>(i)] = kHex[hash & 0x0FULL];
+        hash >>= 4U;
+    }
+    return hex;
+}
+
+std::string pluginThumbnailId(const PluginInfo& plugin)
+{
+    return pluginThumbnailId(plugin.format, plugin.path, plugin.name);
+}
+
+bool isValidPluginThumbnailId(std::string_view thumbId) noexcept
+{
+    if (thumbId.size() != 16)
+        return false;
+    for (char c : thumbId) {
+        const bool isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!isHex)
+            return false;
+    }
+    return true;
 }
 
 } // namespace vloomdaw

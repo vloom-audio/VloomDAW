@@ -49,7 +49,8 @@ private:
         QString vendor;
         QString category;
         QString tags;
-        QWidget* buttonWidget = nullptr;
+        bool favorite = false;
+        std::vector<QWidget*> buttonWidgets;
         QWidget* simpleWidget = nullptr;
     };
 

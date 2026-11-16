@@ -14,6 +14,8 @@
 #include <vector>
 
 class QHBoxLayout;
+class QLabel;
+class QPushButton;
 class QScrollArea;
 class QToolButton;
 
@@ -24,12 +26,15 @@ class LevelMeter;
 class MixerStrip;
 
 /// The mixer panel: the master track, then the insert tracks in a row that
-/// scrolls sideways, as in FL Studio. Track 0 is the master (matching
-/// MixerModel). A pure view: MainWindow connects it to the model and engine.
+/// scrolls sideways, topped by a header bar and anchored at the bottom by a
+/// Studio One-style console toolbar (`#mixerFooter`) with channel filters,
+/// strip view options and batch console actions.
 class MixerPanel : public QWidget {
     Q_OBJECT
 
 public:
+    enum class StripFilter { All = 0, Audio = 1, Instrument = 2, Effects = 3 };
+
     MixerPanel(std::size_t insertCount, QWidget* parent = nullptr);
 
     [[nodiscard]] std::size_t trackCount() const { return static_cast<std::size_t>(strips_.size()); }
@@ -47,8 +52,17 @@ public:
     void setTrackName(std::size_t track, const QString& name);
     /// Shows track `track` (0 = master) in the user's colour (0xRRGGBB; nullopt: none).
     void setTrackColor(std::size_t track, std::optional<std::uint32_t> color);
+    /// Marks track `track` (0 = master) as the currently selected mixer strip.
+    void setSelectedTrack(std::size_t track);
+    [[nodiscard]] std::size_t selectedTrack() const { return selectedTrack_; }
     /// Updates track `track`'s FX rack with its effects chain.
     void setTrackEffects(std::size_t track, const std::vector<PluginSlot>& effects);
+    /// Updates what kind of channel routes into insert `track` for footer filtering.
+    void setTrackSourceFlags(std::size_t track, bool hasAudio, bool hasInstrument);
+    /// Resets peak holds and clip indicators across Master and all Insert strips.
+    void resetAllPeaks();
+    /// Reflects global FX bypass state on the footer button without emitting.
+    void setAllEffectsBypassed(bool bypassed);
 
     [[nodiscard]] QSize minimumSizeHint() const override;
     [[nodiscard]] QSize sizeHint() const override;
@@ -63,41 +77,33 @@ public slots:
     void setDetached(bool detached);
 
 signals:
+    void trackSelected(std::size_t track);
     void faderChanged(std::size_t track, double position);
     void panChanged(std::size_t track, double pan);
     void muteToggled(std::size_t track, bool muted);
     void soloToggled(std::size_t track, bool soloed);
     void closeRequested();
-    /// The user asked to detach the mixer into its own window, or to dock it.
     void detachRequested();
-    /// The user asked for one more insert ("+ Insert").
     void addInsertRequested();
-    /// The user asked to delete insert `track` ("−" for the last one, or a
-    /// strip's context menu).
     void removeInsertRequested(std::size_t track);
-    /// The user asked to rename insert `track` (double-click on its name or
-    /// its context menu).
     void renameRequested(std::size_t track);
-    /// The user asked to move insert `from` to position `to` (context menu).
     void moveInsertRequested(std::size_t from, std::size_t to);
-    /// The user picked a colour for track `track` (0 = master); nullopt: none.
     void colorChanged(std::size_t track, std::optional<std::uint32_t> color);
-    /// Track `track`'s FX button was clicked (the master's too): show its effects at `globalPos`.
     void effectsMenuRequested(std::size_t track, const QPoint& globalPos);
-    /// An effect slot's bypass switch was clicked on track `track`.
     void effectBypassToggled(std::size_t track, std::size_t slot, bool bypassed);
-    /// An effect slot was clicked on track `track`: open editor or insert plugin.
     void effectClicked(std::size_t track, std::size_t slot);
-    /// An effect slot's context menu was requested on track `track` at `globalPos`.
     void effectMenuRequested(std::size_t track, std::size_t slot, const QPoint& globalPos);
-    /// Plugin `plugin` was dropped specifically onto slot `slot` of track `track`.
     void pluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin);
-    /// Plugin `plugin` (an index into the plugin store) was dropped on track `track` (0: the master).
     void pluginDropped(std::size_t track, std::size_t plugin);
+    void clearAllSoloRequested();
+    void clearAllMuteRequested();
+    void bypassAllEffectsToggled(bool bypassed);
 
 private:
     void connectStrip(MixerStrip* strip);
     [[nodiscard]] MixerStrip* makeInsertStrip(std::size_t track);
+    void applyStripFilter();
+    void updateSelectedLabel();
 
     QList<MixerStrip*> strips_;
     DetachButton* detach_ = nullptr;
@@ -107,6 +113,13 @@ private:
     QHBoxLayout* insertRow_ = nullptr;
     QScrollArea* scroll_ = nullptr;
     QStringList names_; ///< [i] the name of track i ("" = "Insert i")
+    std::size_t selectedTrack_ = 0;
+
+    StripFilter filter_ = StripFilter::All;
+    bool wideMode_ = false;
+    bool showFxRack_ = true;
+    QLabel* selectedLabel_ = nullptr;
+    QPushButton* bypassAllFxBtn_ = nullptr;
 };
 
 } // namespace vloomdaw

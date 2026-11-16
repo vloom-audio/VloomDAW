@@ -53,7 +53,8 @@ QTreeView* browserView(QWidget* parent)
     view->setIndentation(14);
     view->setIconSize(QSize(16, 16));
     view->setUniformRowHeights(true);
-    // Files drag out as URLs: drop one on a channel in the channel rack.
+    // Files drag out as URLs: drop one or several on the playlist or channel rack.
+    view->setSelectionMode(QAbstractItemView::ExtendedSelection);
     view->setDragEnabled(true);
     view->setDragDropMode(QAbstractItemView::DragOnly);
     return view;
@@ -221,7 +222,8 @@ bool BrowserPanel::eventFilter(QObject* watched, QEvent* event)
             if (watched == view->viewport()) {
                 const auto* mouse = static_cast<QMouseEvent*>(event);
                 const QModelIndex hit = view->indexAt(mouse->position().toPoint());
-                pressedOnCurrent_ = hit.isValid() && hit == view->currentIndex();
+                pressedOnCurrent_
+                    = hit.isValid() && hit == view->currentIndex() && mouse->modifiers() == Qt::NoModifier;
                 mouseDown_ = true;
             }
         }

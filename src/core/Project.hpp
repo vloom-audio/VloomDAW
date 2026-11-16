@@ -69,7 +69,7 @@ struct Channel {
 /// is that track's sub-track. A track's sub-tracks (and theirs) follow it
 /// directly; the first one after them at its own depth or less ends the group.
 struct PlaylistTrack {
-    static constexpr int kDefaultHeight = 36;
+    static constexpr int kDefaultHeight = 58;
     static constexpr int kMinHeight = 24;
     static constexpr int kMaxHeight = 200;
     static constexpr int kMaxDepth = 4; ///< sub-tracks nest at most this deep
@@ -81,6 +81,9 @@ struct PlaylistTrack {
     int height = kDefaultHeight; ///< lane height in pixels at 100% scale
     int depth = 0; ///< 0: top level; 1: a sub-track of the nearest track above at depth 0; ...
     bool collapsed = false; ///< its sub-tracks are hidden (they still play)
+    double volume = 0.8; ///< empty-track fader 0..1 (inherited when a stem is linked)
+    double pan = 0.0; ///< empty-track pan -1..+1 (inherited when a stem is linked)
+    int insert = -1; ///< linked mixer insert (-1: auto/unlinked, 0: Master, 1..N: Insert)
     std::optional<std::uint32_t> color{}; ///< 0xRRGGBB chosen by the user; none: no colour
 };
 
@@ -279,6 +282,12 @@ public:
     [[nodiscard]] bool trackAudible(std::size_t track) const;
     /// The track's colour, 0xRRGGBB (higher bits dropped); nullopt: none.
     void setTrackColor(std::size_t track, std::optional<std::uint32_t> color);
+    /// Empty-track fader position 0..1 (clamped; NaN ignored).
+    void setTrackVolume(std::size_t track, double volume);
+    /// Empty-track pan -1 .. +1 (clamped; NaN ignored).
+    void setTrackPan(std::size_t track, double pan);
+    /// Linked mixer insert (-1 = unlinked/auto, 0 = Master, 1..N = Insert).
+    void setTrackInsert(std::size_t track, int insert);
     /// Sets a track's lane height (clamped to PlaylistTrack::kMinHeight..kMaxHeight).
     void setTrackHeight(std::size_t track, int height);
     /// Hides or shows a track's sub-tracks in the playlist.
@@ -311,6 +320,13 @@ public:
     [[nodiscard]] bool trackVisible(std::size_t track) const;
     /// Clips placed on `track`, pattern and audio.
     [[nodiscard]] std::size_t clipsOnTrack(std::size_t track) const;
+    /// Tracks where `count` dropped clips land starting at `startTrack`
+    /// (`>= tracks().size()`: new tracks after the last one; on an untouched
+    /// default track, starting at Track 1 instead). Hidden sub-tracks are
+    /// skipped, and indices clamp at kMaxPlaylistTracks - 1.
+    [[nodiscard]] std::vector<int> dropTracks(int startTrack, std::size_t count) const;
+    /// Like dropTracks(), creating any new tracks needed up to kMaxPlaylistTracks.
+    std::vector<int> ensureDropTracks(int startTrack, std::size_t count);
     /// Places `pattern` on `track` at `start` (clamped); returns its index.
     std::optional<std::size_t> addClip(Clip clip);
     void setClip(std::size_t index, Clip clip);

@@ -199,3 +199,94 @@ TEST_CASE("User categories survive a new scan of the same plugins", "[plugins]")
     CHECK(fresh[1].userCategory.empty());
     CHECK(fresh[2].userCategory.empty());
 }
+
+TEST_CASE("Plugin favourites, enabled state and smart sub-categories work without emojis", "[plugins]")
+{
+    PluginInfo prev;
+    prev.name = "Pro-Q 3";
+    prev.path = "C:/VST3/FabFilter Pro-Q 3.vst3";
+    prev.favorite = true;
+    prev.enabled = false;
+
+    PluginInfo rescanned = prev;
+    rescanned.favorite = false;
+    rescanned.enabled = true;
+    std::vector<PluginInfo> fresh{rescanned};
+    carryUserCategories(fresh, {prev});
+    CHECK(fresh[0].favorite);
+    CHECK_FALSE(fresh[0].enabled);
+
+    PluginInfo gtr;
+    gtr.name = "Ample Guitar SC";
+    gtr.category = "Instrument";
+    gtr.tags = "Instrument|Synth";
+    CHECK(pluginMainGroup(gtr) == "Instrument");
+    CHECK(detectPluginSubCategory(gtr) == "Guitar / Bass");
+
+    PluginInfo rompler;
+    rompler.name = "ZENOLOGY";
+    rompler.category = "Instrument";
+    rompler.tags = "Instrument|Synth";
+    CHECK(detectPluginSubCategory(rompler) == "Sampler / ROMpler");
+
+    PluginInfo eq;
+    eq.name = "FabFilter Pro-Q 3";
+    eq.category = "EQ";
+    eq.tags = "Fx|EQ";
+    CHECK(pluginMainGroup(eq) == "Effect");
+    CHECK(detectPluginSubCategory(eq) == "EQ / Filter");
+
+    PluginInfo vocal;
+    vocal.name = "Auto-Tune Pro";
+    vocal.category = "Other";
+    vocal.tags = "Fx";
+    CHECK(detectPluginSubCategory(vocal) == "Pitch / Vocal");
+
+    // Ensure zero non-ASCII emoji bytes in sub-category list.
+    for (const std::string& sub : pluginSubCategories()) {
+        for (unsigned char ch : sub)
+            CHECK(ch < 128);
+    }
+}
+
+TEST_CASE("Plugin thumbnail IDs are deterministic, normalized and distinct per class/format", "[plugins]")
+{
+    PluginInfo a;
+    a.format = PluginFormat::Vst3;
+    a.path = "C:\\Program Files\\Common Files\\VST3\\Cakewalk\\CA-2A.vst3\\";
+    a.name = "CA-2A";
+
+    PluginInfo sameNormalized;
+    sameNormalized.format = PluginFormat::Vst3;
+    sameNormalized.path = "c:/program files/common files/vst3/cakewalk/ca-2a.vst3";
+    sameNormalized.name = "ca-2a";
+
+    const std::string idA = pluginThumbnailId(a);
+    CHECK(idA.size() == 16);
+    CHECK(idA == pluginThumbnailId(sameNormalized));
+
+    PluginInfo otherClass = a;
+    otherClass.name = "CA-2A Mono";
+    CHECK(pluginThumbnailId(otherClass) != idA);
+
+    PluginInfo clapVariant = a;
+    clapVariant.format = PluginFormat::Clap;
+    CHECK(pluginThumbnailId(clapVariant) != idA);
+
+    // Built-in processors must not collide with VST3 paths of the same stem/id.
+    CHECK(pluginThumbnailId(PluginFormat::Builtin, "vloom.eq", "EQ")
+        != pluginThumbnailId(PluginFormat::Vst3, "vloom.eq", "EQ"));
+    CHECK(isValidPluginThumbnailId(idA));
+    CHECK_FALSE(isValidPluginThumbnailId(""));
+    CHECK_FALSE(isValidPluginThumbnailId("../../victim0000"));
+    CHECK_FALSE(isValidPluginThumbnailId("..\\..\\victim0000"));
+    CHECK_FALSE(isValidPluginThumbnailId("0123456789abcdeg"));
+
+#if defined(_WIN32)
+    // Unpaired UTF-16 surrogates in a filesystem path must never throw out of pluginThumbnailId.
+    const std::filesystem::path illFormed(std::wstring{static_cast<wchar_t>(0xD800), L'x'});
+    std::string illId;
+    REQUIRE_NOTHROW(illId = pluginThumbnailId(PluginFormat::Vst3, illFormed, "BrokenName"));
+    CHECK(illId.size() == 16);
+#endif
+}

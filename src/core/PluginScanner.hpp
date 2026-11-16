@@ -39,6 +39,8 @@ struct PluginInfo {
     /// survive scans; see effectiveCategory() and carryUserCategories().
     std::string userCategory;
     std::string userInstrumentType; ///< only with userCategory == "Instrument"
+    bool enabled = true; ///< shown in browser and plugin pickers when true
+    bool favorite = false; ///< marked as favourite by the user
 };
 
 struct PluginFolder {

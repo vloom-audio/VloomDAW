@@ -58,6 +58,8 @@ ProjectData sample()
     p.setTrackName(1, "Drums");
     p.setTrackColor(1, 0xff8a3d);
     p.setTrackHeight(1, 60);
+    p.setTrackVolume(1, 0.7);
+    p.setTrackPan(1, -0.3);
     p.addClip(Clip{second, 1, 3840, false, 0, 0});
     AudioClip audio;
     audio.channel = 0;
@@ -130,6 +132,8 @@ TEST_CASE("A project survives a save and an open", "[project-file]")
     CHECK(b.tracks()[1].name == "Drums");
     CHECK(b.tracks()[1].named);
     CHECK(b.tracks()[1].height == 60);
+    CHECK(b.tracks()[1].volume == 0.7);
+    CHECK(b.tracks()[1].pan == -0.3);
     CHECK(b.tracks()[1].color == a.tracks()[1].color);
     CHECK(b.clips() == a.clips());
     CHECK(b.audioClips() == a.audioClips());
@@ -396,4 +400,43 @@ TEST_CASE("A project's summary gives the launcher its preview", "[project-file]"
     const ProjectSummary empty = ProjectFile::summarize(ProjectData{});
     CHECK(empty.bars == 0);
     CHECK(empty.blocks.empty());
+}
+
+TEST_CASE("Network share UNC paths in plugin slots and project paths are refused", "[project-file][security]")
+{
+    const auto read = ProjectFile::read(R"({
+        "format": "vloomdaw-project",
+        "version": 1,
+        "channels": [{
+            "name": "Lead",
+            "instrument": {"format": "vst3", "path": "\\\\attacker\\share\\synth.vst3", "id": "abc", "name": "Synth"}
+        }],
+        "mixer": [{
+            "effects": [{"format": "clap", "path": "//attacker/share/fx.clap", "id": "xyz", "name": "FX"}]
+        }]
+    })",
+        std::filesystem::path("C:/Projects"));
+    REQUIRE(read.data);
+    REQUIRE(read.data->project.channels().size() == 1);
+    CHECK_FALSE(read.data->project.channels()[0].instrument.has_value());
+    CHECK(read.data->mixer.track(0).effects.empty());
+    CHECK_FALSE(read.warnings.empty());
+
+    // Relative sample paths inside a network folder must not resolve to a UNC share either.
+    const auto netFolder = ProjectFile::read(R"({
+        "format": "vloomdaw-project",
+        "version": 1,
+        "channels": [{"name": "Kick", "sample": "samples/kick.wav"}]
+    })",
+        std::filesystem::path("\\\\127.0.0.1\\share\\proj"));
+    REQUIRE(netFolder.data);
+    REQUIRE(netFolder.data->project.channels().size() == 1);
+    CHECK(netFolder.data->project.channels()[0].samplePath.empty());
+
+    // ProjectFile::load and summarize refuse UNC paths immediately without SMB probes.
+    const auto uncLoad = ProjectFile::load(std::filesystem::path("\\\\127.0.0.1\\share\\song.vloom"));
+    CHECK_FALSE(uncLoad.data);
+    CHECK(uncLoad.error.find("network") != std::string::npos);
+    CHECK_FALSE(
+        ProjectFile::summarize(std::filesystem::path("//127.0.0.1/share/song.vloom"), 4096).has_value());
 }

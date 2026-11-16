@@ -17,6 +17,8 @@ std::shared_ptr<const vloom::SampleBuffer> ChannelRackAudio::load(
         return nullptr;
     if (const auto found = samples_.find(path); found != samples_.end())
         return found->second;
+    if (loading_.contains(path))
+        return nullptr;
     std::string error;
     std::shared_ptr<const vloom::SampleBuffer> sample;
     try {
@@ -45,7 +47,8 @@ bool ChannelRackAudio::hasSample(const std::string& path, double sampleRate) con
 void ChannelRackAudio::store(
     const std::string& path, std::shared_ptr<const vloom::SampleBuffer> sample, double sampleRate)
 {
-    if (sample == nullptr || !(sampleRate > 0.0))
+    loading_.erase(path);
+    if (sample == nullptr || !std::isfinite(sampleRate) || sampleRate <= 0.0)
         return;
     if (rate_ <= 0.0)
         rate_ = sampleRate; // nothing loaded yet: this is the rate from now on
@@ -59,6 +62,26 @@ std::shared_ptr<const vloom::SampleBuffer> ChannelRackAudio::sample(const std::s
 {
     return load(path, kAudioClip, nullptr);
 }
+
+std::shared_ptr<const vloom::SampleBuffer> ChannelRackAudio::cachedSample(const std::string& path) const
+{
+    const auto found = samples_.find(path);
+    return found != samples_.end() ? found->second : nullptr;
+}
+
+void ChannelRackAudio::setLoading(const std::string& path, bool loading)
+{
+    if (path.empty())
+        return;
+    if (loading) {
+        failed_.erase(path);
+        loading_.insert(path);
+    } else {
+        loading_.erase(path);
+    }
+}
+
+bool ChannelRackAudio::isLoading(const std::string& path) const { return loading_.contains(path); }
 
 namespace {
 
@@ -180,14 +203,16 @@ std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
                     // pitch kept) when the stretched copy is ready, resampled
                     // (its pitch following) otherwise.
                     const double speed = tempo_ / clip.sourceBpm;
-                    std::shared_ptr<const vloom::SampleBuffer> stretched;
-                    if (clip.fit == AudioClip::Fit::Stretch && stretch_
-                        && clip.channel < project.channels().size())
-                        stretched = stretch_(project.channels()[clip.channel].samplePath, 1.0 / speed);
-                    if (stretched != nullptr)
-                        out.sample = std::move(stretched);
-                    else
-                        out.rate = speed;
+                    if (std::isfinite(speed) && speed > 0.0) {
+                        std::shared_ptr<const vloom::SampleBuffer> stretched;
+                        if (clip.fit == AudioClip::Fit::Stretch && stretch_
+                            && clip.channel < project.channels().size())
+                            stretched = stretch_(project.channels()[clip.channel].samplePath, 1.0 / speed);
+                        if (stretched != nullptr)
+                            out.sample = std::move(stretched);
+                        else
+                            out.rate = speed;
+                    }
                 }
                 state->audioClips.push_back(out);
             }
@@ -209,6 +234,7 @@ void ChannelRackAudio::reset()
     voices_.clear();
     samples_.clear();
     failed_.clear();
+    loading_.clear();
 }
 
 } // namespace vloomdaw

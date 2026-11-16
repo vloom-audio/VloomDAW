@@ -19,23 +19,44 @@ constexpr vloom::EditorSize kFallbackSize{480, 320};
 
 } // namespace
 
-PluginEditorWindow::PluginEditorWindow(
-    std::shared_ptr<vloom::PluginInstance> instance, const QString& title, QWidget* parent)
+PluginEditorWindow::PluginEditorWindow(std::shared_ptr<vloom::PluginInstance> instance, const QString& title,
+    QWidget* parent, PluginEditorContext context)
     : QWidget(parent, Qt::Window | Qt::Tool)
     , instance_(std::move(instance))
 {
     setObjectName(QStringLiteral("pluginEditor"));
     setAttribute(Qt::WA_DeleteOnClose);
     setWindowTitle(title);
+    if (context.slotTitle.isEmpty())
+        context.slotTitle = title;
+
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    header_ = new PluginEditorHeader(std::move(context), nullptr, this, this);
+    layout->addWidget(header_);
+
     view_ = new QWidget(this);
     view_->setAttribute(Qt::WA_NativeWindow); // the plugin needs a window of its own to draw into
     view_->setAttribute(Qt::WA_DontCreateNativeAncestors);
-    layout->addWidget(view_);
+    header_->setCaptureTarget(view_);
+    layout->addWidget(view_, 1);
 }
 
 PluginEditorWindow::~PluginEditorWindow() { closeEditor(); }
+
+void PluginEditorWindow::setEditorContext(PluginEditorContext context)
+{
+    if (header_ != nullptr)
+        header_->setContext(std::move(context));
+}
+
+void PluginEditorWindow::setBypassedState(bool bypassed)
+{
+    if (header_ != nullptr)
+        header_->setBypassedState(bypassed);
+}
 
 bool PluginEditorWindow::open(QString* error)
 {
@@ -128,12 +149,14 @@ void PluginEditorWindow::fitTo(vloom::EditorSize size)
         size = kFallbackSize;
     fitting_ = true;
     const QSize logical = toLogical(size);
+    const int headerH = header_ != nullptr ? PluginEditorHeader::kHeight : 0;
+    const QSize windowSize(logical.width(), logical.height() + headerH);
     if (instance_->processor().canResizeEditor()) {
-        setMinimumSize(1, 1);
+        setMinimumSize(1, headerH + 1);
         setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
-        resize(logical);
+        resize(windowSize);
     } else {
-        setFixedSize(logical);
+        setFixedSize(windowSize);
     }
     fitting_ = false;
 }

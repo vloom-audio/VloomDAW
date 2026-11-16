@@ -36,7 +36,9 @@ target_sources(vloomdaw_core PRIVATE
     core/StemModels.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
+    core/TrackRouting.cpp
     core/TransportLayout.cpp
+    core/UndoHistory.cpp
 
     # audio — owns the engine and the hardware device
     audio/AudioController.cpp
@@ -158,6 +160,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/PluginsPanel.hpp
     ui/plugins/PluginStore.cpp
     ui/plugins/PluginStore.hpp
+    ui/plugins/PluginThumbnails.cpp
+    ui/plugins/PluginThumbnails.hpp
     ui/widgets/ActivityBar/ActivityBar.cpp
     ui/widgets/ActivityBar/ActivityBar.hpp
     ui/widgets/ColorMenu/ColorMenu.cpp
@@ -226,7 +230,9 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/chevrons-right.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/detach.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/dock.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/follow-playhead.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/folder.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/loop.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/metronome.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/minus.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/mixer.svg
@@ -242,9 +248,14 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/refresh.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/rewind.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/settings.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/skip-end.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/sliders.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/speaker.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/speaker-mute.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/step-back.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/step-forward.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/stop.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/thumbnail.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-delete.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-draw.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-mute.svg
@@ -255,6 +266,8 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-zoom.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/track-mute.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/track-solo.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/volume-down.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/volume-up.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-close.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-maximize.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/window-minimize.svg

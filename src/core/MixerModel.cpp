@@ -110,13 +110,13 @@ void MixerModel::setName(std::size_t index, const std::string& name)
 
 void MixerModel::setFader(std::size_t index, double position)
 {
-    if (valid(index) && !std::isnan(position))
+    if (valid(index) && std::isfinite(position))
         tracks_[index].fader = std::clamp(position, 0.0, 1.0);
 }
 
 void MixerModel::setPan(std::size_t index, double pan)
 {
-    if (valid(index) && !std::isnan(pan))
+    if (valid(index) && std::isfinite(pan))
         tracks_[index].pan = std::clamp(pan, -1.0, 1.0);
 }
 

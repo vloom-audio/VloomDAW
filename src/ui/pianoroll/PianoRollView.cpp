@@ -854,18 +854,25 @@ void PianoRollView::scrollContentsBy(int /*dx*/, int /*dy*/) { viewport()->updat
 
 void PianoRollView::wheelEvent(QWheelEvent* event)
 {
-    if (!event->modifiers().testFlag(Qt::ControlModifier)) {
+    const bool overRuler
+        = event->position().y() < timeline::kRulerHeight && event->position().x() >= kKeyboardWidth;
+    if (event->modifiers().testFlag(Qt::ShiftModifier) && !event->modifiers().testFlag(Qt::ControlModifier)) {
+        const int delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->angleDelta().x();
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta);
+        event->accept();
+        return;
+    }
+    if (!event->modifiers().testFlag(Qt::ControlModifier) && !overRuler) {
         QAbstractScrollArea::wheelEvent(event);
         return;
     }
-    // Ctrl+wheel: zoom around the mouse.
-    const int notches = event->angleDelta().y() / 120;
-    if (notches == 0)
+    // Ctrl+wheel (or mouse wheel directly over the timeline ruler): zoom around the mouse.
+    const double steps = static_cast<double>(event->angleDelta().y()) / 120.0;
+    if (std::abs(steps) < 1e-4)
         return;
     const int mouseX = static_cast<int>(event->position().x());
     const double anchor = tickAt(mouseX);
-    pixelsPerBeat_
-        = std::clamp(pixelsPerBeat_ * std::pow(1.25, notches), kMinPixelsPerBeat, kMaxPixelsPerBeat);
+    pixelsPerBeat_ = std::clamp(pixelsPerBeat_ * std::pow(1.25, steps), kMinPixelsPerBeat, kMaxPixelsPerBeat);
     updateScrollBars();
     horizontalScrollBar()->setValue(static_cast<int>(anchor * pixelsPerTick()) - (mouseX - kKeyboardWidth));
     viewport()->update();

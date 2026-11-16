@@ -6,11 +6,13 @@
 #include "core/Project.hpp"
 #include "core/Scales.hpp"
 
+#include <concepts>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace vloomdaw {
@@ -110,5 +112,16 @@ public:
 /// use the system code page on Windows).
 [[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view utf8);
 [[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path);
+
+/// True when `path` refers to a network share (`\\server\share`, `//server/share`,
+/// or `\\?\UNC\...`): opening one on Windows can leak NTLM credentials over SMB.
+[[nodiscard]] bool isNetworkPath(std::string_view path) noexcept;
+[[nodiscard]] bool isNetworkFsPath(const std::filesystem::path& path) noexcept;
+template <typename Path>
+    requires std::same_as<std::remove_cvref_t<Path>, std::filesystem::path>
+[[nodiscard]] inline bool isNetworkPath(const Path& path) noexcept
+{
+    return isNetworkFsPath(path);
+}
 
 } // namespace vloomdaw

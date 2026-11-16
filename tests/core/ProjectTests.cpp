@@ -693,3 +693,97 @@ TEST_CASE("An audio clip's tempo is kept in range, and a clip without one is not
     CHECK(p.audioClips()[*index].sourceBpm == 0.0);
     CHECK_FALSE(p.audioClips()[*index].fitted());
 }
+
+TEST_CASE("Dropping multiple audio files lays them across consecutive visible tracks", "[project]")
+{
+    // Ten files dropped on Track 1 of a new project create ten tracks, one per file.
+    {
+        Project p;
+        CHECK(p.dropTracks(0, 10) == std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+        const auto tracks = p.ensureDropTracks(0, 10);
+        CHECK(tracks == std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+        CHECK(p.tracks().size() == 10);
+        CHECK(p.tracks()[0].name == "Track 1");
+        CHECK(p.tracks()[9].name == "Track 10");
+    }
+
+    // Dropping into the empty space below an untouched Track 1 starts at Track 1
+    // instead of leaving Track 1 empty and making an extra eleventh track.
+    {
+        Project p;
+        CHECK(p.dropTracks(1, 10) == std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+        const auto tracks = p.ensureDropTracks(1, 10);
+        CHECK(tracks == std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+        CHECK(p.tracks().size() == 10);
+    }
+
+    // Once Track 1 has a clip (or is named), dropping below the last track starts
+    // on a new track after it.
+    {
+        Project p;
+        p.addAudioClip(AudioClip{0, 0, 0});
+        CHECK(p.dropTracks(1, 3) == std::vector<int>{1, 2, 3});
+        CHECK(p.ensureDropTracks(1, 3) == std::vector<int>{1, 2, 3});
+        CHECK(p.tracks().size() == 4);
+
+        Project named;
+        named.setTrackName(0, "Drums");
+        CHECK(named.ensureDropTracks(1, 2) == std::vector<int>{1, 2});
+        CHECK(named.tracks().size() == 3);
+    }
+
+    // Hidden sub-tracks of a collapsed group are skipped so drops match visible lanes.
+    {
+        Project p;
+        for (int i = 0; i < 3; ++i)
+            p.addTrack(); // tracks 0, 1, 2, 3
+        REQUIRE(p.indentTrack(1));
+        REQUIRE(p.indentTrack(2));
+        p.setTrackCollapsed(0, true); // 1 and 2 are hidden; 0 and 3 stay visible
+        CHECK(p.dropTracks(0, 3) == std::vector<int>{0, 3, 4});
+        CHECK(p.ensureDropTracks(0, 3) == std::vector<int>{0, 3, 4});
+        CHECK(p.tracks().size() == 5);
+    }
+
+    // Clamping at kMaxPlaylistTracks, including when the last track is hidden.
+    {
+        Project p;
+        while (p.addTrack()) { }
+        REQUIRE(p.tracks().size() == static_cast<std::size_t>(Project::kMaxPlaylistTracks));
+        CHECK(p.ensureDropTracks(498, 4) == std::vector<int>{498, 499, 499, 499});
+
+        REQUIRE(p.indentTrack(499));
+        p.setTrackCollapsed(498, true); // 499 is hidden and no more tracks can be added
+        CHECK(p.ensureDropTracks(498, 3) == std::vector<int>{498, 498, 498});
+        CHECK(p.dropTracks(0, 0).empty());
+    }
+}
+
+TEST_CASE("Non-finite infinity inputs are rejected by track and channel setters and restored()", "[project]")
+{
+    const double inf = std::numeric_limits<double>::infinity();
+    Project p;
+    p.setTrackVolume(0, 0.5);
+    p.setTrackPan(0, -0.25);
+    p.setTrackVolume(0, inf);
+    p.setTrackVolume(0, -inf);
+    p.setTrackPan(0, inf);
+    p.setTrackPan(0, -inf);
+    CHECK(p.tracks()[0].volume == 0.5);
+    CHECK(p.tracks()[0].pan == -0.25);
+
+    p.setChannelVolume(0, 0.6);
+    p.setChannelPan(0, 0.2);
+    p.setChannelVolume(0, inf);
+    p.setChannelPan(0, -inf);
+    CHECK(p.channels()[0].volume == 0.6);
+    CHECK(p.channels()[0].pan == 0.2);
+
+    PlaylistTrack badTrack;
+    badTrack.volume = inf;
+    badTrack.pan = -inf;
+    const Project restored = Project::restored({}, {}, {badTrack}, {}, {});
+    REQUIRE(restored.tracks().size() == 1);
+    CHECK(restored.tracks()[0].volume == 0.8);
+    CHECK(restored.tracks()[0].pan == 0.0);
+}

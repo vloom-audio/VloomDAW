@@ -71,6 +71,9 @@ Project Project::restored(const std::vector<Channel>& channels, const std::vecto
         PlaylistTrack track = in;
         track.height = std::clamp(in.height, PlaylistTrack::kMinHeight, PlaylistTrack::kMaxHeight);
         track.depth = std::clamp(in.depth, 0, PlaylistTrack::kMaxDepth);
+        track.volume = std::isfinite(in.volume) ? std::clamp(in.volume, 0.0, 1.0) : 0.8;
+        track.pan = std::isfinite(in.pan) ? std::clamp(in.pan, -1.0, 1.0) : 0.0;
+        track.insert = std::max(in.insert, -1);
         if (track.color)
             track.color = *track.color & 0xFFFFFFu;
         p.tracks_.push_back(std::move(track));
@@ -140,13 +143,13 @@ void Project::setChannelSample(std::size_t channel, const std::string& path)
 
 void Project::setChannelVolume(std::size_t channel, double volume)
 {
-    if (channel < channels_.size() && !std::isnan(volume))
+    if (channel < channels_.size() && std::isfinite(volume))
         channels_[channel].volume = std::clamp(volume, 0.0, 1.0);
 }
 
 void Project::setChannelPan(std::size_t channel, double pan)
 {
-    if (channel < channels_.size() && !std::isnan(pan))
+    if (channel < channels_.size() && std::isfinite(pan))
         channels_[channel].pan = std::clamp(pan, -1.0, 1.0);
 }
 
@@ -169,6 +172,12 @@ std::size_t Project::removeInsert(int insert)
             --c.insert;
         }
     }
+    for (PlaylistTrack& t : tracks_) {
+        if (t.insert == insert)
+            t.insert = -1;
+        else if (t.insert > insert)
+            --t.insert;
+    }
     return toMaster;
 }
 
@@ -179,6 +188,10 @@ void Project::moveInsert(int from, int to)
     for (Channel& c : channels_)
         if (c.insert >= 1)
             c.insert = static_cast<int>(movedIndex(static_cast<std::size_t>(c.insert),
+                static_cast<std::size_t>(from), static_cast<std::size_t>(to)));
+    for (PlaylistTrack& t : tracks_)
+        if (t.insert >= 1)
+            t.insert = static_cast<int>(movedIndex(static_cast<std::size_t>(t.insert),
                 static_cast<std::size_t>(from), static_cast<std::size_t>(to)));
 }
 
@@ -566,6 +579,24 @@ void Project::setTrackColor(std::size_t track, std::optional<std::uint32_t> colo
         tracks_[track].color = color ? std::optional<std::uint32_t>(*color & 0xffffffu) : std::nullopt;
 }
 
+void Project::setTrackVolume(std::size_t track, double volume)
+{
+    if (track < tracks_.size() && std::isfinite(volume))
+        tracks_[track].volume = std::clamp(volume, 0.0, 1.0);
+}
+
+void Project::setTrackPan(std::size_t track, double pan)
+{
+    if (track < tracks_.size() && std::isfinite(pan))
+        tracks_[track].pan = std::clamp(pan, -1.0, 1.0);
+}
+
+void Project::setTrackInsert(std::size_t track, int insert)
+{
+    if (track < tracks_.size())
+        tracks_[track].insert = std::max(insert, -1);
+}
+
 void Project::setTrackHeight(std::size_t track, int height)
 {
     if (track < tracks_.size())
@@ -716,6 +747,47 @@ std::size_t Project::clipsOnTrack(std::size_t track) const
     const auto on = [track](const auto& c) { return c.track == static_cast<int>(track); };
     return static_cast<std::size_t>(std::count_if(clips_.begin(), clips_.end(), on))
         + static_cast<std::size_t>(std::count_if(audioClips_.begin(), audioClips_.end(), on));
+}
+
+std::vector<int> Project::dropTracks(int startTrack, std::size_t count) const
+{
+    std::vector<int> out;
+    if (count == 0)
+        return out;
+    out.reserve(count);
+    // A brand-new playlist has only an empty default Track 1: dropping into
+    // the empty space below it starts on Track 1 rather than leaving it empty.
+    if (startTrack >= 1 && tracks_.size() == 1 && clipsOnTrack(0) == 0 && !tracks_[0].named
+        && !tracks_[0].color && !tracks_[0].muted && !tracks_[0].solo)
+        startTrack = 0;
+
+    int lastFallback = kMaxPlaylistTracks - 1;
+    if (static_cast<int>(tracks_.size()) >= kMaxPlaylistTracks) {
+        lastFallback = static_cast<int>(tracks_.size()) - 1;
+        while (lastFallback > 0 && !trackVisible(static_cast<std::size_t>(lastFallback)))
+            --lastFallback;
+    }
+
+    int t = std::max(0, startTrack);
+    for (std::size_t i = 0; i < count; ++i) {
+        while (t < static_cast<int>(tracks_.size()) && !trackVisible(static_cast<std::size_t>(t)))
+            ++t;
+        if (t >= kMaxPlaylistTracks) {
+            out.push_back(lastFallback);
+        } else {
+            out.push_back(t);
+            ++t;
+        }
+    }
+    return out;
+}
+
+std::vector<int> Project::ensureDropTracks(int startTrack, std::size_t count)
+{
+    const std::vector<int> planned = dropTracks(startTrack, count);
+    for (const int t : planned)
+        while (static_cast<int>(tracks_.size()) <= t && addTrack()) { }
+    return planned;
 }
 
 AudioClip Project::clamped(AudioClip clip) const

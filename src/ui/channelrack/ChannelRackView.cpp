@@ -318,7 +318,7 @@ void ChannelRackView::dragLeaveEvent(QDragLeaveEvent* /*event*/) { setDropRow(-1
 
 void ChannelRackView::dropEvent(QDropEvent* event)
 {
-    const QString path = droppedAudio(event->mimeData());
+    const QStringList paths = droppedAudioFiles(event->mimeData());
     const std::size_t row = dropRowAt(event->position().toPoint().y());
     setDropRow(-1);
     if (const auto plugin = droppedPlugin(event->mimeData())) {
@@ -326,10 +326,10 @@ void ChannelRackView::dropEvent(QDropEvent* event)
         emit pluginDropped(row, *plugin);
         return;
     }
-    if (path.isEmpty())
+    if (paths.isEmpty())
         return;
     event->acceptProposedAction();
-    emit sampleDropped(row, path);
+    emit sampleDropped(row, paths);
 }
 
 bool ChannelRackView::event(QEvent* event)
