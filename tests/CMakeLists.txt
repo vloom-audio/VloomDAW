@@ -25,6 +25,7 @@ add_executable(vloomdaw_tests
     core/DeviceRefTests.cpp
     core/DeviceWatchTests.cpp
     core/FrameStatsTests.cpp
+    core/MidiFileTests.cpp
     core/MixerModelTests.cpp
     core/NoteEditsTests.cpp
     core/NoteHistoryTests.cpp
@@ -87,6 +88,29 @@ add_test(NAME "Probe reads a CLAP factory" COMMAND vloomdaw-plugin-probe --clap 
 set_tests_properties("Probe reads a CLAP factory" PROPERTIES
     PASS_REGULAR_EXPRESSION "Fake CLAP Reverb\tVloom Test\t0\\.9\taudio-effect\\|reverb\\|stereo.*Fake CLAP Synth"
     FAIL_REGULAR_EXPRESSION "Forged|licence ok")
+
+add_library(vloomdaw_fake_vst2 MODULE plugins/FakeVst2.cpp)
+target_compile_features(vloomdaw_fake_vst2 PRIVATE cxx_std_20)
+vloom_set_warnings(vloomdaw_fake_vst2)
+set_target_properties(vloomdaw_fake_vst2 PROPERTIES
+    PREFIX "" OUTPUT_NAME "FakeVst2" CXX_VISIBILITY_PRESET hidden AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+if(APPLE)
+    set_target_properties(vloomdaw_fake_vst2 PROPERTIES BUNDLE TRUE BUNDLE_EXTENSION "vst" SUFFIX "")
+    set(probe_vst2 $<TARGET_BUNDLE_DIR:vloomdaw_fake_vst2>)
+elseif(WIN32)
+    set_target_properties(vloomdaw_fake_vst2 PROPERTIES SUFFIX ".dll")
+    set(probe_vst2 $<TARGET_FILE:vloomdaw_fake_vst2>)
+else()
+    set_target_properties(vloomdaw_fake_vst2 PROPERTIES SUFFIX ".so")
+    set(probe_vst2 $<TARGET_FILE:vloomdaw_fake_vst2>)
+endif()
+target_compile_definitions(vloomdaw_tests PRIVATE VLOOMDAW_FAKE_VST2_PATH="${probe_vst2}")
+add_dependencies(vloomdaw_tests vloomdaw_fake_vst2)
+
+add_test(NAME "Probe reads a VST2 module" COMMAND vloomdaw-plugin-probe --vst2 ${probe_vst2})
+set_tests_properties("Probe reads a VST2 module" PROPERTIES
+    PASS_REGULAR_EXPRESSION "@@vloom\tplugin\tFake VST2 Synth\tVloom Test\t200\tInstrument\\|Synth"
+    FAIL_REGULAR_EXPRESSION "Forged VST2")
 add_test(NAME "Probe fails cleanly on a file that is not a plugin"
     COMMAND vloomdaw-plugin-probe --vst3 ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
 set_tests_properties("Probe fails cleanly on a file that is not a plugin" PROPERTIES

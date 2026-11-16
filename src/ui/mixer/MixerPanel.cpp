@@ -56,6 +56,7 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
     // Header: title, + Bus / + FX / + Aux / + Insert buttons, detach / dock and close.
     auto* headerBox = new QWidget(this);
     headerBox->setObjectName(QStringLiteral("mixerHeader"));
+    headerBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     header_ = new QHBoxLayout(headerBox);
     header_->setContentsMargins(0, 0, 0, 0);
     header_->setSpacing(6);
@@ -153,6 +154,10 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
     connect(inserts_, &QWidget::customContextMenuRequested, this,
         [this](const QPoint& pos) { showEmptySpaceContextMenu(inserts_->mapToGlobal(pos)); });
 
+    dragIndicator_ = new QWidget(inserts_);
+    dragIndicator_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    dragIndicator_->hide();
+
     insertRow_ = new QHBoxLayout(inserts_);
     insertRow_->setContentsMargins(0, 0, 0, 0);
     insertRow_->setSpacing(3);
@@ -185,6 +190,7 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
     // Studio One-style Bottom Console Toolbar (#mixerFooter)
     auto* footerBox = new QFrame(this);
     footerBox->setObjectName(QStringLiteral("mixerFooter"));
+    footerBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     auto* footerRow = new QHBoxLayout(footerBox);
     footerRow->setContentsMargins(8, 3, 8, 3);
     footerRow->setSpacing(5);
@@ -256,11 +262,11 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
     });
     footerRow->addWidget(fxVisBtn);
 
-    footerRow->addStretch(1);
-
     selectedLabel_ = new QLabel(footerBox);
     selectedLabel_->setObjectName(QStringLiteral("mixerSelectedReadout"));
-    footerRow->addWidget(selectedLabel_);
+    selectedLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    selectedLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    footerRow->addWidget(selectedLabel_, 1);
 
     auto* addFxBtn = makeFooterPill(
         tr("+ Add FX"), tr("Add an effect plug-in to the currently selected mixer channel"), false);
@@ -398,9 +404,17 @@ void MixerPanel::showStripContextMenu(MixerStrip* strip, const QPoint& globalPos
     populateAddChannelActions(menu);
 
     menu.addSeparator();
+    menu.addAction(tr("Move to First"), this, [this, index] { emit moveInsertRequested(index, 1); })
+        ->setEnabled(index > 1);
     menu.addAction(tr("Move Left"), this, [this, index] { emit moveInsertRequested(index, index - 1); })
         ->setEnabled(index > 1);
     menu.addAction(tr("Move Right"), this, [this, index] { emit moveInsertRequested(index, index + 1); })
+        ->setEnabled(index + 1 < trackCount());
+    menu.addAction(tr("Move to Last"), this,
+            [this, index] {
+                if (trackCount() > 2)
+                    emit moveInsertRequested(index, trackCount() - 1);
+            })
         ->setEnabled(index + 1 < trackCount());
     menu.addSeparator();
     menu.addAction(tr("Delete “%1”").arg(label), this, [this, index] { emit removeInsertRequested(index); });
@@ -451,6 +465,58 @@ void MixerPanel::connectStrip(MixerStrip* strip)
     connect(strip, &MixerStrip::monoToggled, this, [this, strip](bool mono) {
         if (const auto i = strips_.indexOf(strip); i >= 0)
             emit monoToggled(static_cast<std::size_t>(i), mono);
+    });
+    connect(strip, &MixerStrip::stripDragMoved, this, [this, strip](const QPoint& globalPos) {
+        const auto fromIdx = strips_.indexOf(strip);
+        if (fromIdx <= 0 || strips_.size() <= 2 || scroll_ == nullptr || inserts_ == nullptr)
+            return;
+        const QPoint vpPos = scroll_->viewport()->mapFromGlobal(globalPos);
+        if (vpPos.x() < 26)
+            scroll_->horizontalScrollBar()->setValue(scroll_->horizontalScrollBar()->value() - 16);
+        else if (vpPos.x() > scroll_->viewport()->width() - 26)
+            scroll_->horizontalScrollBar()->setValue(scroll_->horizontalScrollBar()->value() + 16);
+
+        const QPoint localPos = inserts_->mapFromGlobal(globalPos);
+        int slot = static_cast<int>(strips_.size()); // slot in 1..strips_.size()
+        int indicatorX = 0;
+        bool found = false;
+        for (qsizetype i = 1; i < strips_.size(); ++i) {
+            MixerStrip* s = strips_[i];
+            if (!s->isVisible())
+                continue;
+            const int midX = s->x() + s->width() / 2;
+            indicatorX = s->x() + s->width() + 1;
+            if (localPos.x() < midX) {
+                slot = static_cast<int>(i);
+                indicatorX = std::max(0, s->x() - 2);
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            slot = static_cast<int>(strips_.size());
+
+        dragTargetSlot_ = slot;
+        if (dragIndicator_ != nullptr) {
+            dragIndicator_->setStyleSheet(QStringLiteral("background-color: %1; border-radius: 1px;")
+                    .arg(Theme::colors().accent.name()));
+            dragIndicator_->setGeometry(indicatorX, 2, 3, std::max(10, inserts_->height() - 4));
+            dragIndicator_->raise();
+            dragIndicator_->show();
+        }
+    });
+    connect(strip, &MixerStrip::stripDragReleased, this, [this, strip](const QPoint& /*globalPos*/) {
+        if (dragIndicator_ != nullptr)
+            dragIndicator_->hide();
+        const auto fromIdx = strips_.indexOf(strip);
+        const int slot = dragTargetSlot_;
+        dragTargetSlot_ = -1;
+        if (fromIdx <= 0 || slot < 1 || slot > strips_.size() || strips_.size() <= 2)
+            return;
+        const int toIdx
+            = std::clamp(slot > fromIdx ? slot - 1 : slot, 1, static_cast<int>(strips_.size()) - 1);
+        if (toIdx != fromIdx)
+            emit moveInsertRequested(static_cast<std::size_t>(fromIdx), static_cast<std::size_t>(toIdx));
     });
     connect(strip, &MixerStrip::userFxSlotRowsChanged, this, [this](int rows) {
         const int clamped = std::clamp(rows, 0, static_cast<int>(MixerModel::kMaxEffects));

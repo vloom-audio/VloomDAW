@@ -22,6 +22,8 @@
 #include "probe/ClapAbi.hpp"
 #include "probe/Vst3Abi.hpp"
 
+#include <vloom/engine/plugin/Vst2Host.hpp>
+
 #include <bit>
 #include <cstdio>
 #include <cstring>
@@ -384,6 +386,21 @@ int probeClap(const fs::path& plugin)
     return 0;
 }
 
+int probeVst2(const fs::path& plugin)
+{
+    std::string error;
+    const auto library = vloom::Vst2Library::open(plugin, &error);
+    if (library == nullptr)
+        return fail(error.empty() ? "could not load the VST2 module" : error);
+
+    emit("probe", {"1"});
+    for (const vloom::PluginInfo& p : library->plugins()) {
+        const std::string tags = p.kind == vloom::PluginInfo::Kind::Instrument ? "Instrument|Synth" : "Fx";
+        emit("plugin", {field(p.name.c_str()), field(p.vendor.c_str()), field(p.version.c_str()), tags});
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -396,7 +413,7 @@ int main(int argc, char** argv)
 #endif
     isolateStdout();
     if (argc != 3) {
-        std::fputs("usage: vloomdaw-plugin-probe --vst3|--clap <path>\n", stderr);
+        std::fputs("usage: vloomdaw-plugin-probe --vst3|--vst2|--clap <path>\n", stderr);
         return 2;
     }
     const std::string_view kind = argv[1];
@@ -412,8 +429,10 @@ int main(int argc, char** argv)
 #endif
     if (kind == "--vst3")
         return probeVst3(path);
+    if (kind == "--vst2")
+        return probeVst2(path);
     if (kind == "--clap")
         return probeClap(path);
-    std::fputs("usage: vloomdaw-plugin-probe --vst3|--clap <path>\n", stderr);
+    std::fputs("usage: vloomdaw-plugin-probe --vst3|--vst2|--clap <path>\n", stderr);
     return 2;
 }

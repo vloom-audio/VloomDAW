@@ -19,6 +19,7 @@ target_sources(vloomdaw_core PRIVATE
     core/DeviceRef.cpp
     core/DeviceWatch.cpp
     core/FrameStats.cpp
+    core/MidiFile.cpp
     core/MixerModel.cpp
     core/Names.cpp
     core/NoteEdits.cpp
@@ -69,12 +70,21 @@ target_include_directories(vloomdaw-plugin-probe PRIVATE ${CMAKE_CURRENT_SOURCE_
 target_compile_features(vloomdaw-plugin-probe PRIVATE cxx_std_20)
 set_target_properties(vloomdaw-plugin-probe PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 vloom_set_warnings(vloomdaw-plugin-probe)
+target_link_libraries(vloomdaw-plugin-probe PRIVATE vloom::engine)
 if(WIN32)
     target_link_libraries(vloomdaw-plugin-probe PRIVATE shell32)
 elseif(APPLE)
     target_link_libraries(vloomdaw-plugin-probe PRIVATE "-framework CoreFoundation")
 elseif(UNIX)
     target_link_libraries(vloomdaw-plugin-probe PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
+# Windows out-of-process VST 2 bridge (vloom-engine ADR 0011).
+if(WIN32 AND NOT TARGET vloom-plugin-bridge AND EXISTS "${VLOOM_ENGINE_DIR}/tools/vloom-plugin-bridge/CMakeLists.txt")
+    add_subdirectory("${VLOOM_ENGINE_DIR}/tools/vloom-plugin-bridge" "${CMAKE_BINARY_DIR}/vloom-plugin-bridge")
+elseif(WIN32 AND NOT TARGET vloom-plugin-bridge AND DEFINED vloom-engine_SOURCE_DIR
+       AND EXISTS "${vloom-engine_SOURCE_DIR}/tools/vloom-plugin-bridge/CMakeLists.txt")
+    add_subdirectory("${vloom-engine_SOURCE_DIR}/tools/vloom-plugin-bridge" "${CMAKE_BINARY_DIR}/vloom-plugin-bridge")
 endif()
 
 if(NOT VLOOMDAW_BUILD_APP)
@@ -232,7 +242,7 @@ elseif(WIN32)
         ui/WinWindow.cpp
         ui/widgets/WindowButtons/WindowButtons.cpp
         ui/widgets/WindowButtons/WindowButtons.hpp)
-    target_link_libraries(vloomdaw_ui PRIVATE dwmapi)
+    target_link_libraries(vloomdaw_ui PRIVATE dwmapi shell32 advapi32)
 endif()
 qt_add_resources(vloomdaw_ui "icons"
     PREFIX "/icons"
@@ -249,6 +259,7 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/dock.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/follow-playhead.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/folder.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/home.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/loop.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/metronome.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/minus.svg
@@ -306,7 +317,9 @@ qt_add_resources(vloomdaw_ui "fonts"
 qt_add_resources(vloomdaw_ui "app_icon"
     PREFIX "/app"
     BASE "${PROJECT_SOURCE_DIR}/resources/app"
-    FILES ${PROJECT_SOURCE_DIR}/resources/app/vloomdaw.png)
+    FILES
+        ${PROJECT_SOURCE_DIR}/resources/app/vloomdaw.png
+        ${PROJECT_SOURCE_DIR}/resources/app/vloom-project.png)
 vloom_set_warnings(vloomdaw_ui)
 
 # ---------------------------------------------------------------- app
@@ -323,6 +336,12 @@ target_link_libraries(VloomDAW PRIVATE vloomdaw_ui)
 vloomdaw_copy_ffmpeg_dlls(VloomDAW)
 # The app finds the probe next to its own executable (inside the bundle on macOS).
 add_dependencies(VloomDAW vloomdaw-plugin-probe vloomdaw-stems)
+if(TARGET vloom-plugin-bridge)
+    add_dependencies(VloomDAW vloom-plugin-bridge)
+    set_target_properties(vloom-plugin-bridge PROPERTIES
+        AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:VloomDAW>)
+endif()
 if(APPLE)
     add_custom_command(TARGET VloomDAW POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -349,6 +368,9 @@ install(TARGETS VloomDAW
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(NOT APPLE)
     install(TARGETS vloomdaw-plugin-probe vloomdaw-stems RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if(TARGET vloom-plugin-bridge)
+        install(TARGETS vloom-plugin-bridge RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
 endif()
 # Windows: FFmpeg's DLLs (LGPL) go next to the app, with FFmpeg's licence.
 # macOS and Linux release builds link a static FFmpeg (scripts/build-ffmpeg.sh).

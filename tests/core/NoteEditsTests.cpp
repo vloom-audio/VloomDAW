@@ -85,3 +85,28 @@ TEST_CASE("Pasted notes keep their spacing and start where asked", "[notes]")
     CHECK(pasted[4] == Note{67, 4320, 480, 80});
     CHECK(withPasted(kNotes, {}, 0) == kNotes);
 }
+
+TEST_CASE("Slicing, legato, velocity scaling and scale-snap transform notes cleanly", "[notes]")
+{
+    const std::vector<Note> bar{Note{60, 0, 960, 100}, Note{63, 960, 480, 80}};
+    const auto cut = slicedNotes(bar, 480, 58, 62);
+    REQUIRE(cut.size() == 3);
+    CHECK(cut[0] == Note{60, 0, 480, 100});
+    CHECK(cut[1] == Note{60, 480, 480, 100});
+    CHECK(cut[2] == bar[1]);
+
+    const auto leg = legatoNotes({Note{60, 0, 240, 100}, Note{64, 960, 240, 100}}, {true, true});
+    CHECK(leg[0].length == 960);
+    CHECK(leg[1].length == 240);
+
+    const auto softer = scaledVelocityNotes(bar, {true, false}, 0.5);
+    CHECK(softer[0].velocity == 50);
+    CHECK(softer[1].velocity == 80);
+    const auto huge = scaledVelocityNotes(bar, {true, false}, 1e20);
+    CHECK(huge[0].velocity == kMaxVelocity);
+
+    // D#5 (63) snaps to D5 (62) in C Major.
+    const auto inScale = snappedToScaleNotes(bar, {false, true}, 0, Scale::Major);
+    CHECK(inScale[0].key == 60);
+    CHECK(inScale[1].key == 62);
+}

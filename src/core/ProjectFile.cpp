@@ -124,6 +124,8 @@ std::string_view pluginFormatText(PluginFormat format)
     switch (format) {
     case PluginFormat::Clap:
         return "clap";
+    case PluginFormat::Vst2:
+        return "vst2";
     case PluginFormat::Builtin:
         return "builtin";
     case PluginFormat::Vst3:
@@ -319,6 +321,8 @@ std::optional<PluginSlot> readPlugin(const Json& object, Reader& in, std::vector
         slot.format = PluginFormat::Clap;
     else if (format == "vst3")
         slot.format = PluginFormat::Vst3;
+    else if (format == "vst2")
+        slot.format = PluginFormat::Vst2;
     else if (format == "builtin")
         slot.format = PluginFormat::Builtin;
     else {
@@ -404,8 +408,14 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
     root["format"] = kFormat;
     root["version"] = kVersion;
     root["app"] = std::string("VloomDAW ") + VLOOMDAW_VERSION;
-    root["song"] = {{"tempo", data.song.tempo}, {"key", data.song.keyRoot},
-        {"scale", scaleName(data.song.scale)}, {"songMode", data.song.songMode}};
+    Json songJson
+        = {{"tempo", data.song.tempo}, {"key", data.song.keyRoot}, {"scale", scaleName(data.song.scale)},
+            {"songMode", data.song.songMode}, {"loopEnabled", data.song.loopEnabled}};
+    if (data.song.loopEnd > data.song.loopStart && data.song.loopStart >= 0) {
+        songJson["loopStart"] = data.song.loopStart;
+        songJson["loopEnd"] = data.song.loopEnd;
+    }
+    root["song"] = std::move(songJson);
 
     Json channels = Json::array();
     for (std::size_t c = 0; c < project.channels().size(); ++c) {
@@ -562,6 +572,13 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
             if (s.name == scale)
                 data.song.scale = s.scale;
         data.song.songMode = Reader::flag(*song, "songMode");
+        data.song.loopEnabled = Reader::flag(*song, "loopEnabled", true);
+        const int loopStart = in.number<int>(*song, "loopStart", 0, 0, 1'000'000'000);
+        const int loopEnd = in.number<int>(*song, "loopEnd", 0, 0, 1'000'000'000);
+        if (loopEnd > loopStart) {
+            data.song.loopStart = loopStart;
+            data.song.loopEnd = loopEnd;
+        }
     }
 
     std::vector<Channel> channels;

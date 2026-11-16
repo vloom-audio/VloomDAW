@@ -13,9 +13,9 @@ namespace vloomdaw {
 /// Builtin: an effect that comes with VloomDAW (vloom-engine's built-in
 /// processors). It has no file: its PluginInfo::path holds its id, e.g.
 /// "vloom.eq".
-enum class PluginFormat { Vst3, Clap, Builtin };
+enum class PluginFormat { Vst3, Clap, Vst2, Builtin };
 
-[[nodiscard]] std::string_view formatName(PluginFormat format); ///< "VST3", "CLAP", "Built-in"
+[[nodiscard]] std::string_view formatName(PluginFormat format); ///< "VST3", "CLAP", "VST2", "Built-in"
 
 /// A plugin. scanPluginFolders() fills in what the file system tells
 /// (name from the file, vendor from the install folder); a probe of the

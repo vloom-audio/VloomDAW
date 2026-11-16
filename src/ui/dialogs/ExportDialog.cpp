@@ -21,6 +21,7 @@
 #include <QRegularExpressionValidator>
 #include <QSettings>
 #include <QStackedWidget>
+#include <QStandardItemModel>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -94,14 +95,9 @@ ExportDialog::ExportDialog(const ExportSong& song, QWidget* parent)
     auto* heading = new QLabel(tr("Export"), this);
     heading->setObjectName(QStringLiteral("settingsHeading"));
     layout->addWidget(heading);
-    const int whole = static_cast<int>(std::lround(song_.seconds));
-    const QString time = QStringLiteral("%1:%2").arg(whole / 60).arg(whole % 60, 2, 10, QLatin1Char('0'));
-    auto* about = new QLabel(tr("%1  ·  %2 bars  ·  %3  ·  %4 kHz")
-                                 .arg(song_.name, QString::number(song_.bars), time,
-                                     QLocale().toString(song_.sampleRate / 1000.0, 'g', 4)),
-        this);
-    about->setObjectName(QStringLiteral("settingsSubtitle"));
-    layout->addWidget(about);
+    about_ = new QLabel(this);
+    about_->setObjectName(QStringLiteral("settingsSubtitle"));
+    layout->addWidget(about_);
 
     // The format: one tile each, with what it is good for.
     const std::array<QString, 5> hints
@@ -144,6 +140,22 @@ ExportDialog::ExportDialog(const ExportSong& song, QWidget* parent)
     auto* right = new QVBoxLayout;
     right->setSpacing(14);
     auto* sound = new SettingsCard(tr("SOUND"), this);
+    range_ = new QComboBox(sound);
+    range_->setAccessibleName(tr("Export range"));
+    range_->addItem(tr("Full song (%1 bars)").arg(song_.bars), 0);
+    if (song_.hasLoopRange) {
+        range_->addItem(tr("Loop range (%1)").arg(song_.loopLabel), 1);
+    } else {
+        range_->addItem(tr("Loop range (set Loop Bar on Playlist)"), 1);
+        if (auto* m = qobject_cast<QStandardItemModel*>(range_->model()))
+            if (QStandardItem* item = m->item(1))
+                item->setEnabled(false);
+    }
+    if (song_.hasLoopRange && song_.preferLoopRange)
+        range_->setCurrentIndex(1);
+    sound->addRow(
+        tr("Range"), tr("Export the whole arrangement or only between the Loop Bar markers."), range_);
+
     quality_ = new QStackedWidget(sound);
     quality_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     wavDepth_ = new QComboBox(quality_);
@@ -269,7 +281,7 @@ ExportDialog::ExportDialog(const ExportSong& song, QWidget* parent)
         if (on)
             formatChanged();
     });
-    for (QComboBox* box : {wavDepth_, flacBits_, bitrate_, channels_})
+    for (QComboBox* box : {range_, wavDepth_, flacBits_, bitrate_, channels_})
         connect(box, &QComboBox::currentIndexChanged, this, &ExportDialog::refresh);
     connect(browseButton, &QPushButton::clicked, this, &ExportDialog::browse);
     connect(start, &QPushButton::clicked, this, &ExportDialog::accept);
@@ -295,8 +307,19 @@ void ExportDialog::formatChanged()
     refresh();
 }
 
+bool ExportDialog::exportingLoopRange() const
+{
+    return song_.hasLoopRange && range_ != nullptr && range_->currentData().toInt() == 1;
+}
+
+double ExportDialog::activeSeconds() const
+{
+    return exportingLoopRange() ? song_.loopSeconds : song_.seconds;
+}
+
 double ExportDialog::estimatedBytes() const
 {
+    const double secs = activeSeconds();
     const double channels = channels_->currentData().toInt();
     const double pcmPerSecond = song_.sampleRate * channels;
     switch (format()) {
@@ -305,21 +328,34 @@ double ExportDialog::estimatedBytes() const
         const double bytes = depth == ExportSettings::WavDepth::Pcm16 ? 2.0
             : depth == ExportSettings::WavDepth::Pcm24                ? 3.0
                                                                       : 4.0;
-        return song_.seconds * pcmPerSecond * bytes;
+        return secs * pcmPerSecond * bytes;
     }
     case AudioFileFormat::Flac:
         // Music usually packs to somewhat over half its size.
-        return song_.seconds * pcmPerSecond * (flacBits_->currentData().toInt() / 8.0) * 0.6;
+        return secs * pcmPerSecond * (flacBits_->currentData().toInt() / 8.0) * 0.6;
     case AudioFileFormat::Mp3:
     case AudioFileFormat::Ogg:
     case AudioFileFormat::M4a:
-        return song_.seconds * bitrate_->currentData().toInt() * 1000.0 / 8.0;
+        return secs * bitrate_->currentData().toInt() * 1000.0 / 8.0;
     }
     return 0.0;
 }
 
 void ExportDialog::refresh()
 {
+    if (about_ != nullptr) {
+        const bool loop = exportingLoopRange();
+        const int bars = loop ? song_.loopBars : song_.bars;
+        const int whole = static_cast<int>(std::lround(activeSeconds()));
+        const QString time = QStringLiteral("%1:%2").arg(whole / 60).arg(whole % 60, 2, 10, QLatin1Char('0'));
+        QString subtitle = tr("%1  ·  %2 bars  ·  %3  ·  %4 kHz")
+                               .arg(song_.name, QString::number(bars), time,
+                                   QLocale().toString(song_.sampleRate / 1000.0, 'g', 4));
+        if (loop && !song_.loopLabel.isEmpty())
+            subtitle += QStringLiteral("  ·  ") + song_.loopLabel;
+        about_->setText(subtitle);
+    }
+
     const AudioFileFormat chosen = format();
     const bool wav = chosen == AudioFileFormat::Wav;
     const bool flac = chosen == AudioFileFormat::Flac;
@@ -371,6 +407,7 @@ ExportSettings ExportDialog::settings() const
     out.mono = channels_->currentData().toInt() == 1;
     out.dither = dither_->isChecked();
     out.tail = tail_->isChecked();
+    out.loopRange = exportingLoopRange();
     out.showFile = showFile_->isChecked();
     out.metadata.title = title_->text().trimmed().toStdString();
     out.metadata.artist = artist_->text().trimmed().toStdString();

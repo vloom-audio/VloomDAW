@@ -12,8 +12,14 @@ namespace vloomdaw {
 inline constexpr std::array<std::string_view, 9> kAudioFileExtensions{
     "wav", "aif", "aiff", "flac", "mp3", "ogg", "oga", "opus", "m4a"};
 
+/// Standard MIDI File extensions recognised by the browser and drop targets.
+inline constexpr std::array<std::string_view, 2> kMidiFileExtensions{"mid", "midi"};
+
 /// True when `fileName` ends in one of kAudioFileExtensions, ignoring case.
 [[nodiscard]] bool isAudioFile(std::string_view fileName) noexcept;
+
+/// True when `fileName` ends in `.mid` or `.midi`, ignoring case.
+[[nodiscard]] bool isMidiFile(std::string_view fileName) noexcept;
 
 /// True when the browser shows audio file `fileName` for `search`: the search
 /// text appears in the name before the extension, ignoring ASCII letter case.

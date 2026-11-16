@@ -24,7 +24,6 @@ class QPushButton;
 class QTableWidget;
 class QTableWidgetItem;
 class QThread;
-class QToolButton;
 class QTreeWidget;
 
 namespace vloomdaw {
@@ -111,7 +110,7 @@ private:
     QPushButton* rescanButton_ = nullptr;
     QPushButton* retryFailedButton_ = nullptr;
     QPushButton* addFileButton_ = nullptr;
-    QToolButton* foldersToggle_ = nullptr;
+    QPushButton* foldersToggle_ = nullptr;
     QFrame* foldersPanel_ = nullptr;
     QTreeWidget* folders_ = nullptr;
     QPushButton* addButton_ = nullptr;

@@ -6,6 +6,7 @@
 
 class QHBoxLayout;
 class QLabel;
+class QResizeEvent;
 
 namespace vloomdaw {
 
@@ -21,8 +22,14 @@ public:
     /// Adds `widget` at the right end of the header.
     void addHeaderWidget(QWidget* widget);
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
+    void updateElidedContext();
+
     QLabel* context_ = nullptr;
+    QString fullContext_;
     QHBoxLayout* header_ = nullptr;
 };
 

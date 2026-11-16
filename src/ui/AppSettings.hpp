@@ -36,6 +36,7 @@ struct AppSettings {
     // General
     PositionMode startPositionMode = PositionMode::BarsBeats;
     bool metronomeOnStartup = false;
+    bool associateProjectFiles = true; ///< Windows: register `.vloom` icon & double-click open
 
     // Theme: preset ids, tuning knobs and per-role colours (core/ThemePresets)
     ThemeChoice theme;

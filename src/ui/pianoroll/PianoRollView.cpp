@@ -10,7 +10,9 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPolygonF>
 #include <QScrollBar>
+#include <QToolTip>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -44,8 +46,24 @@ bool isBlackKey(int key)
     }
 }
 
-int snapDown(double tick, int grid) { return static_cast<int>(std::floor(tick / grid)) * grid; }
-int snapNearest(double tick, int grid) { return static_cast<int>(std::lround(tick / grid)) * grid; }
+int snapDown(double tick, int grid)
+{
+    return grid <= 1 ? static_cast<int>(std::floor(tick)) : static_cast<int>(std::floor(tick / grid)) * grid;
+}
+
+int snapNearest(double tick, int grid)
+{
+    return grid <= 1 ? static_cast<int>(std::lround(tick))
+                     : static_cast<int>(std::lround(tick / grid)) * grid;
+}
+
+QString formatKeyName(int key)
+{
+    const std::string_view pc = noteName(pitchClassOf(key));
+    return QStringLiteral("%1%2")
+        .arg(QLatin1StringView(pc.data(), static_cast<qsizetype>(pc.size())))
+        .arg(key / kPitchClasses);
+}
 
 /// `base` with `amount` (0..1) of `tint` mixed in, as an opaque colour.
 QColor blend(const QColor& base, const QColor& tint, double amount)
@@ -112,15 +130,19 @@ void PianoRollView::setProject(const Project* project)
 
 void PianoRollView::setTarget(std::size_t pattern, std::size_t channel)
 {
-    if (pattern != pattern_ || channel != channel_)
+    const bool changedTarget = (pattern != pattern_ || channel != channel_);
+    if (changedTarget)
         selection_.clear();
     pattern_ = pattern;
     channel_ = channel;
     drag_ = Drag::None;
     dragChanged_ = false;
+    sliceLine_.reset();
     sound(-1, 0);
     viewport()->unsetCursor();
     refresh();
+    if (changedTarget)
+        scrollToChannelNotes();
 }
 
 void PianoRollView::setKey(int root, Scale scale)
@@ -136,10 +158,54 @@ void PianoRollView::setSnapTicks(int ticks)
     viewport()->update();
 }
 
+void PianoRollView::setSnapEnabled(bool enabled)
+{
+    if (snapEnabled_ == enabled)
+        return;
+    snapEnabled_ = enabled;
+    viewport()->update();
+}
+
+void PianoRollView::setTool(Tool tool)
+{
+    if (tool_ == tool)
+        return;
+    if (drag_ != Drag::None)
+        endDrag();
+    tool_ = tool;
+    sliceLine_.reset();
+    if (hover_)
+        updateHoverCursor(*hover_);
+    viewport()->update();
+}
+
+void PianoRollView::zoomBy(double factor)
+{
+    const QRect grid = gridRect();
+    const int centerX = grid.left() + grid.width() / 2;
+    const double anchor = tickAt(centerX);
+    pixelsPerBeat_ = std::clamp(pixelsPerBeat_ * factor, kMinPixelsPerBeat, kMaxPixelsPerBeat);
+    updateScrollBars();
+    horizontalScrollBar()->setValue(static_cast<int>(anchor * pixelsPerTick()) - (centerX - kKeyboardWidth));
+    viewport()->update();
+}
+
 void PianoRollView::setPlayhead(double tick)
 {
     if (tick == playhead_)
         return;
+
+    if (followPlayhead_ && tick >= 0.0 && drag_ == Drag::None) {
+        const QRect grid = gridRect();
+        if (grid.width() > 60) {
+            const double px = tick * pixelsPerTick();
+            const int curScroll = horizontalScrollBar()->value();
+            if (px > curScroll + grid.width() * 0.92 || px < curScroll) {
+                horizontalScrollBar()->setValue(std::max(0, static_cast<int>(px - grid.width() * 0.15)));
+            }
+        }
+    }
+
     // Repaint only the strips under the old and new line, and only when the
     // line moves (a quarter pixel): a full repaint 30 times a second is the main cost.
     const timeline::Scale scale{
@@ -166,7 +232,56 @@ void PianoRollView::refresh()
     }
     selection_.resize(count, false);
     updateScrollBars();
+    emitSelectionSummary();
     viewport()->update();
+}
+
+void PianoRollView::scrollToChannelNotes()
+{
+    const auto* list = notes();
+    if (list == nullptr || list->empty())
+        return;
+    int low = kHighestKey;
+    int high = kLowestKey;
+    for (const Note& n : *list) {
+        low = std::min(low, n.key);
+        high = std::max(high, n.key);
+    }
+    if (low > high)
+        return;
+    const int midKey = (low + high) / 2;
+    const int viewRows = std::max(8, gridRect().height() / kKeyHeight);
+    const int topKey = std::clamp(midKey + viewRows / 2, kLowestKey, kHighestKey);
+    scrolledToMiddle_ = true;
+    verticalScrollBar()->setValue(std::max(0, (kHighestKey - topKey) * kKeyHeight));
+}
+
+void PianoRollView::emitSelectionSummary()
+{
+    const auto* list = notes();
+    if (list == nullptr) {
+        emit selectionSummaryChanged(0, QString());
+        return;
+    }
+    int count = 0;
+    int low = kHighestKey;
+    int high = kLowestKey;
+    for (std::size_t i = 0; i < list->size(); ++i) {
+        if (!isSelected(selection_, i))
+            continue;
+        ++count;
+        low = std::min(low, (*list)[i].key);
+        high = std::max(high, (*list)[i].key);
+    }
+    if (count == 0) {
+        emit selectionSummaryChanged(0, QString());
+        return;
+    }
+    const QString pitchRange = (low == high)
+        ? formatKeyName(low)
+        : QStringLiteral("%1–%2").arg(formatKeyName(low), formatKeyName(high));
+    const QString text = count == 1 ? pitchRange : tr("%1 notes · %2").arg(count).arg(pitchRange);
+    emit selectionSummaryChanged(count, text);
 }
 
 const std::vector<Note>* PianoRollView::notes() const
@@ -181,6 +296,12 @@ int PianoRollView::lengthTicks() const
     // The pattern plus room to write past its end, at least four bars.
     const int pattern = project_ != nullptr ? project_->patternLength(pattern_) : kTicksPerBar;
     return std::max(4 * kTicksPerBar, pattern + 2 * kTicksPerBar);
+}
+
+QRect PianoRollView::rulerRect() const
+{
+    const QRect v = viewport()->rect();
+    return {kKeyboardWidth, 0, std::max(0, v.width() - kKeyboardWidth), timeline::kRulerHeight};
 }
 
 QRect PianoRollView::laneRect() const
@@ -206,7 +327,7 @@ double PianoRollView::tickAt(int x) const
 int PianoRollView::keyAt(int y) const
 {
     const int row = (y - timeline::kRulerHeight + verticalScrollBar()->value()) / kKeyHeight;
-    return kHighestKey - row;
+    return std::clamp(kHighestKey - row, kLowestKey, kHighestKey);
 }
 
 int PianoRollView::yOfKey(int key) const
@@ -219,6 +340,15 @@ QRectF PianoRollView::noteRect(const Note& note) const
     const double x = kKeyboardWidth + note.start * pixelsPerTick() - horizontalScrollBar()->value();
     return {x, static_cast<double>(yOfKey(note.key)), std::max(3.0, note.length * pixelsPerTick()),
         static_cast<double>(kKeyHeight)};
+}
+
+int PianoRollView::effectiveGrid(Qt::KeyboardModifiers mods) const
+{
+    if (!snapEnabled_ || mods.testFlag(Qt::AltModifier))
+        return 1;
+    if (mods.testFlag(Qt::ShiftModifier) && tool_ == Tool::Slice)
+        return kTicksPerStep;
+    return snapTicks_;
 }
 
 std::optional<std::pair<std::size_t, bool>> PianoRollView::noteAt(const QPoint& pos) const
@@ -255,15 +385,21 @@ void PianoRollView::showEvent(QShowEvent* event)
     QAbstractScrollArea::showEvent(event);
     updateScrollBars();
     if (!scrolledToMiddle_) {
-        // Start around middle C, where most parts are written.
         scrolledToMiddle_ = true;
-        verticalScrollBar()->setValue((kHighestKey - 72) * kKeyHeight);
+        const auto* list = notes();
+        if (list != nullptr && !list->empty())
+            scrollToChannelNotes();
+        else
+            verticalScrollBar()->setValue((kHighestKey - 72) * kKeyHeight);
     }
 }
 
 void PianoRollView::hideEvent(QHideEvent* event)
 {
     QAbstractScrollArea::hideEvent(event);
+    if (drag_ == Drag::Scrub)
+        emit playbackReleased();
+    drag_ = Drag::None;
     sound(-1, 0); // no key left sounding behind a hidden editor
 }
 
@@ -304,7 +440,8 @@ void PianoRollView::paintEvent(QPaintEvent* event)
                 p.fillRect(
                     QRect(area.left(), lineY, area.width(), 1), pitchClassOf(key) == 0 ? c.border : c.rail);
         }
-        timeline::paintGrid(p, area, scale, std::min(snapTicks_, kTicksPerStep));
+        const int finest = snapEnabled_ ? std::min(snapTicks_, kTicksPerStep) : kTicksPerBeat;
+        timeline::paintGrid(p, area, scale, finest);
 
         // Shade past the pattern's end.
         if (project_ != nullptr) {
@@ -316,11 +453,16 @@ void PianoRollView::paintEvent(QPaintEvent* event)
         }
     }
 
-    // Notes: darker the softer they are played, outlined when selected.
+    QFont noteFont = font();
+    noteFont.setPointSizeF(noteFont.pointSizeF() > 0 ? noteFont.pointSizeF() * 0.72 : 7.0);
+    noteFont.setWeight(QFont::DemiBold);
+
+    // Notes: darker the softer they are played, outlined when selected, with pitch name label.
     if (list != nullptr && !area.isEmpty()) {
         p.save();
         p.setClipRect(area);
         p.setRenderHint(QPainter::Antialiasing);
+        p.setFont(noteFont);
         for (std::size_t i = 0; i < list->size(); ++i) {
             const Note& note = (*list)[i];
             const QRectF r = noteRect(note).adjusted(0.5, 1.0, -0.5, -1.0);
@@ -328,20 +470,45 @@ void PianoRollView::paintEvent(QPaintEvent* event)
                 continue;
             const bool chosen = isSelected(selection_, i);
             const QColor body = shaded(fill, note.velocity);
-            p.setPen(chosen ? QPen(c.text, 1.5) : QPen(fill.darker(160), 1));
-            p.setBrush(chosen ? body.lighter(125) : body);
-            p.drawRoundedRect(r, 2, 2);
+            p.setPen(chosen ? QPen(c.text, 1.6) : QPen(fill.darker(160), 1));
+            p.setBrush(chosen ? body.lighter(130) : body);
+            p.drawRoundedRect(r, 2.2, 2.2);
+
+            if (r.width() >= 24.0) {
+                p.setPen(chosen ? c.base : (body.lightnessF() > 0.52 ? c.base : c.text));
+                p.drawText(r.adjusted(3.5, -0.5, -5.0, 0.0), Qt::AlignLeft | Qt::AlignVCenter,
+                    formatKeyName(note.key));
+            }
+
             // Resize grip.
             if (r.width() > 12)
                 p.fillRect(QRectF(r.right() - 3, r.top() + 3, 1, r.height() - 6), fill.darker(170));
         }
+
         // The box being dragged to select notes.
         if (drag_ == Drag::Box) {
             const QRect box = QRect(dragStart_, dragLast_).normalized().intersected(grid);
             p.setRenderHint(QPainter::Antialiasing, false);
-            p.setPen(c.accent);
-            p.setBrush(QColor(c.accent.red(), c.accent.green(), c.accent.blue(), 40));
+            p.setPen(QPen(c.accent, 1, Qt::DashLine));
+            p.setBrush(QColor(c.accent.red(), c.accent.green(), c.accent.blue(), 46));
             p.drawRect(box.adjusted(0, 0, -1, -1));
+        }
+
+        // Slice tool cut line.
+        if (sliceLine_) {
+            const int high = std::max(sliceLine_->fromKey, sliceLine_->toKey);
+            const int low = std::min(sliceLine_->fromKey, sliceLine_->toKey);
+            const double sx
+                = kKeyboardWidth + sliceLine_->tick * pixelsPerTick() - horizontalScrollBar()->value();
+            const double y0 = yOfKey(high);
+            const double y1 = yOfKey(low) + kKeyHeight;
+            p.setPen(QPen(c.text, 1.5));
+            p.drawLine(QPointF(std::floor(sx) + 0.5, y0), QPointF(std::floor(sx) + 0.5, y1));
+            p.setPen(Qt::NoPen);
+            p.setBrush(c.accent);
+            QPolygonF tip;
+            tip << QPointF(sx - 4.0, y0) << QPointF(sx + 4.0, y0) << QPointF(sx, y0 + 5.0);
+            p.drawPolygon(tip);
         }
         p.restore();
     }
@@ -372,7 +539,7 @@ void PianoRollView::paintEvent(QPaintEvent* event)
     }
 
     // Ruler.
-    const QRect ruler(kKeyboardWidth, 0, grid.width(), timeline::kRulerHeight);
+    const QRect ruler = rulerRect();
     if (event->rect().intersects(ruler)) {
         timeline::paintRuler(p, ruler, scale);
         timeline::paintPlayheadHead(p, ruler, scale, playhead_);
@@ -426,6 +593,7 @@ void PianoRollView::edit(const std::vector<Note>& next)
     selection_.resize(next.size(), false);
     emit notesChanged(next);
     updateScrollBars();
+    emitSelectionSummary();
     viewport()->update();
 }
 
@@ -443,10 +611,13 @@ void PianoRollView::selectOnly(std::size_t index)
     selection_.assign(expectedCount_, false);
     if (index < selection_.size())
         selection_[index] = true;
+    emitSelectionSummary();
 }
 
 void PianoRollView::sound(int key, int velocity)
 {
+    if (!auditionEnabled_ && key >= 0)
+        key = -1;
     if (key == sounding_)
         return;
     const QRect keys(0, 0, kKeyboardWidth, viewport()->height());
@@ -471,19 +642,49 @@ void PianoRollView::beginDrag(Drag drag, std::size_t index, const QPoint& pos)
         viewport()->setCursor(Qt::ClosedHandCursor);
     else if (drag == Drag::Resize)
         viewport()->setCursor(Qt::SizeHorCursor);
+    else if (drag == Drag::Box || drag == Drag::Slice)
+        viewport()->setCursor(Qt::CrossCursor);
+    else if (drag == Drag::Scrub)
+        viewport()->setCursor(Qt::SplitHCursor);
 }
 
 void PianoRollView::endDrag()
 {
     if (drag_ == Drag::None)
         return;
+    const Drag finishedDrag = drag_;
     drag_ = Drag::None;
     sound(-1, 0);
+    QToolTip::hideText();
     viewport()->unsetCursor();
+
+    if (finishedDrag == Drag::Scrub) {
+        emit playbackReleased();
+        return;
+    }
+
+    if (finishedDrag == Drag::Slice && sliceLine_) {
+        const auto* list = notes();
+        if (list != nullptr) {
+            const std::vector<Note> cut
+                = slicedNotes(*list, sliceLine_->tick, sliceLine_->fromKey, sliceLine_->toKey);
+            sliceLine_.reset();
+            if (cut != *list) {
+                selection_.clear();
+                commit(cut);
+                return;
+            }
+        }
+        sliceLine_.reset();
+        viewport()->update();
+        return;
+    }
+
     if (dragChanged_)
         emit editFinished();
     dragChanged_ = false;
     dragNotes_.clear();
+    paintLastSlot_ = -1;
     refresh(); // the pattern may have grown
 }
 
@@ -496,6 +697,48 @@ void PianoRollView::eraseAt(const QPoint& pos)
     selection_.clear(); // the flags named the notes by position
     dragChanged_ = true;
     edit(dragNotes_);
+}
+
+void PianoRollView::insertNoteAndBeginMove(const QPoint& pos)
+{
+    const auto* list = notes();
+    if (list == nullptr || list->size() >= kMaxPatternNotes)
+        return;
+    const int grid = effectiveGrid(Qt::NoModifier);
+    dragNotes_ = *list;
+    dragNotes_.push_back(Project::clamped(
+        Note{keyAt(pos.y()), std::max(0, snapDown(tickAt(pos.x()), grid)), lastLength_, lastVelocity_}));
+    selection_.assign(dragNotes_.size(), false);
+    selection_.back() = true;
+    beginDrag(Drag::Move, dragNotes_.size() - 1, pos);
+    dragChanged_ = true;
+    edit(dragNotes_);
+    sound(dragNote_.key, dragNote_.velocity);
+}
+
+void PianoRollView::paintNoteAt(const QPoint& pos, int grid)
+{
+    if (!gridRect().contains(pos) || dragNotes_.size() >= kMaxPatternNotes)
+        return;
+    const int stepLen = std::max(kMinNoteLength, grid <= 1 ? lastLength_ : grid);
+    const int slot = std::max(0, static_cast<int>(std::floor(tickAt(pos.x()) / stepLen)));
+    const int key = keyAt(pos.y());
+    if (slot == paintLastSlot_)
+        return;
+    paintLastSlot_ = slot;
+    const int start = slot * stepLen;
+
+    // Skip if an identical note already occupies `(key, start)`.
+    for (const Note& existing : dragNotes_) {
+        if (existing.key == key && existing.start == start)
+            return;
+    }
+    dragNotes_.push_back(Project::clamped(Note{key, start, stepLen, lastVelocity_}));
+    selection_.assign(dragNotes_.size(), false);
+    selection_.back() = true;
+    dragChanged_ = true;
+    edit(dragNotes_);
+    sound(key, lastVelocity_);
 }
 
 void PianoRollView::setVelocityAt(const QPoint& from, const QPoint& to)
@@ -527,6 +770,40 @@ void PianoRollView::setVelocityAt(const QPoint& from, const QPoint& to)
     edit(dragNotes_);
 }
 
+void PianoRollView::updateHoverCursor(const QPoint& pos)
+{
+    if (rulerRect().contains(pos)) {
+        viewport()->setCursor(Qt::PointingHandCursor);
+        return;
+    }
+    if (laneRect().contains(pos)) {
+        viewport()->setCursor(Qt::SizeVerCursor);
+        return;
+    }
+    if (!gridRect().contains(pos)) {
+        viewport()->setCursor(Qt::ArrowCursor);
+        return;
+    }
+    switch (tool_) {
+    case Tool::Slice:
+        viewport()->setCursor(Qt::CrossCursor);
+        return;
+    case Tool::Playback:
+        viewport()->setCursor(Qt::SplitHCursor);
+        return;
+    case Tool::Delete:
+        viewport()->setCursor(Qt::ForbiddenCursor);
+        return;
+    case Tool::Select:
+    case Tool::Draw:
+    case Tool::Paint: {
+        const auto hit = noteAt(pos);
+        viewport()->setCursor(hit ? (hit->second ? Qt::SizeHorCursor : Qt::OpenHandCursor) : Qt::ArrowCursor);
+        return;
+    }
+    }
+}
+
 void PianoRollView::mousePressEvent(QMouseEvent* event)
 {
     const QPoint pos = event->position().toPoint();
@@ -538,7 +815,18 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
     const bool shift = event->modifiers().testFlag(Qt::ShiftModifier);
     dragChanged_ = false;
 
-    // The keyboard plays; the lane sets velocities.
+    // Clicking or dragging the top ruler (or using the Playback tool) scrubs playback.
+    if (event->button() == Qt::LeftButton
+        && (rulerRect().contains(pos) || (tool_ == Tool::Playback && gridRect().contains(pos)))) {
+        dragNotes_.clear();
+        beginDrag(Drag::Scrub, 0, pos);
+        lastScrubTick_ = std::max(0.0, tickAt(pos.x()));
+        setPlayhead(lastScrubTick_);
+        emit playbackRequested(lastScrubTick_);
+        return;
+    }
+
+    // Left piano keyboard plays notes audibly.
     if (event->button() == Qt::LeftButton && pos.x() < kKeyboardWidth && pos.y() >= timeline::kRulerHeight
         && pos.y() < gridRect().bottom()) {
         dragNotes_.clear();
@@ -546,17 +834,20 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
         sound(keyAt(pos.y()), lastVelocity_);
         return;
     }
+
+    // Bottom velocity lane edits note velocities.
     if (event->button() == Qt::LeftButton && laneRect().contains(pos)) {
         dragNotes_ = *list;
         beginDrag(Drag::Velocity, 0, pos);
         setVelocityAt(pos, pos);
         return;
     }
+
     if (!gridRect().contains(pos))
         return;
-    const auto hit = noteAt(pos);
 
-    if (event->button() == Qt::RightButton) {
+    // Right-click (or Delete tool left-click) erases notes.
+    if (event->button() == Qt::RightButton || (event->button() == Qt::LeftButton && tool_ == Tool::Delete)) {
         dragNotes_ = *list;
         beginDrag(Drag::Erase, 0, pos);
         eraseAt(pos);
@@ -565,12 +856,25 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
     if (event->button() != Qt::LeftButton)
         return;
 
+    // Slice tool cuts notes across a vertical line.
+    if (tool_ == Tool::Slice) {
+        const int g = effectiveGrid(event->modifiers());
+        const int cutTick = std::max(kMinNoteLength, snapNearest(tickAt(pos.x()), g));
+        const int k = keyAt(pos.y());
+        sliceLine_ = SliceLine{cutTick, k, k};
+        dragNotes_.clear();
+        beginDrag(Drag::Slice, 0, pos);
+        viewport()->update();
+        return;
+    }
+
+    const auto hit = noteAt(pos);
     if (hit) {
         std::size_t index = hit->first;
         if (ctrl) {
-            // In or out of the selection; nothing moves.
             selection_.resize(list->size(), false);
             selection_[index] = !selection_[index];
+            emitSelectionSummary();
             viewport()->update();
             return;
         }
@@ -578,16 +882,17 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
             selectOnly(index);
         dragNotes_ = *list;
         if (shift && !hit->second) {
-            // A copy of the selection is what moves; the notes stay.
+            // Shift+drag on a note moves a duplicate of the selection.
             const std::vector<Note> copies = selectedNotes(dragNotes_, selection_);
             if (dragNotes_.size() + copies.size() <= kMaxPatternNotes) {
-                std::size_t rank = 0; // the clicked note's place among the selected ones
+                std::size_t rank = 0;
                 for (std::size_t i = 0; i < index; ++i)
                     rank += isSelected(selection_, i) ? 1 : 0;
                 index = dragNotes_.size() + rank;
                 selection_.assign(dragNotes_.size(), false);
                 dragNotes_.insert(dragNotes_.end(), copies.begin(), copies.end());
                 selection_.resize(dragNotes_.size(), true);
+                emitSelectionSummary();
             }
         }
         beginDrag(hit->second ? Drag::Resize : Drag::Move, index, pos);
@@ -595,27 +900,56 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
         viewport()->update();
         return;
     }
-    if (ctrl) {
-        boxBase_ = shift ? selection_ : NoteSelection{};
-        if (!shift)
+
+    // Empty grid space:
+    // - In Select mode (or when holding Ctrl in Draw/Paint mode): marquee box-selects notes!
+    if (tool_ == Tool::Select || ctrl) {
+        boxBase_ = (shift || (tool_ == Tool::Select && ctrl)) ? selection_ : NoteSelection{};
+        if (!shift && !(tool_ == Tool::Select && ctrl))
             selection_.assign(list->size(), false);
+        emitSelectionSummary();
         dragNotes_.clear();
         beginDrag(Drag::Box, 0, pos);
         viewport()->update();
         return;
     }
-    // New note at the clicked step, then drag it into place.
-    if (list->size() >= kMaxPatternNotes)
+
+    if (tool_ == Tool::Paint) {
+        dragNotes_ = *list;
+        paintLastSlot_ = -1;
+        beginDrag(Drag::Paint, 0, pos);
+        paintNoteAt(pos, effectiveGrid(event->modifiers()));
         return;
-    dragNotes_ = *list;
-    dragNotes_.push_back(Project::clamped(
-        Note{keyAt(pos.y()), snapDown(tickAt(pos.x()), snapTicks_), lastLength_, lastVelocity_}));
-    selection_.assign(dragNotes_.size(), false);
-    selection_.back() = true;
-    beginDrag(Drag::Move, dragNotes_.size() - 1, pos);
-    dragChanged_ = true;
-    edit(dragNotes_);
-    sound(dragNote_.key, dragNote_.velocity);
+    }
+
+    // Draw tool: place a new note and drag it into place.
+    insertNoteAndBeginMove(pos);
+}
+
+void PianoRollView::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && tool_ == Tool::Select && gridRect().contains(pos)) {
+        if (const auto hit = noteAt(pos)) {
+            // Double-clicking an existing note in Select mode deletes it cleanly.
+            const auto* list = notes();
+            if (list != nullptr && hit->first < list->size()) {
+                NoteSelection del(list->size(), false);
+                del[hit->first] = true;
+                selection_.clear();
+                commit(withoutNotes(*list, del));
+                return;
+            }
+        } else {
+            // Double-clicking empty space in Select mode inserts a new note!
+            if (drag_ == Drag::Box)
+                endDrag();
+            insertNoteAndBeginMove(pos);
+            endDrag();
+            return;
+        }
+    }
+    QAbstractScrollArea::mouseDoubleClickEvent(event);
 }
 
 void PianoRollView::mouseMoveEvent(QMouseEvent* event)
@@ -624,30 +958,49 @@ void PianoRollView::mouseMoveEvent(QMouseEvent* event)
     hover_ = pos;
     const auto* list = notes();
     if (drag_ == Drag::None || list == nullptr) {
-        if (laneRect().contains(pos)) {
-            viewport()->setCursor(Qt::SizeVerCursor);
-            return;
+        if (tool_ == Tool::Slice && gridRect().contains(pos)) {
+            const int g = effectiveGrid(event->modifiers());
+            const int cutTick = std::max(kMinNoteLength, snapNearest(tickAt(pos.x()), g));
+            const int k = keyAt(pos.y());
+            const SliceLine preview{cutTick, k, k};
+            if (!sliceLine_ || sliceLine_->tick != preview.tick || sliceLine_->fromKey != preview.fromKey) {
+                sliceLine_ = preview;
+                viewport()->update();
+            }
+        } else if (sliceLine_) {
+            sliceLine_.reset();
+            viewport()->update();
         }
-        const auto hit = noteAt(pos);
-        viewport()->setCursor(hit ? (hit->second ? Qt::SizeHorCursor : Qt::OpenHandCursor) : Qt::ArrowCursor);
+        updateHoverCursor(pos);
         return;
     }
-    const bool free = event->modifiers().testFlag(Qt::AltModifier);
+
+    const int grid = effectiveGrid(event->modifiers());
     const double dt = tickAt(pos.x()) - dragStartTick_;
-    const auto snapped = [this, free](double tick) {
-        return free ? static_cast<int>(std::lround(tick)) : snapNearest(tick, snapTicks_);
-    };
+    const auto snapped = [grid](double tick) { return snapNearest(tick, grid); };
 
     switch (drag_) {
     case Drag::Move: {
-        const std::vector<Note> next = movedNotes(dragNotes_, selection_,
-            snapped(dragNote_.start + dt) - dragNote_.start, keyAt(pos.y()) - dragStartKey_);
+        const int deltaKeys = keyAt(pos.y()) - dragStartKey_;
+        const std::vector<Note> next
+            = movedNotes(dragNotes_, selection_, snapped(dragNote_.start + dt) - dragNote_.start, deltaKeys);
         if (next != *list) {
             dragChanged_ = true;
             edit(next);
         }
-        if (dragIndex_ < next.size())
-            sound(next[dragIndex_].key, next[dragIndex_].velocity);
+        if (dragIndex_ < next.size()) {
+            const Note& curNote = next[dragIndex_];
+            sound(curNote.key, curNote.velocity);
+            const int actualShift = curNote.key - dragNote_.key;
+            if (actualShift != 0) {
+                const QString sign = actualShift > 0 ? QStringLiteral("+") : QString();
+                QToolTip::showText(event->globalPosition().toPoint(),
+                    tr("Pitch: %1%2 st  ·  %3").arg(sign).arg(actualShift).arg(formatKeyName(curNote.key)),
+                    viewport());
+            } else {
+                QToolTip::hideText();
+            }
+        }
         break;
     }
     case Drag::Resize: {
@@ -668,12 +1021,31 @@ void PianoRollView::mouseMoveEvent(QMouseEvent* event)
         for (std::size_t i = 0; i < list->size(); ++i)
             if (noteRect((*list)[i]).intersects(box))
                 selection_[i] = true;
+        emitSelectionSummary();
         viewport()->update();
         break;
     }
     case Drag::Erase:
         eraseAt(pos);
         break;
+    case Drag::Paint:
+        paintNoteAt(pos, grid);
+        break;
+    case Drag::Slice:
+        if (sliceLine_) {
+            sliceLine_->toKey = keyAt(pos.y());
+            viewport()->update();
+        }
+        break;
+    case Drag::Scrub: {
+        const double tick = std::max(0.0, tickAt(pos.x()));
+        if (std::abs(tick - lastScrubTick_) * pixelsPerTick() >= 2.5) {
+            lastScrubTick_ = tick;
+            setPlayhead(tick);
+            emit playbackRequested(tick);
+        }
+        break;
+    }
     case Drag::Velocity:
         setVelocityAt(dragLast_, pos);
         break;
@@ -691,8 +1063,13 @@ void PianoRollView::mouseReleaseEvent(QMouseEvent* /*event*/) { endDrag(); }
 
 bool PianoRollView::viewportEvent(QEvent* event)
 {
-    if (event->type() == QEvent::Leave)
+    if (event->type() == QEvent::Leave) {
         hover_.reset();
+        if (drag_ == Drag::None && sliceLine_) {
+            sliceLine_.reset();
+            viewport()->update();
+        }
+    }
     return QAbstractScrollArea::viewportEvent(event);
 }
 
@@ -772,15 +1149,53 @@ void PianoRollView::nudge(int ticks, int keys)
         commit(movedNotes(*list, selection_, ticks, keys));
 }
 
+void PianoRollView::transpose(int semitones)
+{
+    const auto* list = notes();
+    if (list == nullptr || list->empty() || semitones == 0)
+        return;
+    const NoteSelection target = hasSelection() ? selection_ : NoteSelection(list->size(), true);
+    commit(movedNotes(*list, target, 0, semitones));
+}
+
+void PianoRollView::applyLegato()
+{
+    const auto* list = notes();
+    if (list == nullptr || list->empty())
+        return;
+    const NoteSelection target = hasSelection() ? selection_ : NoteSelection(list->size(), true);
+    commit(legatoNotes(*list, target));
+}
+
+void PianoRollView::snapToScale()
+{
+    const auto* list = notes();
+    if (list == nullptr || list->empty())
+        return;
+    const NoteSelection target = hasSelection() ? selection_ : NoteSelection(list->size(), true);
+    commit(snappedToScaleNotes(*list, target, root_, scale_));
+}
+
+void PianoRollView::scaleVelocity(double factor)
+{
+    const auto* list = notes();
+    if (list == nullptr || list->empty())
+        return;
+    const NoteSelection target = hasSelection() ? selection_ : NoteSelection(list->size(), true);
+    commit(scaledVelocityNotes(*list, target, factor));
+}
+
 void PianoRollView::selectAll()
 {
     selection_.assign(expectedCount_, true);
+    emitSelectionSummary();
     viewport()->update();
 }
 
 void PianoRollView::clearSelection()
 {
     selection_.assign(expectedCount_, false);
+    emitSelectionSummary();
     viewport()->update();
 }
 
@@ -811,9 +1226,9 @@ void PianoRollView::paste()
     const auto* list = notes();
     if (list == nullptr || clipboard_.empty())
         return;
-    // Where the mouse points, else at the first bar line in view.
+    const int grid = effectiveGrid(Qt::NoModifier);
     const int at = hover_ && gridRect().contains(*hover_)
-        ? snapDown(tickAt(hover_->x()), snapTicks_)
+        ? snapDown(tickAt(hover_->x()), grid)
         : static_cast<int>(std::ceil(std::max(0.0, tickAt(kKeyboardWidth)) / kTicksPerBar)) * kTicksPerBar;
     const std::size_t before = list->size();
     const std::vector<Note> next = withPasted(*list, clipboard_, at);
@@ -830,7 +1245,6 @@ void PianoRollView::duplicateSelection()
     const auto span = list != nullptr ? selectionSpan(*list, selection_) : std::nullopt;
     if (!span)
         return;
-    // Right after the selection, on the snap grid.
     const int length = (span->second - span->first + snapTicks_ - 1) / snapTicks_ * snapTicks_;
     const std::size_t before = list->size();
     const std::vector<Note> next = withPasted(*list, selectedNotes(*list, selection_), span->first + length);
@@ -856,6 +1270,19 @@ void PianoRollView::wheelEvent(QWheelEvent* event)
 {
     const bool overRuler
         = event->position().y() < timeline::kRulerHeight && event->position().x() >= kKeyboardWidth;
+
+    // Alt + Mouse Wheel over selected notes adjusts their pitch directly!
+    if (event->modifiers().testFlag(Qt::AltModifier) && !event->modifiers().testFlag(Qt::ControlModifier)
+        && hasSelection() && gridRect().contains(event->position().toPoint())) {
+        const int raw = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->angleDelta().x();
+        if (raw != 0) {
+            const int unit = event->modifiers().testFlag(Qt::ShiftModifier) ? kPitchClasses : 1;
+            transpose((raw > 0 ? 1 : -1) * unit);
+            event->accept();
+            return;
+        }
+    }
+
     if (event->modifiers().testFlag(Qt::ShiftModifier) && !event->modifiers().testFlag(Qt::ControlModifier)) {
         const int delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->angleDelta().x();
         horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta);

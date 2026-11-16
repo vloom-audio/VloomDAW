@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vloom Audio contributors
 #include "audio/AudioController.hpp"
+#include "core/BrowserFilter.hpp"
 #include "core/DeviceRef.hpp"
 #include "ui/AppSettings.hpp"
 #include "ui/FilePaths.hpp"
@@ -11,12 +12,16 @@
 #include "ui/dialogs/SettingsDialog/SettingsDialog.hpp"
 #include "ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp"
 #include "ui/launcher/LauncherDialog.hpp"
+#if defined(Q_OS_WIN)
+#include "ui/WinWindow.hpp"
+#endif
 
 #include <QApplication>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QIcon>
+#include <QLocale>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
@@ -33,7 +38,13 @@ int main(int argc, char* argv[])
     if (!qEnvironmentVariableIsSet("QT_QPA_UPDATE_IDLE_TIME"))
         qputenv("QT_QPA_UPDATE_IDLE_TIME", "0");
 
+    // Keep numeric spin boxes, BPM readouts, and file-size labels in standard
+    // Western Arabic digits (0-9) matching the English UI, even when the host
+    // OS regional format uses native digits (such as Thai regional digits).
+    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+
     QApplication app(argc, argv);
+    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
     QApplication::setApplicationName(QStringLiteral("VloomDAW"));
     QApplication::setApplicationVersion(QStringLiteral(VLOOMDAW_VERSION));
     QApplication::setOrganizationName(QStringLiteral("Vloom Audio"));
@@ -44,19 +55,31 @@ int main(int argc, char* argv[])
     vloomdaw::AppSettings settings = vloomdaw::AppSettings::load();
     vloomdaw::Theme::select(settings.theme);
     vloomdaw::Theme::apply(app);
+#if defined(Q_OS_WIN)
+    if (settings.associateProjectFiles)
+        vloomdaw::setWindowsProjectFileAssociation(QCoreApplication::applicationFilePath(), true);
+#endif
 
     // The controller outlives the window, so audio stops after the UI is gone.
     vloomdaw::AudioController audio;
 
-    // "VloomDAW song.vloom" (and opening a .vloom with the app) opens it directly;
-    // UNC network paths are refused before QFileInfo touches SMB.
+    // "VloomDAW song.vloom" (such as double-clicking TESTTTTT.vloom in Explorer)
+    // or "VloomDAW song.mid" opens it directly; UNC network paths are refused
+    // before QFileInfo touches SMB.
     const QStringList args = QApplication::arguments();
     QString startupFile;
-    if (args.size() > 1 && vloomdaw::isLocalPath(args.at(1))
-        && args.at(1).endsWith(QStringLiteral(".vloom"), Qt::CaseInsensitive)) {
-        const QString abs = QFileInfo(args.at(1)).absoluteFilePath();
-        if (vloomdaw::isLocalPath(abs))
-            startupFile = abs;
+    for (int i = 1; i < args.size(); ++i) {
+        const QString& arg = args.at(i);
+        if (arg.startsWith(QLatin1Char('-')) || !vloomdaw::isLocalPath(arg))
+            continue;
+        if (arg.endsWith(QStringLiteral(".vloom"), Qt::CaseInsensitive)
+            || vloomdaw::isMidiFile(QFileInfo(arg).fileName().toStdString())) {
+            const QString abs = QFileInfo(arg).absoluteFilePath();
+            if (vloomdaw::isLocalPath(abs)) {
+                startupFile = abs;
+                break;
+            }
+        }
     }
 
     std::optional<double> startupTempo;
@@ -104,8 +127,10 @@ int main(int argc, char* argv[])
                 QString folder = QSettings().value(kFolderKey).toString();
                 if (!vloomdaw::isLocalPath(folder) || !QDir(folder).exists())
                     folder = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
-                const QString picked = QFileDialog::getOpenFileName(
-                    nullptr, QObject::tr("Open Project"), folder, QObject::tr("VloomDAW project (*.vloom)"));
+                const QString picked
+                    = QFileDialog::getOpenFileName(nullptr, QObject::tr("Open Project"), folder,
+                        QObject::tr("VloomDAW & MIDI files (*.vloom *.mid *.midi);;VloomDAW project "
+                                    "(*.vloom);;MIDI files (*.mid *.midi)"));
                 if (vloomdaw::isLocalPath(picked)) {
                     QSettings().setValue(kFolderKey, QFileInfo(picked).absolutePath());
                     startupFile = picked;
@@ -157,6 +182,7 @@ int main(int argc, char* argv[])
                     });
                 dlg.generalPage()->setStartPositionMode(static_cast<int>(settings.startPositionMode));
                 dlg.generalPage()->setMetronomeOnStartup(settings.metronomeOnStartup);
+                dlg.generalPage()->setAssociateProjectFiles(settings.associateProjectFiles);
                 QObject::connect(dlg.generalPage(), &vloomdaw::GeneralSettingsPage::startPositionModeChanged,
                     &dlg, [&](int mode) {
                         settings.startPositionMode = mode == 1
@@ -168,6 +194,15 @@ int main(int argc, char* argv[])
                     &dlg, [&](bool on) {
                         settings.metronomeOnStartup = on;
                         settings.save();
+                    });
+                QObject::connect(dlg.generalPage(),
+                    &vloomdaw::GeneralSettingsPage::associateProjectFilesChanged, &dlg, [&](bool on) {
+                        settings.associateProjectFiles = on;
+                        settings.save();
+#if defined(Q_OS_WIN)
+                        vloomdaw::setWindowsProjectFileAssociation(
+                            QCoreApplication::applicationFilePath(), on);
+#endif
                     });
                 dlg.themePage()->setChoice(settings.theme);
                 QObject::connect(dlg.themePage(), &vloomdaw::ThemeSettingsPage::choiceChanged, &dlg,

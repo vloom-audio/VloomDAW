@@ -500,6 +500,8 @@ std::string pluginThumbnailId(PluginFormat format, const std::filesystem::path& 
     const char* fmtPrefix = "vst3|";
     if (format == PluginFormat::Clap)
         fmtPrefix = "clap|";
+    else if (format == PluginFormat::Vst2)
+        fmtPrefix = "vst2|";
     else if (format == PluginFormat::Builtin)
         fmtPrefix = "builtin|";
 

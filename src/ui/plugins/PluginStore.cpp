@@ -48,11 +48,19 @@ std::string text(const QSettings& s, const char* key)
 
 QString formatKey(PluginFormat format)
 {
-    return format == PluginFormat::Clap ? QStringLiteral("clap") : QStringLiteral("vst3");
+    if (format == PluginFormat::Clap)
+        return QStringLiteral("clap");
+    if (format == PluginFormat::Vst2)
+        return QStringLiteral("vst2");
+    return QStringLiteral("vst3");
 }
 PluginFormat formatFromKey(const QString& key)
 {
-    return key == QLatin1String("clap") ? PluginFormat::Clap : PluginFormat::Vst3;
+    if (key == QLatin1String("clap"))
+        return PluginFormat::Clap;
+    if (key == QLatin1String("vst2"))
+        return PluginFormat::Vst2;
+    return PluginFormat::Vst3;
 }
 
 } // namespace

@@ -11,6 +11,7 @@ class QButtonGroup;
 class QCheckBox;
 class QDoubleSpinBox;
 class QGridLayout;
+class QLabel;
 class QLineEdit;
 class QWidget;
 
@@ -40,8 +41,11 @@ public:
     };
 
     /// `tempo`: the new project's tempo until the user has chosen one (the
-    /// last one is remembered).
-    LauncherDialog(const AudioStatus& audio, double tempo, QWidget* parent = nullptr);
+    /// last one is remembered). When `hasOpenProject` is true (`File > Start Window…`),
+    /// closing returns to the open project; when false (startup or after `Close Project`),
+    /// the footer offers `Exit VloomDAW`.
+    LauncherDialog(
+        const AudioStatus& audio, double tempo, QWidget* parent = nullptr, bool hasOpenProject = false);
 
     [[nodiscard]] Choice choice() const { return choice_; }
     [[nodiscard]] QString path() const { return path_; }
@@ -59,9 +63,9 @@ private:
     /// Places the cards in as many columns as the view has room for.
     void layoutCards();
 
-    [[nodiscard]] QWidget* createSidePanel(double tempo);
+    [[nodiscard]] QWidget* createSidePanel(double tempo, const AudioStatus& audio);
     [[nodiscard]] QWidget* createRecentPanel();
-    [[nodiscard]] QWidget* createStatusBar(const AudioStatus& audio);
+    [[nodiscard]] QWidget* createStatusBar(bool hasOpenProject);
     /// Lays out the cards for the projects the filter and search let through.
     void rebuildCards();
     void choose(Choice choice, const QString& path = {});
@@ -71,6 +75,7 @@ private:
     QString path_;
     QDoubleSpinBox* tempo_ = nullptr;
     QLineEdit* search_ = nullptr;
+    QLabel* countBadge_ = nullptr;
     QButtonGroup* filters_ = nullptr;
     QGridLayout* cards_ = nullptr;
     QWidget* cardsHost_ = nullptr;

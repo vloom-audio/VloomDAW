@@ -35,6 +35,9 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
 | `key` | root pitch class, 0 = C .. 11 = B |
 | `scale` | `major`, `natural-minor`, `harmonic-minor`, `melodic-minor`, `dorian`, `phrygian`, `lydian`, `mixolydian`, `locrian`, `major-pentatonic`, `minor-pentatonic`, `blues` or `chromatic` |
 | `songMode` | plays the playlist instead of looping the pattern |
+| `loopEnabled` | transport loop switch (optional, defaults to `true`) |
+| `loopStart` | custom Playlist Loop Bar start in ticks (optional; written when `loopEnd > loopStart`) |
+| `loopEnd` | custom Playlist Loop Bar end in ticks (optional; written when `loopEnd > loopStart`) |
 
 ## Channels, patterns, playlist
 
@@ -91,9 +94,9 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
   "id": "…", "name": "Pro-L 2", "bypassed": false, "state": "base64…" }
 ```
 
-- `format`: `clap`, `vst3`, or `builtin` for an effect that comes with
-  VloomDAW (`"id": "vloom.eq"`). A built-in has no `path`; one in the file
-  is ignored.
+- `format`: `clap`, `vst3`, `vst2`, or `builtin` for an effect or instrument
+  that comes with VloomDAW (`"id": "vloom.eq"`). A built-in has no `path`; one
+  in the file is ignored.
 - `id`: the plugin's id in its library (vloom-engine's `PluginInfo::id`).
 - `state`: what the plugin's `saveState()` returned, as base64. It may be
   missing; the plugin then starts at its defaults.

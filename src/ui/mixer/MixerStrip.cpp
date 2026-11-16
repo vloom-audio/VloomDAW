@@ -10,6 +10,7 @@
 #include "ui/widgets/Fader/Fader.hpp"
 #include "ui/widgets/LevelMeter/LevelMeter.hpp"
 
+#include <QApplication>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QEvent>
@@ -1350,7 +1351,53 @@ void MixerStrip::mousePressEvent(QMouseEvent* event)
         emit colorPickRequested(mapToGlobal(QPoint(0, 8)));
         return;
     }
+    if (kind_ == Kind::Insert && event->button() == Qt::LeftButton
+        && (nameEditor_ == nullptr || !nameEditor_->isVisible())) {
+        pendingStripDrag_ = true;
+        draggingStripOrder_ = false;
+        stripDragStartGlobal_ = event->globalPosition().toPoint();
+    }
     QFrame::mousePressEvent(event);
+}
+
+void MixerStrip::mouseMoveEvent(QMouseEvent* event)
+{
+    if (pendingStripDrag_) {
+        if (!event->buttons().testFlag(Qt::LeftButton)) {
+            pendingStripDrag_ = false;
+            draggingStripOrder_ = false;
+            unsetCursor();
+            return;
+        }
+        const QPoint gpos = event->globalPosition().toPoint();
+        if (!draggingStripOrder_
+            && std::abs(gpos.x() - stripDragStartGlobal_.x()) >= QApplication::startDragDistance()) {
+            draggingStripOrder_ = true;
+            setCursor(Qt::ClosedHandCursor);
+        }
+        if (draggingStripOrder_) {
+            emit stripDragMoved(gpos);
+            event->accept();
+            return;
+        }
+    }
+    QFrame::mouseMoveEvent(event);
+}
+
+void MixerStrip::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (pendingStripDrag_) {
+        const bool wasDragging = draggingStripOrder_;
+        pendingStripDrag_ = false;
+        draggingStripOrder_ = false;
+        unsetCursor();
+        if (wasDragging) {
+            emit stripDragReleased(event->globalPosition().toPoint());
+            event->accept();
+            return;
+        }
+    }
+    QFrame::mouseReleaseEvent(event);
 }
 
 void MixerStrip::paintEvent(QPaintEvent* event)
@@ -1452,7 +1499,55 @@ bool MixerStrip::eventFilter(QObject* watched, QEvent* event)
 
     if (watched == name_ || watched == namePlate_) {
         switch (event->type()) {
+        case QEvent::MouseButtonPress: {
+            const auto* me = static_cast<QMouseEvent*>(event);
+            if (kind_ == Kind::Insert && me->button() == Qt::LeftButton
+                && (nameEditor_ == nullptr || !nameEditor_->isVisible())) {
+                pendingStripDrag_ = true;
+                draggingStripOrder_ = false;
+                stripDragStartGlobal_ = me->globalPosition().toPoint();
+            }
+            break;
+        }
+        case QEvent::MouseMove: {
+            if (pendingStripDrag_) {
+                const auto* me = static_cast<QMouseEvent*>(event);
+                if (!me->buttons().testFlag(Qt::LeftButton)) {
+                    pendingStripDrag_ = false;
+                    draggingStripOrder_ = false;
+                    unsetCursor();
+                    break;
+                }
+                const QPoint gpos = me->globalPosition().toPoint();
+                if (!draggingStripOrder_
+                    && std::abs(gpos.x() - stripDragStartGlobal_.x()) >= QApplication::startDragDistance()) {
+                    draggingStripOrder_ = true;
+                    setCursor(Qt::ClosedHandCursor);
+                }
+                if (draggingStripOrder_) {
+                    emit stripDragMoved(gpos);
+                    return true;
+                }
+            }
+            break;
+        }
+        case QEvent::MouseButtonRelease: {
+            if (pendingStripDrag_) {
+                const auto* me = static_cast<QMouseEvent*>(event);
+                const bool wasDragging = draggingStripOrder_;
+                pendingStripDrag_ = false;
+                draggingStripOrder_ = false;
+                unsetCursor();
+                if (wasDragging) {
+                    emit stripDragReleased(me->globalPosition().toPoint());
+                    return true;
+                }
+            }
+            break;
+        }
         case QEvent::MouseButtonDblClick:
+            pendingStripDrag_ = false;
+            draggingStripOrder_ = false;
             if (solo_ != nullptr) {
                 startInlineRename();
                 return true;

@@ -9,6 +9,8 @@
 #include "core/BrowserFilter.hpp"
 #include "core/Decibels.hpp"
 #include "core/DeviceRef.hpp"
+#include "core/MidiFile.hpp"
+#include "core/Names.hpp"
 #include "core/NoteNames.hpp"
 #include "core/PluginMetadata.hpp"
 #include "core/PositionFormat.hpp"
@@ -72,6 +74,7 @@
 #include <vloom/engine/sample/SampleBuffer.hpp>
 #include <vloom/engine/sample/SampleLoader.hpp>
 
+#include <QAbstractItemView>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
@@ -84,6 +87,7 @@
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileOpenEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -189,7 +193,7 @@ constexpr QLatin1StringView kPerformanceOverlayKey{"debug/performanceOverlay"};
 constexpr QLatin1StringView kSidebarPageKey{"mainWindow/sidebarPage"};
 constexpr QLatin1StringView kPlaylistHeaderWidthKey{"playlist/headerWidth"};
 
-constexpr int kDefaultSidebarWidth = 260;
+constexpr int kDefaultSidebarWidth = 280;
 constexpr int kThemeApplyMs = 200; ///< full restyle once theme edits pause this long
 constexpr int kDefaultMixerHeight = 408;
 constexpr std::size_t kMixerInserts = 0;
@@ -234,7 +238,22 @@ MainWindow::MainWindow(AudioController& audio, QWidget* parent)
     rackAudio_.setPluginResolver(pluginHost_.resolver());
     pluginIdleTimer_ = new QTimer(this);
     connect(pluginIdleTimer_, &QTimer::timeout, this, [this] {
-        pluginHost_.idle();
+        const std::vector<std::uint64_t> failed = pluginHost_.idle();
+        for (const std::uint64_t handle : failed) {
+            if (const auto ed = pluginEditors_.find(handle); ed != pluginEditors_.end()) {
+                if (!ed->second.isNull())
+                    delete ed->second.data();
+                pluginEditors_.erase(ed);
+            }
+            if (const auto inst = pluginHost_.instance(handle); inst != nullptr) {
+                const QString name = QString::fromStdString(inst->processor().info().name);
+                statusBar()->showMessage(
+                    tr("Plugin “%1” stopped responding (its bridge process ended); its last settings were "
+                       "preserved.")
+                        .arg(name),
+                    10000);
+            }
+        }
         // Plugins change their latency while they run (oversampling, linear
         // phase): the mixer's delay compensation follows.
         audio_.engine().updatePluginLatency();
@@ -328,7 +347,7 @@ void MainWindow::createMenus()
         return action;
     };
     addFileAction(tr("&New Project"), QKeySequence(Qt::CTRL | Qt::Key_N), [this] { newProject(); });
-    fileMenu->addAction(tr("S&tart Window…"), this, [this] { showLauncher(); });
+    fileMenu->addAction(tr("S&tart Hub…"), this, [this] { showLauncher(); });
     addFileAction(tr("&Open…"), QKeySequence(Qt::CTRL | Qt::Key_O), [this] { openProject(); });
 
     recentMenu_ = fileMenu->addMenu(tr("Open &Recent"));
@@ -339,9 +358,17 @@ void MainWindow::createMenus()
     addFileAction(tr("&Save"), QKeySequence(Qt::CTRL | Qt::Key_S), [this] { saveProject(); });
     addFileAction(
         tr("Save &As…"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), [this] { saveProjectAs(); });
+    closeProjectAction_
+        = addFileAction(tr("&Close Project"), QKeySequence::Close, [this] { closeProject(); });
+    closeProjectAction_->setIcon(Theme::icon(QStringLiteral("home")));
+    closeProjectAction_->setIconVisibleInMenu(false);
+    closeProjectAction_->setToolTip(
+        tr("Close Project (%1)").arg(closeProjectAction_->shortcut().toString(QKeySequence::NativeText)));
 
     fileMenu->addSeparator();
     addFileAction(tr("&Import Audio…"), QKeySequence(Qt::CTRL | Qt::Key_I), [this] { importAudioFiles(); });
+    addFileAction(
+        tr("Import &MIDI…"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M), [this] { importMidiFiles(); });
     addFileAction(tr("&Export…"), QKeySequence(Qt::CTRL | Qt::Key_E), [this] { exportSong(); });
 
     // The title's "*" follows unsaved changes; the snapshot is taken once
@@ -513,7 +540,10 @@ void MainWindow::createToolBars()
         (void)audio_.engine().locate(end);
     });
     connect(transport_, &TransportBar::loopToggled, this, [this](bool loop) {
+        songLoopStart_ = -1.0;
         songLoopEnd_ = -1.0;
+        if (playlist_ != nullptr)
+            playlist_->setLoopActive(loop);
         if (audio_.isRunning())
             applySongLoop();
         statusBar()->showMessage(loop ? tr("Cycle loop enabled") : tr("Cycle loop disabled"), 3000);
@@ -554,7 +584,11 @@ void MainWindow::createToolBars()
     });
     connect(transport_, &TransportBar::songModeChanged, this, [this](bool song) {
         songMode_ = song;
+        songLoopStart_ = -1.0;
+        songLoopEnd_ = -1.0;
         syncChannelRack();
+        if (audio_.isRunning())
+            applySongLoop();
         statusBar()->showMessage(song ? tr("Song mode: Play runs through the playlist.")
                                       : tr("Pattern mode: Play loops the current pattern."),
             4000);
@@ -863,6 +897,11 @@ void MainWindow::showMixerSourceMenu(std::size_t track, const QPoint& globalPos)
             const QString file
                 = QFileInfo(QString::fromStdString(project_.channels()[*ch].samplePath)).fileName();
             menu.addAction(tr("Audio File: %1").arg(file))->setEnabled(false);
+        } else {
+            menu.addAction(Theme::icon(QStringLiteral("track-instrument")),
+                project_.channels()[*ch].instrument ? tr("Replace Instrument Plug-in…")
+                                                    : tr("Load Instrument Plug-in…"),
+                this, [this, chIdx = *ch, globalPos] { showInstrumentChooserMenu(chIdx, globalPos); });
         }
         menu.addSeparator();
     }
@@ -1109,10 +1148,8 @@ void MainWindow::copyMixerChannelSettings(std::size_t track)
     copied.mono = mt.mono;
     copied.effects = mt.effects;
     copied.sends = mt.sends;
-    for (const PluginSlot& slot : mt.effects) {
-        const auto inst = pluginHost_.instance(slot.instance);
-        copied.effectStates.push_back(inst != nullptr ? inst->processor().saveState() : slot.savedState);
-    }
+    for (const PluginSlot& slot : mt.effects)
+        copied.effectStates.push_back(pluginHost_.saveState(slot.instance, slot.savedState));
     copiedChannelSettings_ = std::move(copied);
     if (mixerPanel_ != nullptr)
         mixerPanel_->setCanPasteChannelSettings(true);
@@ -2479,6 +2516,11 @@ void MainWindow::showTrackChannelMenu(std::size_t track, const QPoint& globalPos
             menu.addAction(tr("Open Instrument Editor…"), this,
                 [this, handle = ch.instrument->instance, chName] { openPluginEditor(handle, chName); });
         }
+        if (ch.samplePath.empty()) {
+            menu.addAction(Theme::icon(QStringLiteral("track-instrument")),
+                ch.instrument ? tr("Replace Instrument Plug-in…") : tr("Load Instrument Plug-in…"), this,
+                [this, chIdx = *primary, globalPos] { showInstrumentChooserMenu(chIdx, globalPos); });
+        }
         menu.addSeparator();
     }
 
@@ -2686,7 +2728,13 @@ void MainWindow::updatePanelContexts()
     const QString pattern = QString::fromStdString(project_.patterns()[currentPattern_].name);
     const QString channel = QString::fromStdString(project_.channels()[currentChannel_].name);
     channelRackFrame_->setContext(pattern);
-    pianoRollFrame_->setContext(QStringLiteral("%1  ·  %2").arg(pattern, channel));
+    rebuildPianoRollChannels();
+    QString prContext = QStringLiteral("%1  ·  %2").arg(pattern, channel);
+    if (!pianoRollSelectionText_.isEmpty())
+        prContext += QStringLiteral("   [%1]").arg(pianoRollSelectionText_);
+    else if (!pianoRollToolHint_.isEmpty())
+        prContext += QStringLiteral("   ·   %1").arg(pianoRollToolHint_);
+    pianoRollFrame_->setContext(prContext);
 }
 
 void MainWindow::syncPatternSelector()
@@ -3191,33 +3239,7 @@ QWidget* MainWindow::createMixer()
             if (playlist_ != nullptr)
                 playlist_->viewport()->update();
         });
-    connect(mixerPanel_, &MixerPanel::moveInsertRequested, this, [this](std::size_t from, std::size_t to) {
-        if (from == MixerModel::kMaster || to == MixerModel::kMaster || from >= mixer_.size()
-            || to >= mixer_.size() || from == to)
-            return;
-        recordUndo(tr("Move Insert"));
-        const auto trkFrom = insertPrimaryTrack(project_, mixer_, from);
-        const auto trkTo = insertPrimaryTrack(project_, mixer_, to);
-        mixer_.moveInsert(from, to);
-        project_.moveInsert(static_cast<int>(from), static_cast<int>(to));
-        if (trkFrom && trkTo && *trkFrom != *trkTo && *trkFrom < project_.tracks().size()
-            && *trkTo < project_.tracks().size() && project_.tracks()[*trkFrom].depth == 0
-            && !project_.hasSubTracks(*trkFrom) && project_.tracks()[*trkTo].depth == 0
-            && !project_.hasSubTracks(*trkTo)) {
-            project_.moveTrack(*trkFrom, *trkTo);
-        }
-        syncMixerPanel();
-        mixerPanel_->setSelectedTrack(to);
-        if (playlist_ != nullptr) {
-            playlist_->refresh();
-            if (const auto movedTrk = insertPrimaryTrack(project_, mixer_, to))
-                playlist_->setSelectedTrack(static_cast<int>(*movedTrk));
-        }
-        syncInsertNames();
-        updateMixer();
-        syncChannelRack(); // channels follow their insert
-        syncEffectCounts();
-    });
+    connect(mixerPanel_, &MixerPanel::moveInsertRequested, this, &MainWindow::moveMixerInsertTo);
     connect(mixerPanel_, &MixerPanel::effectsMenuRequested, this, &MainWindow::showEffectsMenu);
     connect(mixerPanel_, &MixerPanel::effectBypassToggled, this,
         [this](std::size_t track, std::size_t slot, bool bypassed) {
@@ -3399,6 +3421,7 @@ void MainWindow::createSettingsDialog()
     auto* general = settingsDialog_->generalPage();
     general->setStartPositionMode(static_cast<int>(settings_.startPositionMode));
     general->setMetronomeOnStartup(settings_.metronomeOnStartup);
+    general->setAssociateProjectFiles(settings_.associateProjectFiles);
     connect(general, &GeneralSettingsPage::startPositionModeChanged, this, [this](int mode) {
         settings_.startPositionMode
             = mode == 1 ? AppSettings::PositionMode::Time : AppSettings::PositionMode::BarsBeats;
@@ -3407,6 +3430,13 @@ void MainWindow::createSettingsDialog()
     connect(general, &GeneralSettingsPage::metronomeOnStartupChanged, this, [this](bool on) {
         settings_.metronomeOnStartup = on;
         settings_.save();
+    });
+    connect(general, &GeneralSettingsPage::associateProjectFilesChanged, this, [this](bool on) {
+        settings_.associateProjectFiles = on;
+        settings_.save();
+#if defined(Q_OS_WIN)
+        setWindowsProjectFileAssociation(QCoreApplication::applicationFilePath(), on);
+#endif
     });
 
     StemSettingsPage* stems = settingsDialog_->stemPage();
@@ -3486,11 +3516,12 @@ void MainWindow::createCentralArea()
     splitter_ = new QSplitter(Qt::Horizontal, root);
     splitter_->setObjectName(QStringLiteral("sidebarSplitter"));
     splitter_->setChildrenCollapsible(false);
-    splitter_->setHandleWidth(1);
+    splitter_->setHandleWidth(5);
     rootLayout->addWidget(splitter_, 1);
 
     sidePanels_ = new QStackedWidget(splitter_);
-    sidePanels_->setMinimumWidth(180);
+    sidePanels_->setMinimumWidth(190);
+    sidePanels_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     splitter_->addWidget(sidePanels_);
 
     // Pages: the activity bar index equals the stack index.
@@ -3564,6 +3595,7 @@ void MainWindow::createCentralArea()
     sidePanels_->addWidget(pluginsPanel_);
     activityBar_->addPage(Theme::icon(QStringLiteral("plug")), tr("Plugins"));
 
+    activityBar_->addBottomAction(closeProjectAction_);
     activityBar_->addBottomAction(settingsAction_);
     connect(activityBar_, &ActivityBar::currentChanged, this, &MainWindow::showSidePanel);
 
@@ -3571,7 +3603,8 @@ void MainWindow::createCentralArea()
     workspaceSplitter_ = new QSplitter(Qt::Vertical, splitter_);
     workspaceSplitter_->setObjectName(QStringLiteral("workspaceSplitter"));
     workspaceSplitter_->setChildrenCollapsible(false);
-    workspaceSplitter_->setHandleWidth(1);
+    workspaceSplitter_->setHandleWidth(4);
+    workspaceSplitter_->setMinimumWidth(360);
     workspaceSplitter_->addWidget(createWorkspace());
     workspaceSplitter_->addWidget(createMixer());
     workspaceSplitter_->setStretchFactor(0, 1);
@@ -3761,9 +3794,146 @@ QWidget* MainWindow::createWorkspace()
     pianoRoll_->setProject(&project_);
     pianoRollFrame_ = new PanelFrame(tr("PIANO ROLL"), pianoRoll_, workspace_);
     workspace_->addWidget(pianoRollFrame_);
-    makeDetachable(detachable_[0], WorkspacePage::PianoRoll, pianoRollFrame_, tr("Piano roll"),
-        tr("piano roll"), QStringLiteral("pianoRoll"));
     {
+        // Active MIDI channel switcher + 1-click Instrument plugin editor / picker.
+        pianoRollChannel_ = new ClipSourceBox([this] { rebuildPianoRollChannels(); }, pianoRollFrame_);
+        pianoRollChannel_->setObjectName(QStringLiteral("pianoRollChannel"));
+        pianoRollChannel_->setToolTip(tr("Active channel edited in the Piano Roll"));
+        pianoRollChannel_->setAccessibleName(tr("Piano Roll Channel"));
+        pianoRollChannel_->setFocusPolicy(Qt::NoFocus);
+        pianoRollChannel_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        pianoRollChannel_->setMinimumContentsLength(8);
+        pianoRollChannel_->setMaximumWidth(200);
+        if (QAbstractItemView* popupView = pianoRollChannel_->view())
+            popupView->setMinimumWidth(260);
+        connect(pianoRollChannel_, &QComboBox::activated, this, [this](int row) {
+            const QVariant v = pianoRollChannel_->itemData(row);
+            if (v.isValid())
+                selectChannel(static_cast<std::size_t>(v.toULongLong()));
+        });
+        pianoRollFrame_->addHeaderWidget(pianoRollChannel_);
+
+        auto* instBtn = headerButton(QStringLiteral("plug"), tr("Inst"),
+            tr("Open this channel's Instrument editor (or load an Instrument plug-in; right-click to "
+               "replace)"));
+        instBtn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(instBtn, &QToolButton::clicked, this, [this, instBtn] {
+            if (currentChannel_ >= project_.channels().size())
+                return;
+            const Channel& c = project_.channels()[currentChannel_];
+            const auto instance = c.instrument ? pluginHost_.instance(c.instrument->instance) : nullptr;
+            if (instance != nullptr
+                && (instance->processor().hasEditor() || !instance->processor().parameters().empty())) {
+                openPluginEditor(c.instrument->instance, QString::fromStdString(c.name));
+                return;
+            }
+            showInstrumentChooserMenu(currentChannel_, instBtn->mapToGlobal(QPoint(0, instBtn->height())));
+        });
+        connect(instBtn, &QWidget::customContextMenuRequested, this, [this, instBtn](const QPoint& pos) {
+            if (currentChannel_ < project_.channels().size())
+                showInstrumentChooserMenu(currentChannel_, instBtn->mapToGlobal(pos));
+        });
+        pianoRollFrame_->addHeaderWidget(instBtn);
+
+        // Studio One-style MIDI editing tools (Select is default so plain left-drag marquee-selects notes).
+        struct PianoToolInfo {
+            PianoRollView::Tool tool;
+            const char* icon;
+            QString name;
+            QKeySequence key;
+            QString hint;
+        };
+        const PianoToolInfo prTools[] = {
+            {PianoRollView::Tool::Select, "tool-select", tr("Select"), QKeySequence(Qt::Key_E),
+                tr("Select: drag a box to select notes, drag up/down to adjust pitch (double-click "
+                   "inserts)")},
+            {PianoRollView::Tool::Draw, "tool-draw", tr("Draw"), QKeySequence(Qt::Key_P),
+                tr("Draw: click/drag to place notes, drag a note to move or trim (Ctrl+drag box-selects)")},
+            {PianoRollView::Tool::Paint, "tool-paint", tr("Paint"), QKeySequence(Qt::Key_B),
+                tr("Paint: drag horizontally to lay repeated notes at each snap step")},
+            {PianoRollView::Tool::Slice, "tool-slice", tr("Slice"), QKeySequence(Qt::Key_C),
+                tr("Slice: click or drag across notes to split them at the cut line (Alt: free)")},
+            {PianoRollView::Tool::Delete, "tool-delete", tr("Delete"), QKeySequence(Qt::Key_D),
+                tr("Delete: click or drag over notes to erase them")},
+            {PianoRollView::Tool::Playback, "tool-playback", tr("Playback"), QKeySequence(Qt::Key_Y),
+                tr("Playback: hold to audition from the pointer, drag to scrub")},
+        };
+        auto* prGroup = new QActionGroup(pianoRollFrame_);
+        QList<QToolButton*> prToolButtons;
+        for (const PianoToolInfo& info : prTools) {
+            auto* action
+                = new QAction(Theme::icon(QString::fromLatin1(info.icon)), info.name, pianoRollFrame_);
+            action->setCheckable(true);
+            action->setChecked(info.tool == PianoRollView::Tool::Select);
+            action->setShortcut(info.key);
+            action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+            action->setToolTip(
+                QStringLiteral("%1 (%2)").arg(info.name, info.key.toString(QKeySequence::NativeText)));
+            pianoRollFrame_->addAction(action);
+            prGroup->addAction(action);
+            auto* btn = new QToolButton;
+            btn->setDefaultAction(action);
+            btn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            btn->setFocusPolicy(Qt::NoFocus);
+            prToolButtons.append(btn);
+            connect(action, &QAction::triggered, this, [this, tool = info.tool, hint = info.hint] {
+                pianoRoll_->setTool(tool);
+                pianoRollToolHint_ = hint;
+                updatePanelContexts();
+            });
+        }
+        pianoRollToolHint_ = prTools[0].hint;
+        pianoRollFrame_->addHeaderWidget(makePanelButtonGroup(prToolButtons));
+
+        // Pitch / Transpose & MIDI Action buttons (acts on selected notes, or all notes if none selected).
+        const auto textSegBtn = [this](const QString& label, const QString& tip) {
+            auto* b = new QToolButton(pianoRollFrame_);
+            b->setText(label);
+            b->setFocusPolicy(Qt::NoFocus);
+            b->setToolTip(tip);
+            return b;
+        };
+        auto* octDownBtn = textSegBtn(
+            tr("-Oct"), tr("Transpose -1 octave (-12 semitones; Shift+Down or Alt+Shift+Wheel)"));
+        auto* semiDownBtn
+            = textSegBtn(tr("-1"), tr("Transpose -1 semitone (Down arrow, drag vertically, or Alt+Wheel)"));
+        auto* semiUpBtn
+            = textSegBtn(tr("+1"), tr("Transpose +1 semitone (Up arrow, drag vertically, or Alt+Wheel)"));
+        auto* octUpBtn
+            = textSegBtn(tr("+Oct"), tr("Transpose +1 octave (+12 semitones; Shift+Up or Alt+Shift+Wheel)"));
+        auto* actionBtn = textSegBtn(
+            tr("Action ▾"), tr("MIDI note actions: Transpose, Quantize, Legato, Snap to Scale, Velocity"));
+        connect(octDownBtn, &QToolButton::clicked, this, [this] { pianoRoll_->transpose(-12); });
+        connect(semiDownBtn, &QToolButton::clicked, this, [this] { pianoRoll_->transpose(-1); });
+        connect(semiUpBtn, &QToolButton::clicked, this, [this] { pianoRoll_->transpose(1); });
+        connect(octUpBtn, &QToolButton::clicked, this, [this] { pianoRoll_->transpose(12); });
+        connect(actionBtn, &QToolButton::clicked, this, [this, actionBtn] {
+            QMenu menu(this);
+            menu.addAction(tr("Transpose Custom Semitones…"), this, [this] {
+                bool ok = false;
+                const int st = QInputDialog::getInt(
+                    this, tr("Transpose Notes"), tr("Semitones (-48 to +48):"), 0, -48, 48, 1, &ok);
+                if (ok && st != 0)
+                    pianoRoll_->transpose(st);
+            });
+            menu.addAction(tr("Transpose +1 Octave (+12 st)"), this, [this] { pianoRoll_->transpose(12); });
+            menu.addAction(tr("Transpose -1 Octave (-12 st)"), this, [this] { pianoRoll_->transpose(-12); });
+            menu.addSeparator();
+            menu.addAction(tr("Quantize Note Starts\tCtrl+Q"), this, [this] { pianoRoll_->quantize(); });
+            menu.addAction(tr("Legato (Extend to Next Note)"), this, [this] { pianoRoll_->applyLegato(); });
+            menu.addAction(tr("Snap Pitch to Scale"), this, [this] { pianoRoll_->snapToScale(); });
+            menu.addSeparator();
+            menu.addAction(tr("Velocity +15%"), this, [this] { pianoRoll_->scaleVelocity(1.15); });
+            menu.addAction(tr("Velocity -15%"), this, [this] { pianoRoll_->scaleVelocity(0.85); });
+            menu.addSeparator();
+            menu.addAction(tr("Select All\tCtrl+A"), this, [this] { pianoRoll_->selectAll(); });
+            menu.addAction(tr("Duplicate\tCtrl+D"), this, [this] { pianoRoll_->duplicateSelection(); });
+            menu.addAction(tr("Delete Selected\tDel"), this, [this] { pianoRoll_->deleteSelection(); });
+            menu.exec(actionBtn->mapToGlobal(QPoint(0, actionBtn->height())));
+        });
+        pianoRollFrame_->addHeaderWidget(
+            makePanelButtonGroup({octDownBtn, semiDownBtn, semiUpBtn, octUpBtn, actionBtn}));
+
         // What notes snap to while placed, moved or resized (Alt: no snap).
         auto* snap = new QComboBox(pianoRollFrame_);
         snap->setObjectName(QStringLiteral("pianoRollSnap"));
@@ -3779,7 +3949,83 @@ QWidget* MainWindow::createWorkspace()
         connect(snap, &QComboBox::activated, this,
             [this, snap](int row) { pianoRoll_->setSnapTicks(snap->itemData(row).toInt()); });
         pianoRollFrame_->addHeaderWidget(snap);
+
+        auto* snapToggle
+            = textSegBtn(tr("Snap"), tr("Toggle grid snap on/off (Alt holds temporary free move)"));
+        snapToggle->setCheckable(true);
+        snapToggle->setChecked(true);
+        connect(snapToggle, &QToolButton::toggled, this, [this](bool on) { pianoRoll_->setSnapEnabled(on); });
+
+        auto* quantizeBtn
+            = textSegBtn(tr("Q"), tr("Quantize selected notes (or all notes) to the snap grid (Ctrl+Q)"));
+        connect(quantizeBtn, &QToolButton::clicked, this, [this] { pianoRoll_->quantize(); });
+
+        auto* auditionBtn = headerButton(QStringLiteral("speaker"), QString(),
+            tr("Audition Notes: preview pitch sound when clicking, drawing, or dragging notes"));
+        auditionBtn->setCheckable(true);
+        auditionBtn->setChecked(true);
+        connect(auditionBtn, &QToolButton::toggled, this,
+            [this](bool on) { pianoRoll_->setAuditionEnabled(on); });
+
+        auto* followBtn = headerButton(
+            QStringLiteral("follow-playhead"), QString(), tr("Follow playhead during playback"));
+        followBtn->setCheckable(true);
+        followBtn->setChecked(true);
+        connect(
+            followBtn, &QToolButton::toggled, this, [this](bool on) { pianoRoll_->setFollowPlayhead(on); });
+
+        pianoRollFrame_->addHeaderWidget(
+            makePanelButtonGroup({snapToggle, quantizeBtn, auditionBtn, followBtn}));
+
+        auto* zoomOutBtn = headerButton(
+            QStringLiteral("minus"), QString(), tr("Zoom out horizontally (or Ctrl+Wheel on the grid)"));
+        auto* zoomInBtn = headerButton(
+            QStringLiteral("plus"), QString(), tr("Zoom in horizontally (or Ctrl+Wheel on the grid)"));
+        connect(zoomOutBtn, &QToolButton::clicked, this, [this] { pianoRoll_->zoomBy(1.0 / 1.3); });
+        connect(zoomInBtn, &QToolButton::clicked, this, [this] { pianoRoll_->zoomBy(1.3); });
+        pianoRollFrame_->addHeaderWidget(makePanelButtonGroup({zoomOutBtn, zoomInBtn}));
     }
+    makeDetachable(detachable_[0], WorkspacePage::PianoRoll, pianoRollFrame_, tr("Piano roll"),
+        tr("piano roll"), QStringLiteral("pianoRoll"));
+    connect(pianoRoll_, &PianoRollView::selectionSummaryChanged, this,
+        [this](int /*count*/, const QString& summary) {
+            pianoRollSelectionText_ = summary;
+            updatePanelContexts();
+        });
+    connect(pianoRoll_, &PianoRollView::playbackRequested, this, [this](double tick) {
+        double targetTick = std::max(0.0, tick);
+        if (songMode_) {
+            bool foundClip = false;
+            for (const Clip& clip : project_.clips()) {
+                if (clip.pattern == currentPattern_ && !clip.muted) {
+                    targetTick = std::max(0.0, static_cast<double>(clip.start) + tick - clip.offset);
+                    foundClip = true;
+                    break;
+                }
+            }
+            if (!foundClip)
+                transport_->songModeAction()->setChecked(false);
+        }
+        auto& engine = audio_.engine();
+        if (!scrubbingPlayback_) {
+            scrubbingPlayback_ = true;
+            wasPlayingBeforeScrub_ = engine.isPlaying() && !scrubStopPending_;
+            scrubStopPending_ = false;
+            scrubPlaySent_ = false;
+        }
+        (void)engine.locate(targetTick);
+        if (!wasPlayingBeforeScrub_ && !scrubPlaySent_)
+            scrubPlaySent_ = engine.play();
+    });
+    connect(pianoRoll_, &PianoRollView::playbackReleased, this, [this] {
+        if (scrubbingPlayback_ && !wasPlayingBeforeScrub_) {
+            scrubStopPending_ = true;
+            scrubStopSent_ = audio_.engine().stop();
+        }
+        scrubbingPlayback_ = false;
+        wasPlayingBeforeScrub_ = false;
+        scrubPlaySent_ = false;
+    });
     // An edit arrives as the whole list of notes; a drag sends one on every
     // move. The notes before the first one are kept, so the edit is one step
     // to undo once it is finished.
@@ -3911,7 +4157,11 @@ QWidget* MainWindow::createWorkspace()
             tr("What Draw and Paint place: a pattern, or a channel's sample as an audio clip"));
         clipSource_->setAccessibleName(tr("Clip to place"));
         clipSource_->setFocusPolicy(Qt::NoFocus);
-        clipSource_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+        clipSource_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        clipSource_->setMinimumContentsLength(10);
+        clipSource_->setMaximumWidth(220);
+        if (QAbstractItemView* popupView = clipSource_->view())
+            popupView->setMinimumWidth(280);
         connect(clipSource_, &QComboBox::activated, this, [this](int row) {
             const QVariant value = clipSource_->itemData(row);
             if (!value.isValid())
@@ -3956,6 +4206,29 @@ QWidget* MainWindow::createWorkspace()
         quantizeBtn->setToolTip(tr("Quantize selected clips (or all clips) to the snap grid"));
         connect(quantizeBtn, &QToolButton::clicked, this, [this] { playlist_->quantizeSelectedClips(); });
 
+        auto* loopBtn = headerButton(QStringLiteral("loop"), QString(),
+            tr("Set Loop Bar around selection/song (Ctrl+L); right-click for Loop / Mixdown options"));
+        loopBtn->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(loopBtn, &QToolButton::clicked, this, [this] { playlist_->loopSelectionOrSong(); });
+        connect(loopBtn, &QWidget::customContextMenuRequested, this, [this, loopBtn](const QPoint& pos) {
+            QMenu menu(this);
+            QAction* activeAct = menu.addAction(tr("Loop Active"));
+            activeAct->setCheckable(true);
+            activeAct->setChecked(transport_->loopEnabled());
+            connect(activeAct, &QAction::triggered, this,
+                [this](bool checked) { transport_->setLoopEnabled(checked); });
+            menu.addSeparator();
+            QAction* setAct = menu.addAction(
+                tr("Set Loop to Selection / Song"), playlist_, &PlaylistView::loopSelectionOrSong);
+            setAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
+            menu.addAction(tr("Clear Loop Range"), playlist_, &PlaylistView::clearLoopRange)
+                ->setEnabled(playlist_->hasLoopRange());
+            menu.addSeparator();
+            menu.addAction(tr("Export Loop Range…"), this, [this] { exportSong(true); })
+                ->setEnabled(playlist_->hasLoopRange());
+            menu.exec(loopBtn->mapToGlobal(pos));
+        });
+
         auto* followBtn = headerButton(
             QStringLiteral("follow-playhead"), QString(), tr("Follow playhead during playback"));
         followBtn->setCheckable(true);
@@ -3963,7 +4236,7 @@ QWidget* MainWindow::createWorkspace()
         connect(
             followBtn, &QToolButton::toggled, this, [this](bool on) { playlist_->setFollowPlayhead(on); });
 
-        playlistFrame_->addHeaderWidget(makePanelButtonGroup({snapToggle, quantizeBtn, followBtn}));
+        playlistFrame_->addHeaderWidget(makePanelButtonGroup({snapToggle, quantizeBtn, loopBtn, followBtn}));
         rebuildClipSources();
 
         // The tools side by side in one box; the tool in use is lit.
@@ -4074,37 +4347,25 @@ QWidget* MainWindow::createWorkspace()
     };
     // Moving or regrouping tracks can change which ones play (mute and solo
     // count for a whole group).
+    connect(playlist_, &PlaylistView::trackReordered, this, &MainWindow::movePlaylistTrackTo);
     connect(
         playlist_, &PlaylistView::trackMoveRequested, this, [this, songEdited](std::size_t track, bool down) {
             if (track >= project_.tracks().size())
                 return;
-            std::optional<std::size_t> swapNeighbour;
             if (project_.tracks()[track].depth == 0 && !project_.hasSubTracks(track)) {
                 if (!down && track > 0 && project_.tracks()[track - 1].depth == 0
                     && !project_.hasSubTracks(track - 1)) {
-                    swapNeighbour = track - 1;
-                } else if (down && track + 1 < project_.tracks().size()
-                    && project_.tracks()[track + 1].depth == 0 && !project_.hasSubTracks(track + 1)) {
-                    swapNeighbour = track + 1;
+                    movePlaylistTrackTo(track, track - 1);
+                    return;
+                }
+                if (down && track + 1 < project_.tracks().size() && project_.tracks()[track + 1].depth == 0
+                    && !project_.hasSubTracks(track + 1)) {
+                    movePlaylistTrackTo(track, track + 1);
+                    return;
                 }
             }
-            const int insA = swapNeighbour ? trackMixerInsert(project_, mixer_, track) : -1;
-            const int insB = swapNeighbour ? trackMixerInsert(project_, mixer_, *swapNeighbour) : -1;
-            const bool swapInserts = swapNeighbour && insA > 0 && insB > 0 && std::abs(insA - insB) == 1
-                && insertPrimaryTrack(project_, mixer_, static_cast<std::size_t>(insA)) == track
-                && insertPrimaryTrack(project_, mixer_, static_cast<std::size_t>(insB)) == *swapNeighbour;
-
             recordUndo(tr("Move Track"));
             if (project_.moveTrackGroup(track, down)) {
-                if (swapInserts) {
-                    mixer_.moveInsert(static_cast<std::size_t>(insA), static_cast<std::size_t>(insB));
-                    project_.moveInsert(insA, insB);
-                    syncMixerPanel();
-                    mixerPanel_->setSelectedTrack(static_cast<std::size_t>(insB));
-                    syncInsertNames();
-                    updateMixer();
-                    syncEffectCounts();
-                }
                 playlist_->refresh();
                 songEdited();
             }
@@ -4260,6 +4521,40 @@ QWidget* MainWindow::createWorkspace()
             selectPattern(source.index); // its pattern becomes current, as in FL Studio
     });
     connect(playlist_, &PlaylistView::audioDropped, this, &MainWindow::dropAudioFiles);
+    connect(playlist_, &PlaylistView::midiFilesDropped, this, &MainWindow::dropMidiFiles);
+    connect(playlist_, &PlaylistView::projectFileDropped, this, [this](const QString& path) {
+        if (maybeSaveChanges())
+            openProjectFile(path);
+    });
+    connect(playlist_, &PlaylistView::loopRangeChanged, this,
+        [this](int startTicks, int endTicks, bool activate) {
+            const int normStart = endTicks > startTicks ? std::max(0, startTicks) : 0;
+            const int normEnd = endTicks > startTicks ? endTicks : 0;
+            if (normStart != loopStartTicks_ || normEnd != loopEndTicks_) {
+                recordUndo(tr("Loop Range"), "song.loop");
+                loopStartTicks_ = normStart;
+                loopEndTicks_ = normEnd;
+            }
+            if (activate && !transport_->loopEnabled())
+                transport_->setLoopEnabled(true);
+            if (activate && normEnd > normStart && !songMode_)
+                transport_->songModeAction()->setChecked(true);
+            songLoopStart_ = -1.0;
+            songLoopEnd_ = -1.0;
+            if (audio_.isRunning())
+                applySongLoop();
+            if (loopEndTicks_ > loopStartTicks_) {
+                const int b1 = loopStartTicks_ / kTicksPerBar + 1;
+                const int b2 = loopEndTicks_ / kTicksPerBar + 1;
+                statusBar()->showMessage(tr("Loop range: Bar %1 – Bar %2").arg(b1).arg(b2), 3000);
+            } else {
+                statusBar()->showMessage(tr("Loop range cleared"), 2500);
+            }
+        });
+    connect(playlist_, &PlaylistView::loopActiveToggled, this,
+        [this](bool active) { transport_->setLoopEnabled(active); });
+    connect(playlist_, &PlaylistView::exportLoopRangeRequested, this, [this] { exportSong(true); });
+    playlist_->setLoopActive(transport_->loopEnabled());
     connect(
         playlist_, &PlaylistView::pluginDroppedOnPlaylist, this, &MainWindow::handlePluginDroppedOnPlaylist);
     connect(playlist_, &PlaylistView::audioClipChanged, this, [this](std::size_t index, AudioClip clip) {
@@ -4285,6 +4580,24 @@ QWidget* MainWindow::createWorkspace()
         songEdited();
     });
     connect(playlist_, &PlaylistView::patternPicked, this, &MainWindow::selectPattern);
+    connect(playlist_, &PlaylistView::patternClipActivated, this, [this](std::size_t pattern, int track) {
+        selectPattern(pattern);
+        std::optional<std::size_t> chosenCh;
+        if (track >= 0 && static_cast<std::size_t>(track) < project_.tracks().size())
+            chosenCh = trackPrimaryChannel(project_, static_cast<std::size_t>(track));
+        if (chosenCh && *chosenCh < project_.channels().size()) {
+            selectChannel(*chosenCh);
+        } else if (pattern < project_.patterns().size()) {
+            const auto& chs = project_.patterns()[pattern].channels;
+            for (std::size_t c = 0; c < chs.size(); ++c) {
+                if (!chs[c].notes.empty()) {
+                    selectChannel(c);
+                    break;
+                }
+            }
+        }
+        showWorkspace(WorkspacePage::PianoRoll);
+    });
 
     selectChannel(0);
     selectPattern(0);
@@ -4474,6 +4787,17 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 
 bool MainWindow::event(QEvent* event)
 {
+    if (event->type() == QEvent::FileOpen) {
+        auto* openEvt = static_cast<QFileOpenEvent*>(event);
+        const QString file = openEvt->file();
+        if (isLocalPath(file)
+            && (file.endsWith(QStringLiteral(".vloom"), Qt::CaseInsensitive)
+                || isMidiFile(QFileInfo(file).fileName().toStdString()))) {
+            if (maybeSaveChanges())
+                openProjectFile(file);
+            return true;
+        }
+    }
     // A frame: Qt sends UpdateRequest to the top-level widget, which then
     // paints everything dirty. Time it for the performance overlay.
     if (event->type() == QEvent::UpdateRequest && performanceOverlay_ != nullptr
@@ -4576,20 +4900,8 @@ void MainWindow::restoreWindowState()
         bar->show();
 }
 
-void MainWindow::closeEvent(QCloseEvent* event)
+void MainWindow::saveWindowStateToSettings()
 {
-    if (!maybeSaveChanges()) {
-        event->ignore();
-        return;
-    }
-
-    // A visible Settings window would otherwise keep the app running.
-    settingsDialog_->close();
-
-    // Save the normal window size and give the menu bar and Dock back.
-    if (coversScreen_)
-        toggleFullScreen();
-
     QSettings settings;
     settings.setValue(kGeometryKey, saveGeometry());
     settings.setValue(kStateKey, saveState());
@@ -4606,6 +4918,23 @@ void MainWindow::closeEvent(QCloseEvent* event)
     settings.setValue(kSidebarPageKey, activityBar_->current());
     if (playlist_ != nullptr)
         settings.setValue(kPlaylistHeaderWidthKey, playlist_->headerWidth());
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (!maybeSaveChanges()) {
+        event->ignore();
+        return;
+    }
+
+    // A visible Settings window would otherwise keep the app running.
+    settingsDialog_->close();
+
+    // Save the normal window size and give the menu bar and Dock back.
+    if (coversScreen_)
+        toggleFullScreen();
+
+    saveWindowStateToSettings();
 
     // Detached windows are separate top-level windows: close them with the
     // main window, or the app would keep running.
@@ -4703,6 +5032,7 @@ bool MainWindow::startDevice(int index, bool fallback)
 
     // Re-send UI state so the engine matches what the user sees.
     pendingTempo_.reset();
+    songLoopStart_ = -1.0;
     songLoopEnd_ = -1.0; // sent again on the next tick
     audio_.engine().setTempo(transport_->tempo());
     audio_.engine().setMetronomeEnabled(transport_->metronomeEnabled());
@@ -4817,6 +5147,34 @@ void MainWindow::rebuildClipSources()
     clipSource_->setCurrentIndex(std::max(0, row));
 }
 
+void MainWindow::rebuildPianoRollChannels()
+{
+    if (pianoRollChannel_ == nullptr)
+        return;
+    const QSignalBlocker block(pianoRollChannel_);
+    pianoRollChannel_->clear();
+    const auto swatch = [](const QColor& color) {
+        QPixmap pixmap(12, 12);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(color);
+        p.drawRoundedRect(QRectF(1, 1, 10, 10), 2, 2);
+        return QIcon(pixmap);
+    };
+    for (std::size_t i = 0; i < project_.channels().size(); ++i) {
+        const Channel& ch = project_.channels()[i];
+        const QColor col = ch.color ? QColor::fromRgb(*ch.color) : Theme::colors().accent;
+        QString label = QString::fromStdString(ch.name);
+        if (ch.instrument && !ch.instrument->name.empty() && ch.instrument->name != ch.name)
+            label += QStringLiteral(" · %1").arg(QString::fromStdString(ch.instrument->name));
+        pianoRollChannel_->addItem(swatch(col), label, QVariant::fromValue<qulonglong>(i));
+    }
+    if (currentChannel_ < project_.channels().size())
+        pianoRollChannel_->setCurrentIndex(static_cast<int>(currentChannel_));
+}
+
 int MainWindow::songEndTicks()
 {
     long long end = 0;
@@ -4843,12 +5201,23 @@ void MainWindow::applySongLoop()
 {
     // Pattern mode loops the pattern itself; an empty song (or loop turned off) clears the song loop.
     const bool loopOn = transport_ == nullptr || transport_->loopEnabled();
-    const double end = (songMode_ && loopOn) ? static_cast<double>(songEndTicks()) : 0.0;
-    if (end == songLoopEnd_)
+    double start = 0.0;
+    double end = 0.0;
+    if (songMode_ && loopOn) {
+        if (loopEndTicks_ > loopStartTicks_) {
+            start = static_cast<double>(loopStartTicks_);
+            end = static_cast<double>(loopEndTicks_);
+        } else {
+            end = static_cast<double>(songEndTicks());
+        }
+    }
+    if (start == songLoopStart_ && end == songLoopEnd_)
         return;
     auto& engine = audio_.engine();
-    if ((end > 0.0 ? engine.setLoop(0.0, end) : engine.clearLoop()))
+    if ((end > start ? engine.setLoop(start, end) : engine.clearLoop())) {
+        songLoopStart_ = start;
         songLoopEnd_ = end; // else the queue was full: tried again next tick
+    }
 }
 
 void MainWindow::scheduleChannelRackSync()
@@ -5545,11 +5914,12 @@ void MainWindow::releaseUnusedPlugins()
     pluginHost_.retainOnly(pluginsInUse(), [this](std::uint64_t handle) {
         std::erase(unpublishedInstruments_, handle);
         // Preserve the plugin's parameter state across Undo/Redo before unloading it.
-        if (const auto inst = pluginHost_.instance(handle); inst != nullptr) {
-            const std::vector<std::uint8_t> state = inst->processor().saveState();
+        if (pluginHost_.instance(handle) != nullptr) {
+            const std::vector<std::uint8_t> state = pluginHost_.saveState(handle);
             undoHistory_.forEachPluginSlot([handle, &state](PluginSlot& slot) {
                 if (slot.instance == handle) {
-                    slot.savedState = state;
+                    if (!state.empty())
+                        slot.savedState = state;
                     slot.instance = 0;
                 }
             });
@@ -5593,6 +5963,107 @@ void MainWindow::newProject()
     statusBar()->showMessage(tr("New project"), 3000);
 }
 
+void MainWindow::closeProject()
+{
+    if (!maybeSaveChanges())
+        return;
+
+    if (previewer_ != nullptr)
+        previewer_->stop();
+    if (stemProgress_ != nullptr) {
+        if (stemSeparator_ != nullptr)
+            stemSeparator_->cancel();
+        stemProgress_->deleteLater();
+        stemProgress_ = nullptr;
+    }
+    settingsDialog_->close();
+    if (pluginManager_ != nullptr)
+        pluginManager_->close();
+
+    if (coversScreen_)
+        toggleFullScreen();
+    saveWindowStateToSettings();
+
+    // Remember which detached editor / mixer windows were open so they return
+    // automatically once the user picks or creates a new project.
+    const bool mixerWinWasVisible = mixerWindow_ != nullptr && mixerWindow_->isVisible();
+    std::array<bool, std::size(detachable_)> pageWinWasVisible{};
+    for (std::size_t i = 0; i < std::size(detachable_); ++i) {
+        pageWinWasVisible[i] = detachable_[i].window != nullptr && detachable_[i].window->isVisible();
+    }
+
+    QApplication::setQuitOnLastWindowClosed(false);
+    for (const DetachablePage& d : detachable_)
+        if (d.window != nullptr)
+            d.window->hide();
+    if (mixerWindow_ != nullptr)
+        mixerWindow_->hide();
+    hide();
+
+    // Completely unload the closed project's plugins, audio clips, and undo state.
+    resetProject();
+    projectPath_.clear();
+    markProjectSaved();
+    updateWindowTitle();
+
+    const auto restoreWorkspaceWindows = [&, this] {
+        show();
+        for (std::size_t i = 0; i < std::size(detachable_); ++i) {
+            if (pageWinWasVisible[i] && detachable_[i].window != nullptr)
+                detachable_[i].window->show();
+        }
+        if (mixerWinWasVisible && mixerWindow_ != nullptr)
+            mixerWindow_->show();
+        raise();
+        activateWindow();
+        QApplication::setQuitOnLastWindowClosed(true);
+    };
+
+    for (;;) {
+        LauncherDialog::AudioStatus status;
+        if (audio_.isRunning()) {
+            status.device = QString::fromStdString(audio_.deviceName());
+            status.sampleRate = audio_.sampleRate();
+            status.bufferFrames = audio_.bufferFrames();
+        }
+        LauncherDialog launcher(status, kDefaultTempo, nullptr, false);
+        launcher.exec();
+
+        switch (launcher.choice()) {
+        case LauncherDialog::Choice::None:
+            QApplication::setQuitOnLastWindowClosed(true);
+            QApplication::quit();
+            return;
+        case LauncherDialog::Choice::NewProject:
+            restoreWorkspaceWindows();
+            startEmptyProject(launcher.tempo());
+            statusBar()->showMessage(tr("New project"), 3000);
+            return;
+        case LauncherDialog::Choice::OpenFile:
+            restoreWorkspaceWindows();
+            openProjectFile(launcher.path());
+            return;
+        case LauncherDialog::Choice::BrowseOpen: {
+            const QString picked = QFileDialog::getOpenFileName(nullptr, tr("Open Project"), projectFolder(),
+                tr("VloomDAW & MIDI files (*.vloom *.mid *.midi);;VloomDAW project "
+                   "(*.vloom);;MIDI files (*.mid *.midi)"));
+            if (!isLocalPath(picked))
+                continue;
+            rememberFolder(picked);
+            restoreWorkspaceWindows();
+            openProjectFile(picked);
+            return;
+        }
+        case LauncherDialog::Choice::AudioSettings:
+            listDevices();
+            refreshStemSettings();
+            settingsDialog_->showPage(SettingsDialog::Page::Audio);
+            settingsDialog_->exec();
+            continue;
+        }
+    }
+}
+
 void MainWindow::resetProject()
 {
     stopAndRewind();
@@ -5601,6 +6072,7 @@ void MainWindow::resetProject()
     updateUndoActions();
     unpublishedInstruments_.clear(); // the old project's
     transport_->setTempo(kDefaultTempo);
+    playlist_->setTempo(kDefaultTempo);
     pendingTempo_ = kDefaultTempo; // sent by refreshFromEngine()
     transport_->recordAction()->setChecked(false);
     transport_->keyDisplay()->setRootNote(0); // C
@@ -5614,6 +6086,13 @@ void MainWindow::resetProject()
     playlist_->clearWaveCache();
     currentPattern_ = 0;
     currentChannel_ = 0;
+    loopStartTicks_ = 0;
+    loopEndTicks_ = 0;
+    songLoopStart_ = -1.0;
+    songLoopEnd_ = -1.0;
+    transport_->setLoopEnabled(true);
+    playlist_->setLoopRange(0, 0);
+    playlist_->setLoopActive(true);
     transport_->songModeAction()->setChecked(false);
     allEffectsBypassed_ = false;
     mixerPanel_->setAllEffectsBypassed(false);
@@ -5641,6 +6120,9 @@ UndoSnapshot MainWindow::captureUndoSnapshot() const
     snap.song.keyRoot = transport_->keyDisplay()->rootNote();
     snap.song.scale = transport_->keyDisplay()->scale();
     snap.song.songMode = songMode_;
+    snap.song.loopEnabled = transport_->loopEnabled();
+    snap.song.loopStart = loopStartTicks_;
+    snap.song.loopEnd = loopEndTicks_;
     snap.currentPattern = currentPattern_;
     snap.currentChannel = currentChannel_;
     snap.selectedTrack = playlist_ != nullptr ? playlist_->selectedTrack() : 0;
@@ -5709,6 +6191,13 @@ void MainWindow::applyUndoSnapshot(UndoSnapshot snapshot)
         transport_->songModeAction()->setChecked(snapshot.song.songMode);
     }
     songMode_ = snapshot.song.songMode;
+    loopStartTicks_ = snapshot.song.loopEnd > snapshot.song.loopStart ? snapshot.song.loopStart : 0;
+    loopEndTicks_ = snapshot.song.loopEnd > snapshot.song.loopStart ? snapshot.song.loopEnd : 0;
+    transport_->setLoopEnabled(snapshot.song.loopEnabled);
+    playlist_->setLoopRange(loopStartTicks_, loopEndTicks_);
+    playlist_->setLoopActive(snapshot.song.loopEnabled);
+    songLoopStart_ = -1.0;
+    songLoopEnd_ = -1.0;
 
     currentPattern_
         = project_.patterns().empty() ? 0 : std::min(snapshot.currentPattern, project_.patterns().size() - 1);
@@ -5954,13 +6443,14 @@ ProjectData MainWindow::projectData(bool withPluginStates) const
     out.song.keyRoot = transport_->keyDisplay()->rootNote();
     out.song.scale = transport_->keyDisplay()->scale();
     out.song.songMode = songMode_;
+    out.song.loopEnabled = transport_->loopEnabled();
+    out.song.loopStart = loopStartTicks_;
+    out.song.loopEnd = loopEndTicks_;
     if (!withPluginStates)
         return out;
-    // A plugin that is not loaded keeps the settings its project file had.
-    const auto stateOf = [this](const PluginSlot& slot) {
-        const auto instance = pluginHost_.instance(slot.instance);
-        return instance != nullptr ? instance->processor().saveState() : slot.savedState;
-    };
+    // A plugin that is not loaded (or whose bridge ended) keeps its last good settings.
+    const auto stateOf
+        = [this](const PluginSlot& slot) { return pluginHost_.saveState(slot.instance, slot.savedState); };
     for (const Channel& channel : project_.channels())
         out.states.instruments.push_back(
             channel.instrument ? stateOf(*channel.instrument) : std::vector<std::uint8_t>{});
@@ -5987,7 +6477,7 @@ std::uint64_t MainWindow::pluginFingerprint() const
         const auto instance = pluginHost_.instance(slot.instance);
         if (instance == nullptr)
             return;
-        const std::vector<std::uint8_t> state = instance->processor().saveState();
+        const std::vector<std::uint8_t> state = pluginHost_.saveState(slot.instance, slot.savedState);
         for (std::size_t size = state.size(), i = 0; i < 8; ++i, size >>= 8)
             mix(static_cast<std::uint8_t>(size)); // the length too: states do not run together
         for (const std::uint8_t byte : state)
@@ -6081,8 +6571,9 @@ void MainWindow::openProject()
 {
     if (!maybeSaveChanges())
         return;
-    const QString path
-        = QFileDialog::getOpenFileName(this, tr("Open Project"), projectFolder(), kProjectFilter);
+    const QString path = QFileDialog::getOpenFileName(this, tr("Open Project"), projectFolder(),
+        tr("VloomDAW & MIDI files (*.vloom *.mid *.midi);;VloomDAW project (*.vloom);;MIDI files "
+           "(*.mid *.midi)"));
     if (!path.isEmpty())
         openProjectFile(path);
 }
@@ -6097,6 +6588,18 @@ void MainWindow::openProjectFile(const QString& path)
     }
 
     const QFileInfo fileInfo(path);
+    if (isMidiFile(fileInfo.fileName().toStdString())) {
+        resetProject();
+        projectPath_.clear();
+        const std::size_t importedTracks = importMidiFile(path, -1, 0, false);
+        if (importedTracks > 0) {
+            undoHistory_.clear();
+            updateUndoActions();
+            markProjectSaved();
+            rememberFolder(path);
+        }
+        return;
+    }
     const QString projectTitle
         = fileInfo.completeBaseName().isEmpty() ? fileInfo.fileName() : fileInfo.completeBaseName();
     ProjectLoadDialog progress(projectTitle, this);
@@ -6169,7 +6672,7 @@ void MainWindow::showLauncher()
         status.sampleRate = audio_.sampleRate();
         status.bufferFrames = audio_.bufferFrames();
     }
-    LauncherDialog launcher(status, kDefaultTempo, this);
+    LauncherDialog launcher(status, transport_->tempo(), this, true);
     launcher.exec();
     switch (launcher.choice()) {
     case LauncherDialog::Choice::NewProject:
@@ -6177,6 +6680,7 @@ void MainWindow::showLauncher()
             return;
         resetProject();
         transport_->setTempo(launcher.tempo());
+        playlist_->setTempo(launcher.tempo());
         pendingTempo_ = launcher.tempo(); // sent by refreshFromEngine()
         syncChannelRack(); // fitted audio clips follow the tempo
         projectPath_.clear();
@@ -6364,6 +6868,7 @@ bool MainWindow::applyProject(ProjectData incoming, QStringList& problems, Proje
     project_ = std::move(incoming.project);
     mixer_ = std::move(incoming.mixer);
     transport_->setTempo(incoming.song.tempo);
+    playlist_->setTempo(incoming.song.tempo);
     pendingTempo_ = incoming.song.tempo; // sent by refreshFromEngine()
     transport_->recordAction()->setChecked(false);
     transport_->keyDisplay()->setRootNote(incoming.song.keyRoot);
@@ -6380,6 +6885,13 @@ bool MainWindow::applyProject(ProjectData incoming, QStringList& problems, Proje
     playlist_->clearWaveCache();
     currentPattern_ = 0;
     currentChannel_ = 0;
+    loopStartTicks_ = incoming.song.loopEnd > incoming.song.loopStart ? incoming.song.loopStart : 0;
+    loopEndTicks_ = incoming.song.loopEnd > incoming.song.loopStart ? incoming.song.loopEnd : 0;
+    songLoopStart_ = -1.0;
+    songLoopEnd_ = -1.0;
+    transport_->setLoopEnabled(incoming.song.loopEnabled);
+    playlist_->setLoopRange(loopStartTicks_, loopEndTicks_);
+    playlist_->setLoopActive(incoming.song.loopEnabled);
     allEffectsBypassed_ = false;
     mixerPanel_->setAllEffectsBypassed(false);
     transport_->songModeAction()->setChecked(incoming.song.songMode); // syncs through songModeChanged
@@ -6416,7 +6928,8 @@ void MainWindow::syncMixerPanel()
             QString instrumentName;
             QString sourceLabel;
             const auto insNum = static_cast<int>(i);
-            for (const Channel& ch : project_.channels()) {
+            for (std::size_t chIdx = 0; chIdx < project_.channels().size(); ++chIdx) {
+                const Channel& ch = project_.channels()[chIdx];
                 if (ch.insert != insNum)
                     continue;
                 if (ch.instrument.has_value()) {
@@ -6428,13 +6941,21 @@ void MainWindow::syncMixerPanel()
                     if (sourceLabel.isEmpty())
                         sourceLabel = t.mono ? tr("Audio · Mono") : tr("Audio · Stereo");
                 } else {
-                    // Empty pre-created Audio or MIDI channel
-                    hasAudio = true;
+                    const bool hasMidiNotes = std::any_of(
+                        project_.patterns().begin(), project_.patterns().end(), [chIdx](const Pattern& pat) {
+                            return chIdx < pat.channels.size() && !pat.channels[chIdx].notes.empty();
+                        });
+                    if (hasMidiNotes)
+                        hasInstrument = true;
+                    else
+                        hasAudio = true;
                     if (sourceLabel.isEmpty()) {
                         const QString chTitle = QString::fromStdString(ch.name);
-                        sourceLabel = (t.mono || chTitle.contains(QStringLiteral("(M)"), Qt::CaseInsensitive))
-                            ? tr("Audio · Mono")
-                            : tr("IN L+R");
+                        sourceLabel = hasMidiNotes
+                            ? tr("MIDI · + VSTi")
+                            : ((t.mono || chTitle.contains(QStringLiteral("(M)"), Qt::CaseInsensitive))
+                                      ? tr("Audio · Mono")
+                                      : tr("IN L+R"));
                     }
                 }
             }
@@ -6517,14 +7038,315 @@ void MainWindow::importAudioFiles()
             5000);
 }
 
-void MainWindow::exportSong()
+void MainWindow::movePlaylistTrackTo(std::size_t from, std::size_t to)
+{
+    if (from >= project_.tracks().size() || to >= project_.tracks().size() || from == to)
+        return;
+
+    const auto dedicatedInsert = [this](std::size_t trk) -> int {
+        const int ins = trackMixerInsert(project_, mixer_, trk);
+        if (ins > 0 && static_cast<std::size_t>(ins) < mixer_.size()
+            && insertPrimaryTrack(project_, mixer_, static_cast<std::size_t>(ins)) == trk) {
+            return ins;
+        }
+        return -1;
+    };
+
+    const int insFrom = dedicatedInsert(from);
+    int insTarget = -1;
+    if (insFrom > 0) {
+        const int step = (to < from) ? 1 : -1;
+        for (int t = static_cast<int>(to); t != static_cast<int>(from); t += step) {
+            const int candidate = dedicatedInsert(static_cast<std::size_t>(t));
+            if (candidate > 0) {
+                insTarget = candidate;
+                break;
+            }
+        }
+    }
+
+    recordUndo(tr("Move Track"));
+    const std::size_t movedTo = project_.moveTrack(from, to);
+
+    if (insFrom > 0 && insTarget > 0 && insFrom != insTarget) {
+        mixer_.moveInsert(static_cast<std::size_t>(insFrom), static_cast<std::size_t>(insTarget));
+        project_.moveInsert(insFrom, insTarget);
+    }
+
+    syncMixerPanel();
+    syncInsertNames();
+    if (playlist_ != nullptr) {
+        playlist_->refresh();
+        playlist_->setSelectedTrack(static_cast<int>(movedTo));
+    }
+    if (mixerPanel_ != nullptr) {
+        const int newIns = trackMixerInsert(project_, mixer_, movedTo);
+        if (newIns > 0 && static_cast<std::size_t>(newIns) < mixerPanel_->trackCount())
+            mixerPanel_->setSelectedTrack(static_cast<std::size_t>(newIns));
+    }
+    updateMixer();
+    syncEffectCounts();
+    syncChannelRack();
+    refreshOpenPluginEditors();
+}
+
+void MainWindow::moveMixerInsertTo(std::size_t from, std::size_t to)
+{
+    if (from == MixerModel::kMaster || to == MixerModel::kMaster || from >= mixer_.size()
+        || to >= mixer_.size() || from == to)
+        return;
+
+    const auto trkFrom = insertPrimaryTrack(project_, mixer_, from);
+    std::optional<std::size_t> trkTarget;
+    if (trkFrom && *trkFrom < project_.tracks().size()) {
+        const int step = (to < from) ? 1 : -1;
+        for (int ins = static_cast<int>(to); ins != static_cast<int>(from); ins += step) {
+            if (const auto cand = insertPrimaryTrack(project_, mixer_, static_cast<std::size_t>(ins));
+                cand && *cand < project_.tracks().size()) {
+                trkTarget = *cand;
+                break;
+            }
+        }
+    }
+
+    recordUndo(tr("Move Insert"));
+    mixer_.moveInsert(from, to);
+    project_.moveInsert(static_cast<int>(from), static_cast<int>(to));
+
+    if (trkFrom && trkTarget && *trkFrom != *trkTarget)
+        project_.moveTrack(*trkFrom, *trkTarget);
+
+    syncMixerPanel();
+    mixerPanel_->setSelectedTrack(to);
+    if (playlist_ != nullptr) {
+        playlist_->refresh();
+        if (const auto movedTrk = insertPrimaryTrack(project_, mixer_, to))
+            playlist_->setSelectedTrack(static_cast<int>(*movedTrk));
+    }
+    syncInsertNames();
+    updateMixer();
+    syncChannelRack();
+    syncEffectCounts();
+    refreshOpenPluginEditors();
+}
+
+void MainWindow::dropMidiFiles(const QStringList& paths, int track, int startTick)
+{
+    if (paths.isEmpty())
+        return;
+    bool recorded = false;
+    int nextTrack = track;
+    std::size_t totalTracks = 0;
+    for (const QString& path : paths) {
+        if (!isLocalPath(path))
+            continue;
+        if (!recorded) {
+            recordUndo(tr("Import MIDI"));
+            recorded = true;
+        }
+        const std::size_t added = importMidiFile(path, nextTrack, startTick, false);
+        totalTracks += added;
+        if (nextTrack >= 0)
+            nextTrack += static_cast<int>(added);
+    }
+    if (totalTracks > 0 && !paths.isEmpty())
+        rememberFolder(paths.front());
+}
+
+void MainWindow::importMidiFiles()
+{
+    const QStringList files = QFileDialog::getOpenFileNames(
+        this, tr("Import MIDI"), projectFolder(), tr("MIDI files (*.mid *.midi);;All files (*)"));
+    if (files.isEmpty())
+        return;
+    bool recorded = false;
+    std::size_t totalTracks = 0;
+    for (const QString& path : files) {
+        if (!isLocalPath(path))
+            continue;
+        if (!recorded) {
+            recordUndo(tr("Import MIDI"));
+            recorded = true;
+        }
+        totalTracks += importMidiFile(path, -1, 0, false);
+    }
+    if (totalTracks > 0)
+        rememberFolder(files.front());
+}
+
+std::size_t MainWindow::importMidiFile(
+    const QString& path, int startTrack, int startTick, bool recordUndoStep)
+{
+    if (!isLocalPath(path))
+        return 0;
+    const MidiReadResult parsed = readMidiFile(toPath(path));
+    if (!parsed.ok) {
+        QMessageBox::warning(this, tr("Could not import MIDI"),
+            tr("%1 could not be imported.\n\n%2")
+                .arg(QDir::toNativeSeparators(path), QString::fromStdString(parsed.error)));
+        return 0;
+    }
+
+    const std::size_t trackBudget
+        = project_.tracks().size() < static_cast<std::size_t>(Project::kMaxPlaylistTracks)
+        ? static_cast<std::size_t>(Project::kMaxPlaylistTracks) - project_.tracks().size()
+        : 0;
+    const bool reuseFirstPattern
+        = project_.patterns().size() == 1 && project_.isPatternEmpty(0) && project_.clips().empty();
+    const std::size_t patternBudget = (project_.patterns().size() < Project::kMaxPatterns
+                                              ? Project::kMaxPatterns - project_.patterns().size()
+                                              : 0)
+        + (reuseFirstPattern ? 1 : 0);
+
+    // Check whether `startTrack` targets an existing untouched empty track we can reuse for track 0.
+    bool reuseTargetTrack = false;
+    if (startTrack >= 0 && static_cast<std::size_t>(startTrack) < project_.tracks().size()) {
+        const auto trkIdx = static_cast<std::size_t>(startTrack);
+        const PlaylistTrack& pt = project_.tracks()[trkIdx];
+        reuseTargetTrack = !pt.named && pt.insert < 0 && project_.clipsOnTrack(trkIdx) == 0
+            && !trackPrimaryChannel(project_, trkIdx).has_value();
+    } else if (startTrack < 0 && project_.tracks().size() == 1) {
+        const PlaylistTrack& pt = project_.tracks()[0];
+        if (!pt.named && pt.insert < 0 && project_.clipsOnTrack(0) == 0
+            && !trackPrimaryChannel(project_, 0).has_value()) {
+            startTrack = 0;
+            reuseTargetTrack = true;
+        }
+    }
+
+    const std::size_t maxTracks = std::min(
+        parsed.file.tracks.size(), std::min(trackBudget + (reuseTargetTrack ? 1 : 0), patternBudget));
+    if (maxTracks == 0) {
+        statusBar()->showMessage(tr("No room for additional MIDI tracks or patterns."), 4000);
+        return 0;
+    }
+
+    if (recordUndoStep)
+        recordUndo(tr("Import MIDI"));
+
+    // Adopt the MIDI file's tempo when importing into a blank arrangement.
+    if (project_.clips().empty() && project_.audioClips().empty() && parsed.file.tempoBpm.has_value()) {
+        transport_->setTempo(*parsed.file.tempoBpm);
+        pendingTempo_ = *parsed.file.tempoBpm;
+        playlist_->setTempo(*parsed.file.tempoBpm);
+    }
+
+    const QFileInfo fileInfo(path);
+    const std::string fileStem
+        = cleanName(fileInfo.completeBaseName().toStdString(), Project::kMaxTrackNameLength);
+
+    std::optional<std::size_t> firstChannel;
+    std::optional<std::size_t> firstPattern;
+    std::optional<std::size_t> firstTrack;
+
+    std::size_t insertCursor = startTrack >= 0
+        ? std::min(static_cast<std::size_t>(startTrack), project_.tracks().size())
+        : project_.tracks().size();
+
+    for (std::size_t i = 0; i < maxTracks; ++i) {
+        const MidiTrackImport& mt = parsed.file.tracks[i];
+        std::string title = cleanName(mt.name, Project::kMaxTrackNameLength);
+        if (title.empty() || (maxTracks == 1 && mt.name.starts_with("MIDI ")))
+            title = !fileStem.empty() ? fileStem : ("MIDI " + std::to_string(i + 1));
+
+        const std::uint32_t col = trackPaletteColor(project_.tracks().size() + i);
+
+        // 1. Empty MIDI Channel (NO auto-loaded instrument: user adds their own VSTi per track).
+        const std::size_t chIdx = project_.addChannel(title);
+        project_.setChannelColor(chIdx, col);
+
+        // 2. Dedicated Mixer Insert linked 1:1 with the MIDI channel & Playlist track.
+        int dedicatedIns = 0;
+        if (const auto ins = mixer_.addInsert()) {
+            mixer_.setName(*ins, title);
+            mixer_.setColor(*ins, col);
+            project_.setChannelInsert(chIdx, static_cast<int>(*ins));
+            dedicatedIns = static_cast<int>(*ins);
+        }
+
+        // 3. Dedicated Pattern holding this MIDI track's notes.
+        std::size_t patIdx = 0;
+        if (i == 0 && reuseFirstPattern) {
+            patIdx = 0;
+            project_.setPatternName(0, title);
+        } else {
+            patIdx = project_.addPattern();
+            project_.setPatternName(patIdx, title);
+        }
+        project_.setNotes(patIdx, chIdx, mt.notes);
+
+        // 4. Playlist Track & Pattern Clip placed at `startTick`.
+        std::size_t trkIdx = 0;
+        if (i == 0 && reuseTargetTrack) {
+            trkIdx = static_cast<std::size_t>(startTrack);
+            insertCursor = trkIdx + 1;
+        } else {
+            const auto added = project_.addTrack();
+            if (!added)
+                break;
+            trkIdx = project_.moveTrack(*added, insertCursor);
+            insertCursor = trkIdx + 1;
+        }
+        project_.setTrackName(trkIdx, title);
+        project_.setTrackColor(trkIdx, col);
+        if (dedicatedIns > 0)
+            project_.setTrackInsert(trkIdx, dedicatedIns);
+
+        project_.addClip(Clip{patIdx, static_cast<int>(trkIdx), std::max(0, startTick)});
+
+        if (!firstChannel)
+            firstChannel = chIdx;
+        if (!firstPattern)
+            firstPattern = patIdx;
+        if (!firstTrack)
+            firstTrack = trkIdx;
+    }
+
+    if (!songMode_)
+        transport_->songModeAction()->setChecked(true);
+
+    syncMixerPanel();
+    syncInsertNames();
+    syncPatternSelector();
+    channelRack_->refresh();
+    playlist_->refresh();
+    pianoRoll_->refresh();
+    rebuildClipSources();
+
+    if (firstChannel)
+        selectChannel(*firstChannel);
+    if (firstPattern)
+        selectPattern(*firstPattern);
+    if (firstTrack) {
+        playlist_->setSelectedTrack(static_cast<int>(*firstTrack));
+        const int ins = trackMixerInsert(project_, mixer_, *firstTrack);
+        if (ins > 0 && static_cast<std::size_t>(ins) < mixerPanel_->trackCount())
+            mixerPanel_->setSelectedTrack(static_cast<std::size_t>(ins));
+    }
+
+    syncChannelRack();
+    updateMixer();
+    syncEffectCounts();
+
+    statusBar()->showMessage(
+        tr("Imported %1 (%n MIDI track(s) — assign an Instrument on each track to hear playback).", nullptr,
+            static_cast<int>(maxTracks))
+            .arg(fileInfo.fileName()),
+        6000);
+    return maxTracks;
+}
+
+void MainWindow::exportSong(bool forceLoopRange)
 {
     flushChannelRackSync();
     const double rate = audio_.sampleRate() > 0 ? audio_.sampleRate() : audio_.requestedSampleRate();
-    const bool song = songMode_ || !project_.clips().empty() || !project_.audioClips().empty();
+    const bool hasCustomLoop = loopEndTicks_ > loopStartTicks_;
+    const bool song
+        = forceLoopRange || songMode_ || !project_.clips().empty() || !project_.audioClips().empty();
     std::vector<ChannelRackAudio::LoadError> errors;
     auto state = rackAudio_.build(project_, currentPattern_, rate, song, errors);
-    if (state == nullptr || vloom::songEndTicks(*state, transport_->tempo()) <= 0) {
+    const std::int64_t endTicks = state != nullptr ? vloom::songEndTicks(*state, transport_->tempo()) : 0;
+    if (state == nullptr || (endTicks <= 0 && !(forceLoopRange && hasCustomLoop))) {
         QMessageBox::information(this, tr("Nothing to export"),
             tr("The song is empty: place patterns or audio in the playlist, or put steps or notes in the "
                "pattern."));
@@ -6534,10 +7356,24 @@ void MainWindow::exportSong()
     ExportSong about;
     about.folder = projectFolder();
     about.name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
-    const std::int64_t endTicks = vloom::songEndTicks(*state, transport_->tempo());
-    about.bars = static_cast<int>((endTicks + kTicksPerBar - 1) / kTicksPerBar);
-    about.seconds = static_cast<double>(endTicks) / kTicksPerBeat * 60.0 / transport_->tempo();
+    const std::int64_t fullTicks = std::max<std::int64_t>(endTicks, hasCustomLoop ? loopEndTicks_ : 0);
+    about.bars = static_cast<int>((fullTicks + kTicksPerBar - 1) / kTicksPerBar);
+    about.seconds = static_cast<double>(fullTicks) / kTicksPerBeat * 60.0 / transport_->tempo();
     about.sampleRate = rate;
+    if (song && hasCustomLoop) {
+        about.hasLoopRange = true;
+        about.preferLoopRange = forceLoopRange || transport_->loopEnabled();
+        const int spanTicks = loopEndTicks_ - loopStartTicks_;
+        about.loopBars = std::max(1, (spanTicks + kTicksPerBar - 1) / kTicksPerBar);
+        about.loopSeconds = static_cast<double>(spanTicks) / kTicksPerBeat * 60.0 / transport_->tempo();
+        const int b1 = loopStartTicks_ / kTicksPerBar + 1;
+        const int beat1 = (loopStartTicks_ % kTicksPerBar) / kTicksPerBeat + 1;
+        const int b2 = loopEndTicks_ / kTicksPerBar + 1;
+        const int beat2 = (loopEndTicks_ % kTicksPerBar) / kTicksPerBeat + 1;
+        about.loopLabel = (beat1 == 1 && beat2 == 1)
+            ? tr("Bar %1 – %2").arg(b1).arg(b2)
+            : tr("Bar %1.%2 – %3.%4").arg(b1).arg(beat1).arg(b2).arg(beat2);
+    }
     ExportDialog dialog(about, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -6568,6 +7404,10 @@ void MainWindow::exportSong()
     if (!chosen.tail)
         options.maxTailSeconds = 0.0;
     options.tempo = transport_->tempo();
+    if (chosen.loopRange && hasCustomLoop) {
+        options.startTicks = loopStartTicks_;
+        options.endTicks = loopEndTicks_;
+    }
     options.masterGain = volumeToGain(transport_->masterVolume())
         * static_cast<float>(mixer_.effectiveGain(MixerModel::kMaster));
     options.masterPan = static_cast<float>(mixer_.track(MixerModel::kMaster).pan);
@@ -6643,12 +7483,20 @@ void MainWindow::exportSong()
 void MainWindow::togglePlay()
 {
     flushChannelRackSync();
+    if (audio_.isRunning())
+        applySongLoop();
     auto& engine = audio_.engine();
     scrubStopPending_ = false; // the user's own play or stop wins
-    if (engine.isPlaying())
+    if (engine.isPlaying()) {
         engine.stop();
-    else
+    } else {
+        if (songMode_ && transport_->loopEnabled() && loopEndTicks_ > loopStartTicks_) {
+            const double pos = engine.positionTicks();
+            if (pos < loopStartTicks_ || pos >= loopEndTicks_)
+                (void)engine.locate(static_cast<double>(loopStartTicks_));
+        }
         engine.play();
+    }
 }
 
 void MainWindow::stopAndRewind()
@@ -6656,7 +7504,12 @@ void MainWindow::stopAndRewind()
     auto& engine = audio_.engine();
     scrubStopPending_ = false;
     engine.stop();
-    engine.locate(0.0);
+    if (songMode_ && transport_->loopEnabled() && loopEndTicks_ > loopStartTicks_
+        && engine.positionTicks() > loopStartTicks_ + 1.0) {
+        engine.locate(static_cast<double>(loopStartTicks_));
+    } else {
+        engine.locate(0.0);
+    }
 }
 
 void MainWindow::tapTempo()
@@ -6666,6 +7519,7 @@ void MainWindow::tapTempo()
     const double seconds = static_cast<double>(tapClock_.nsecsElapsed()) / 1e9;
     if (const auto bpm = tapTempo_.tap(seconds)) {
         transport_->setTempo(*bpm);
+        playlist_->setTempo(*bpm);
         pendingTempo_ = *bpm; // sent by refreshFromEngine()
     }
 }
@@ -6740,8 +7594,10 @@ void MainWindow::refreshFromEngine()
     }
     // Show the engine's tempo only once it has caught up, and never while
     // there is no device (the display is the truth until one opens).
-    if (audio_.isRunning() && !tempoSent && !pendingTempo_)
+    if (audio_.isRunning() && !tempoSent && !pendingTempo_) {
         transport_->setTempo(engine.tempo());
+        playlist_->setTempo(engine.tempo());
+    }
 
     // Real time since the last tick: meters fall by it, and slower readouts
     // update on their own schedule whatever the refresh rate is.
@@ -6774,7 +7630,19 @@ void MainWindow::refreshFromEngine()
     const bool showPlayhead = engine.isPlaying() || ticks > 0.0;
     const double patternTicks = project_.patternLength(currentPattern_);
     playlist_->setPlayhead(showPlayhead ? ticks : -1.0);
-    pianoRoll_->setPlayhead(showPlayhead ? std::fmod(ticks, patternTicks) : -1.0);
+    double prPlayhead = showPlayhead ? std::fmod(ticks, patternTicks) : -1.0;
+    if (showPlayhead && songMode_) {
+        for (const Clip& clip : project_.clips()) {
+            if (clip.pattern != currentPattern_ || clip.muted)
+                continue;
+            const double clipLen = project_.clipLength(clip);
+            if (ticks >= clip.start && ticks < clip.start + clipLen) {
+                prPlayhead = std::fmod(ticks - clip.start + clip.offset, patternTicks);
+                break;
+            }
+        }
+    }
+    pianoRoll_->setPlayhead(prPlayhead);
     channelRack_->setPlayStep(engine.isPlaying()
             ? static_cast<int>(std::fmod(ticks, static_cast<double>(kTicksPerBar)) / kTicksPerStep)
             : -1);

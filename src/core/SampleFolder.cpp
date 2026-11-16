@@ -121,7 +121,7 @@ FolderListing listSampleFolder(const fs::path& folder, std::size_t maxEntries)
             continue;
         std::error_code typeError;
         const bool isDir = entry.is_directory(typeError);
-        if (typeError || (isDir ? isHiddenFolder(entry.path()) : !isAudioFile(name)))
+        if (typeError || (isDir ? isHiddenFolder(entry.path()) : !(isAudioFile(name) || isMidiFile(name))))
             continue;
         if (listing.entries.size() >= maxEntries) {
             listing.truncated = true;
@@ -165,7 +165,8 @@ SearchResult searchSampleFolder(
                 it.disable_recursion_pending();
             continue;
         }
-        if (name.empty() || isDotHidden(name) || !isAudioFile(name) || !matchesSearch(name, search))
+        if (name.empty() || isDotHidden(name) || !(isAudioFile(name) || isMidiFile(name))
+            || !matchesSearch(name, search))
             continue;
         if (result.hits.size() >= maxResults) {
             result.truncated = true;
