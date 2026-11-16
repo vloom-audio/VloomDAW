@@ -80,18 +80,20 @@ std::vector<PluginInfo> builtinPlugins()
             return "EQ";
         return "Utility";
     };
+    // The plugin lists tell instruments from effects by category and tags.
+    const auto instrument = [](const vloom::PluginInfo& builtin) {
+        return builtin.kind == vloom::PluginInfo::Kind::Instrument;
+    };
     std::vector<PluginInfo> list;
     for (const vloom::PluginInfo& builtin : vloom::builtinProcessors()) {
-        if (builtin.kind != vloom::PluginInfo::Kind::Effect)
-            continue; // the lists and the rack know built-in effects only
         PluginInfo info;
         info.name = builtin.name;
         info.format = PluginFormat::Builtin;
         info.path = builtin.id;
         info.vendor = builtin.vendor;
-        info.category = category(builtin.id);
+        info.category = instrument(builtin) ? "Instrument" : category(builtin.id);
         info.version = builtin.version;
-        info.tags = "Fx";
+        info.tags = instrument(builtin) ? "Instrument|Synth" : "Fx";
         info.probe = PluginInfo::Probe::Ok;
         list.push_back(std::move(info));
     }

@@ -17,6 +17,8 @@ namespace vloomdaw::timeline {
 namespace {
 
 constexpr double kMinLineSpacing = 6.0; ///< pixels; denser lines are skipped
+constexpr double kPlayheadHeadHalfWidth = 5.0; ///< pixels
+constexpr double kPlayheadHeadHeight = 10.0;
 
 /// First multiple of `step` at or before the left edge of `rect`.
 long long firstMultiple(const QRect& rect, const Scale& scale, int step)
@@ -112,23 +114,32 @@ void paintPlayhead(QPainter& painter, const QRect& rect, const Scale& scale, dou
         return;
     // Anti-aliased at its exact position, so it glides instead of stepping
     // a whole pixel at a time.
-    const Theme::Colors& c = Theme::colors();
     painter.save();
+    painter.setClipRect(rect);
     painter.setRenderHint(QPainter::Antialiasing);
-    const double lineTop = rect.top() < kRulerHeight ? std::min<double>(rect.bottom() + 1, kRulerHeight - 2.0)
-                                                     : static_cast<double>(rect.top());
-    if (rect.bottom() + 1 > lineTop)
-        painter.fillRect(QRectF(x - 1.0, lineTop, 2.0, rect.bottom() + 1.0 - lineTop), c.playing);
+    painter.fillRect(QRectF(x - 1.0, rect.top(), 2.0, rect.height()), Theme::colors().playing);
+    painter.restore();
+}
 
-    if (rect.top() < kRulerHeight) {
-        // DAW ruler marker cap (pentagon head pointing down onto the playhead line).
-        QPolygonF head;
-        head << QPointF(x - 5.5, 2.0) << QPointF(x + 5.5, 2.0) << QPointF(x + 5.5, 12.0)
-             << QPointF(x, kRulerHeight - 1.0) << QPointF(x - 5.5, 12.0);
-        painter.setPen(QPen(c.playing.darker(160), 1.0));
-        painter.setBrush(c.playing);
-        painter.drawPolygon(head);
-    }
+void paintPlayheadHead(QPainter& painter, const QRect& ruler, const Scale& scale, double tick)
+{
+    const double x = playheadX(ruler, scale, tick);
+    if (std::isnan(x))
+        return;
+    // A flat top with a point: its tip meets the line where the ruler ends.
+    const double bottom = ruler.bottom() + 1.0;
+    const double top = bottom - kPlayheadHeadHeight;
+    const double shoulder = bottom - kPlayheadHeadHalfWidth;
+    QPolygonF head;
+    head << QPointF(x - kPlayheadHeadHalfWidth, top) << QPointF(x + kPlayheadHeadHalfWidth, top)
+         << QPointF(x + kPlayheadHeadHalfWidth, shoulder) << QPointF(x, bottom)
+         << QPointF(x - kPlayheadHeadHalfWidth, shoulder);
+    painter.save();
+    painter.setClipRect(ruler);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(Theme::colors().playing);
+    painter.drawPolygon(head);
     painter.restore();
 }
 
@@ -137,7 +148,9 @@ QRect playheadRect(const QRect& rect, const Scale& scale, double tick)
     const double x = playheadX(rect, scale, tick);
     if (std::isnan(x))
         return {};
-    return {static_cast<int>(std::floor(x)) - 8, rect.top(), 17, rect.height()};
+    // As wide as the head, the widest part.
+    const int half = static_cast<int>(kPlayheadHeadHalfWidth) + 3;
+    return {static_cast<int>(std::floor(x)) - half, rect.top(), 2 * half + 1, rect.height()};
 }
 
 bool playheadMoved(const QRect& rect, const Scale& scale, double from, double to)

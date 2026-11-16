@@ -404,7 +404,10 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
                 steps += on ? 'x' : '.';
             Json notes = Json::array();
             for (const Note& n : cp.notes)
-                notes.push_back(Json::array({n.key, n.start, n.length}));
+                // The velocity only when it is not the default: files stay as before.
+                notes.push_back(n.velocity == kDefaultVelocity
+                        ? Json::array({n.key, n.start, n.length})
+                        : Json::array({n.key, n.start, n.length, n.velocity}));
             perChannel.push_back({{"steps", steps}, {"notes", std::move(notes)}});
         }
         patterns.push_back(
@@ -583,8 +586,8 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
                     cp.steps[s] = steps[s] == 'x';
                 for (const Json* np : in.array(cj, "notes", kMaxNotes)) {
                     const Json& n = *np;
-                    if (!n.is_array() || n.size() != 3 || !n[0].is_number() || !n[1].is_number()
-                        || !n[2].is_number())
+                    if (!n.is_array() || (n.size() != 3 && n.size() != 4) || !n[0].is_number()
+                        || !n[1].is_number() || !n[2].is_number() || (n.size() == 4 && !n[3].is_number()))
                         continue;
                     const auto value = [](const Json& v) {
                         const double d = v.get<double>();
@@ -593,7 +596,8 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
                                   d, 0.0, static_cast<double>(std::numeric_limits<int>::max() / 2)))
                             : 0;
                     };
-                    cp.notes.push_back(Note{value(n[0]), value(n[1]), value(n[2])});
+                    cp.notes.push_back(Note{value(n[0]), value(n[1]), value(n[2]),
+                        n.size() == 4 ? value(n[3]) : kDefaultVelocity});
                 }
             }
             p.channels.push_back(std::move(cp));

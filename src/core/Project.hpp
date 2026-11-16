@@ -21,12 +21,17 @@ inline constexpr int kTicksPerStep = kTicksPerBar / kStepsPerBar;
 inline constexpr int kMinNoteLength = kTicksPerStep / 4; ///< 1/64
 inline constexpr int kLowestKey = 0; ///< MIDI note numbers
 inline constexpr int kHighestKey = 127;
+inline constexpr int kMinVelocity = 1; ///< how hard a note is played, as in MIDI
+inline constexpr int kMaxVelocity = 127;
+inline constexpr int kDefaultVelocity = 100;
+inline constexpr std::size_t kMaxPatternNotes = 100000; ///< per channel and pattern
 
 /// A note in the piano roll; positions in ticks from the pattern start.
 struct Note {
     int key = 60; ///< MIDI note number, 60 = C5 (middle C)
     int start = 0;
     int length = kTicksPerStep;
+    int velocity = kDefaultVelocity; ///< kMinVelocity .. kMaxVelocity
 
     [[nodiscard]] int end() const { return start + length; }
     friend bool operator==(const Note&, const Note&) = default;
@@ -250,6 +255,9 @@ public:
     /// Replaces note `index` (clamped), e.g. after a move or resize.
     void setNote(std::size_t pattern, std::size_t channel, std::size_t index, Note note);
     void removeNote(std::size_t pattern, std::size_t channel, std::size_t index);
+    /// Replaces all the notes (each clamped, in the order given; what is past
+    /// kMaxPatternNotes is left out): an edit of several notes, or an undo.
+    void setNotes(std::size_t pattern, std::size_t channel, std::vector<Note> notes);
 
     // ---- playlist
     /// Appends a track named "Track N"; its index, or nullopt at kMaxPlaylistTracks.

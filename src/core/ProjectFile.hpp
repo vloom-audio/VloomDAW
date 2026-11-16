@@ -74,7 +74,7 @@ public:
     static constexpr int kVersion = 1;
     static constexpr std::uintmax_t kMaxFileBytes = 256ull << 20; ///< plugin states make files big
     static constexpr std::size_t kMaxChannels = 1000;
-    static constexpr std::size_t kMaxNotes = 100000; ///< per channel and pattern
+    static constexpr std::size_t kMaxNotes = kMaxPatternNotes; ///< per channel and pattern
     static constexpr std::size_t kMaxClips = 100000; ///< pattern and audio clips, each
     static constexpr std::size_t kMaxStateBytes = 64ull << 20; ///< per plugin
     static constexpr int kMaxDepth = 32; ///< JSON nesting

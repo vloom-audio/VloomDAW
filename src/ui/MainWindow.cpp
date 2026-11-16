@@ -13,6 +13,7 @@
 #include "core/PositionFormat.hpp"
 #include "core/ProcessMemory.hpp"
 #include "core/Scales.hpp"
+#include "core/StemModels.hpp"
 #include "core/TrackRouting.hpp"
 #include "ui/AudioDecoder.hpp"
 #include "ui/DeviceScanner.hpp"
@@ -31,11 +32,15 @@
 #include "ui/mixer/MixerPanel.hpp"
 #include "ui/pianoroll/PianoRollView.hpp"
 #include "ui/playlist/PlaylistView.hpp"
+#include "ui/plugins/EqEditorWindow.hpp"
 #include "ui/plugins/ParameterEditorWindow.hpp"
 #include "ui/plugins/PluginEditorWindow.hpp"
 #include "ui/plugins/PluginManagerDialog.hpp"
 #include "ui/plugins/PluginPickerPopup.hpp"
 #include "ui/plugins/PluginsPanel.hpp"
+#include "ui/plugins/SynthEditorWindow.hpp"
+#include "ui/stems/StemModelStore.hpp"
+#include "ui/stems/StemSeparator.hpp"
 #include "ui/widgets/ActivityBar/ActivityBar.hpp"
 #include "ui/widgets/DetachButton/DetachButton.hpp"
 #include "ui/widgets/FloatingPanel/FloatingPanel.hpp"
@@ -65,6 +70,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QCursor>
 #include <QDateTime>
 #include <QDir>
@@ -107,8 +113,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 #include <span>
 #include <string>
+#include <utility>
 
 namespace vloomdaw {
 
@@ -351,11 +359,6 @@ void MainWindow::createMenus()
     // Edit menu: real Undo/Redo and active editor selection/clipboard commands.
     // Focused QLineEdit controls delegate text editing keys to the text field first.
     auto* editMenu = menuBar()->addMenu(tr("&Edit"));
-    const auto notYetIn = [this](const QString& feature, const QString& when) {
-        return [this, feature, when] {
-            statusBar()->showMessage(tr("%1 is not available yet: it arrives %2.").arg(feature, when), 5000);
-        };
-    };
     const auto addEditAction
         = [&](const QString& text, const QList<QKeySequence>& shortcuts, auto&& handler) {
               auto* action = editMenu->addAction(text, this, handler);
@@ -384,8 +387,15 @@ void MainWindow::createMenus()
     editMenu->addSeparator();
     selectAllAction_ = addEditAction(
         tr("Select &All"), {QKeySequence(Qt::CTRL | Qt::Key_A)}, [this] { performSelectAll(); });
+    addEditAction(tr("&Quantize"), {QKeySequence(Qt::CTRL | Qt::Key_Q)}, [this] { performQuantize(); });
     connect(editMenu, &QMenu::aboutToShow, this, &MainWindow::updateUndoActions);
     updateUndoActions();
+
+    const auto notYetIn = [this](const QString& feature, const QString& when) {
+        return [this, feature, when] {
+            statusBar()->showMessage(tr("%1 is not available yet: it arrives %2.").arg(feature, when), 5000);
+        };
+    };
 
     // Patterns, as in FL Studio.
     auto* patternsMenu = menuBar()->addMenu(tr("&Patterns"));
@@ -446,6 +456,7 @@ void MainWindow::createMenus()
     optionsMenu->addAction(tr("Theme…"), this, [this] { showSettings(SettingsDialog::Page::Theme); });
     optionsMenu->addSeparator();
     optionsMenu->addAction(tr("Plugin Manager…"), this, &MainWindow::showPluginManager);
+    optionsMenu->addAction(tr("Stem Models…"), this, [this] { (void)showStemModels(); });
 
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
     fullScreenAction_ = viewMenu->addAction(tr("Enter Full Screen"), this, &MainWindow::toggleFullScreen);
@@ -1078,7 +1089,215 @@ void MainWindow::showAudioClipMenu(std::size_t index, const QPoint& globalPos)
         if (ok)
             setAudioClipTempo(index, bpm);
     });
+    menu.addSeparator();
+    QAction* stems = menu.addAction(tr("Stem Extractor…"), this, [this, index] { extractStems(index); });
+    stems->setEnabled(stemSeparator_ == nullptr || !stemSeparator_->isRunning());
     menu.exec(globalPos);
+}
+
+bool MainWindow::showStemModels()
+{
+    StemModelStore store(settings_.stemModel, this);
+    const auto keep = [this](const QString& id) {
+        settings_.stemModel = id;
+        settings_.save();
+    };
+    connect(&store, &StemModelStore::chosenChanged, this, keep);
+    store.exec();
+    if (store.chosen() != settings_.stemModel)
+        keep(store.chosen()); // the saved one was not on this computer any more
+    return !settings_.stemModel.isEmpty();
+}
+
+void MainWindow::extractStems(std::size_t index)
+{
+    if (index >= project_.audioClips().size())
+        return;
+    const AudioClip clip = project_.audioClips()[index];
+    if (clip.channel >= project_.channels().size() || project_.channels()[clip.channel].samplePath.empty())
+        return;
+    if (stemSeparator_ != nullptr && stemSeparator_->isRunning()) {
+        statusBar()->showMessage(tr("The stem extractor is still working on another clip."), 5000);
+        return;
+    }
+    if (StemSeparator::program().isEmpty() || !stemSeparationSupported()) {
+        QMessageBox::information(this, tr("Stem Extractor"),
+            StemSeparator::program().isEmpty()
+                ? tr("The stem separator is missing from this installation.")
+                : tr("This processor is too old for the stem extractor: it needs AVX2 (2013 and later)."));
+        return;
+    }
+    const auto modelInUse = [this]() -> const StemModel* {
+        const StemModel* model = findStemModel(settings_.stemModel.toStdString());
+        return model != nullptr && stemModelInstalled(*model, toPath(StemSeparator::modelFolder())) ? model
+                                                                                                    : nullptr;
+    };
+    const StemModel* model = modelInUse();
+    if (model == nullptr) {
+        // None yet: the store, where the user picks and downloads one.
+        if (!showStemModels())
+            return;
+        model = modelInUse();
+        if (model == nullptr)
+            return;
+    }
+
+    const QFileInfo source(QString::fromStdString(project_.channels()[clip.channel].samplePath));
+    StemJob job;
+    job.source = source.absoluteFilePath();
+    job.baseName = source.completeBaseName();
+    job.modelId = QString::fromLatin1(model->id.data(), static_cast<qsizetype>(model->id.size()));
+    job.modelFolder = StemSeparator::modelFolder();
+    // Next to the file, so the stems travel with it; in the app's own folder
+    // when that place cannot be written to (a read-only sample pack).
+    const QString beside
+        = QStringLiteral("%1/%2 - stems/%3").arg(source.absolutePath(), job.baseName, job.modelId);
+    const QByteArray pathHash
+        = QCryptographicHash::hash(job.source.toUtf8(), QCryptographicHash::Sha256).toHex().left(12);
+    job.outputFolder = QDir().mkpath(beside) && QFileInfo(beside).isWritable()
+        ? beside
+        : QStringLiteral("%1/stems/%2-%3/%4")
+              .arg(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation), job.baseName,
+                  QString::fromLatin1(pathHash), job.modelId);
+
+    // Extracted before with this model, and the file has not changed since: use those.
+    QList<StemFile> ready;
+    for (const std::string_view name : model->stems) {
+        const QString stem = QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size()));
+        const QFileInfo file(StemSeparator::stemPath(job, stem));
+        if (file.isFile() && file.size() > 0 && file.lastModified() >= source.lastModified())
+            ready.push_back({stem, file.absoluteFilePath()});
+    }
+    if (ready.size() == static_cast<qsizetype>(model->stems.size())) {
+        placeStems(clip, ready);
+        return;
+    }
+
+    if (stemSeparator_ == nullptr)
+        stemSeparator_ = new StemSeparator(this);
+    const auto closeProgress = [this] {
+        if (stemProgress_ != nullptr) {
+            stemProgress_->deleteLater();
+            stemProgress_ = nullptr;
+        }
+    };
+    stemSeparator_->disconnect(this, nullptr); // the last job's finished / failed
+    connect(stemSeparator_, &StemSeparator::progress, this, [this](double fraction, const QString& stage) {
+        if (stemProgress_ == nullptr)
+            return;
+        stemProgress_->setValue(static_cast<int>(fraction * 1000.0));
+        if (!stage.isEmpty())
+            stemProgress_->setLabelText(
+                stemProgress_->property("what").toString() + QLatin1Char('\n') + stage);
+    });
+    connect(stemSeparator_, &StemSeparator::finished, this,
+        [this, clip, closeProgress](const QList<StemFile>& stems) {
+            closeProgress();
+            placeStems(clip, stems);
+        });
+    connect(stemSeparator_, &StemSeparator::failed, this, [this, closeProgress](const QString& reason) {
+        closeProgress();
+        QMessageBox::warning(this, tr("Stem Extractor"), reason);
+    });
+
+    const QString what
+        = tr("Extracting stems from %1 with %2.\nThis takes several times as long as the audio "
+             "lasts; you can keep working meanwhile.")
+              .arg(source.fileName(),
+                  QString::fromLatin1(model->name.data(), static_cast<qsizetype>(model->name.size())));
+    stemProgress_ = new QProgressDialog(what, tr("Cancel"), 0, 1000, this);
+    stemProgress_->setProperty("what", what);
+    stemProgress_->setWindowTitle(tr("Stem Extractor"));
+    stemProgress_->setWindowModality(Qt::NonModal);
+    stemProgress_->setAutoClose(false);
+    stemProgress_->setAutoReset(false);
+    stemProgress_->setMinimumDuration(0);
+    stemProgress_->setMinimumWidth(420);
+    connect(stemProgress_, &QProgressDialog::canceled, this, [this, closeProgress] {
+        if (stemSeparator_ != nullptr)
+            stemSeparator_->cancel();
+        closeProgress();
+        statusBar()->showMessage(tr("Stem extraction cancelled."), 4000);
+    });
+    stemProgress_->show();
+    stemSeparator_->start(job);
+}
+
+void MainWindow::placeStems(const AudioClip& clip, const QList<StemFile>& stems, int next)
+{
+    if (next < stems.size()) {
+        // One after another: each is decoded for the engine off this thread.
+        const std::uint64_t gen = projectGeneration_;
+        loadSampleThen(stems[next].path, [this, gen, clip, stems, next] {
+            if (projectGeneration_ == gen)
+                placeStems(clip, stems, next + 1);
+        });
+        return;
+    }
+    recordUndo(tr("Extract Stems"));
+    int placed = 0;
+    for (const StemFile& stem : stems) {
+        const std::string file = QDir::cleanPath(stem.path).toStdString();
+        if (clipAudio(file)->seconds <= 0.0) {
+            clipAudio_.erase(file);
+            continue;
+        }
+        std::size_t channel = 0;
+        if (const auto existing = project_.channelWithSample(file)) {
+            channel = *existing;
+        } else {
+            channel = project_.addChannel(QFileInfo(stem.path).completeBaseName().toStdString());
+            project_.setChannelSample(channel, file);
+            project_.setChannelColor(channel, trackPaletteColor(channel));
+        }
+        if (project_.channels()[channel].insert == 0)
+            linkChannelToInsert(project_, mixer_, channel);
+        // A track of its own, right under the clip's (and the stems before it).
+        QString title = stem.stem;
+        if (!title.isEmpty())
+            title[0] = title[0].toUpper();
+        int track = static_cast<int>(project_.tracks().size()) - 1;
+        if (const auto added = project_.addTrack()) {
+            track = static_cast<int>(
+                project_.moveTrack(*added, static_cast<std::size_t>(clip.track + 1 + placed)));
+            const auto trkIdx = static_cast<std::size_t>(track);
+            project_.setTrackName(trkIdx, title.toStdString());
+            project_.setTrackColor(trkIdx, project_.channels()[channel].color);
+            project_.setTrackInsert(trkIdx, project_.channels()[channel].insert);
+        }
+        AudioClip copy = clip; // the same part of the song, fitted the same way
+        copy.channel = channel;
+        copy.track = track;
+        copy.muted = false;
+        project_.addAudioClip(copy);
+        ++placed;
+    }
+    if (placed == 0) {
+        statusBar()->showMessage(tr("The stems could not be loaded."), 6000);
+        return;
+    }
+    // The clip itself goes quiet: its stems play in its place. (Tracks added
+    // above did not move it: they went in below it.)
+    bool mutedClip = false;
+    for (std::size_t i = 0; i < project_.audioClips().size() && !mutedClip; ++i)
+        if (project_.audioClips()[i] == clip) {
+            AudioClip muted = clip;
+            muted.muted = true;
+            project_.setAudioClip(i, muted);
+            mutedClip = true;
+        }
+    syncMixerPanel();
+    syncInsertNames();
+    channelRack_->refresh();
+    playlist_->refresh();
+    rebuildClipSources();
+    updateMixer();
+    syncChannelRack();
+    // Not found: the clip was moved or changed while its stems were made.
+    statusBar()->showMessage(mutedClip
+            ? tr("%n stem(s) placed under the clip; the clip itself is muted.", nullptr, placed)
+            : tr("%n stem(s) placed where the clip was; mute the clip to hear them alone.", nullptr, placed),
+        8000);
 }
 
 void MainWindow::setAudioClipTempo(std::size_t index, double bpm)
@@ -1706,6 +1925,33 @@ void MainWindow::makeDetachable(DetachablePage& d, WorkspacePage page, PanelFram
     d.placeholder->hide();
 }
 
+bool MainWindow::pianoRollActive() const
+{
+    // Docked, it shows only as the workspace's page; detached, its window is in front.
+    return pianoRoll_->isVisible() && pianoRoll_->window()->isActiveWindow();
+}
+
+void MainWindow::stepNoteHistory(bool redo)
+{
+    const bool any = redo ? noteHistory_.canRedo() : noteHistory_.canUndo();
+    const auto target = redo ? noteHistory_.redo(project_) : noteHistory_.undo(project_);
+    if (!target) {
+        statusBar()->showMessage(!any
+                ? (redo ? tr("Nothing to redo.") : tr("Nothing to undo."))
+                : tr("The notes were changed elsewhere since: the undo history was cleared."),
+            4000);
+        return;
+    }
+    // Show the notes it changed.
+    if (target->pattern != currentPattern_)
+        selectPattern(target->pattern);
+    if (target->channel != currentChannel_)
+        selectChannel(target->channel);
+    pianoRoll_->refresh();
+    playlist_->refresh();
+    syncChannelRack();
+}
+
 bool MainWindow::isPageDetached(WorkspacePage page) const
 {
     const DetachablePage* d = detachable(page);
@@ -1866,10 +2112,7 @@ QWidget* MainWindow::createMixer()
     connect(mixerPanel_, &MixerPanel::effectsMenuRequested, this, &MainWindow::showEffectsMenu);
     connect(mixerPanel_, &MixerPanel::effectBypassToggled, this,
         [this](std::size_t track, std::size_t slot, bool bypassed) {
-            recordUndo(tr("Bypass Effect"));
-            mixer_.setEffectBypassed(track, slot, bypassed);
-            updateMixer();
-            syncEffectCounts();
+            setEffectBypassed(track, slot, bypassed);
         });
     connect(mixerPanel_, &MixerPanel::effectClicked, this, [this](std::size_t track, std::size_t slot) {
         if (track >= mixer_.size())
@@ -2346,8 +2589,10 @@ QWidget* MainWindow::createWorkspace()
         // A plugin channel opens its plugin's editor, as in FL Studio.
         if (channel < project_.channels().size()) {
             const Channel& c = project_.channels()[channel];
-            if (c.instrument && pluginHost_.instance(c.instrument->instance) != nullptr
-                && pluginHost_.instance(c.instrument->instance)->processor().hasEditor()) {
+            // Its own editor, or the one the app has for a built-in.
+            const auto instance = c.instrument ? pluginHost_.instance(c.instrument->instance) : nullptr;
+            if (instance != nullptr
+                && (instance->processor().hasEditor() || !instance->processor().parameters().empty())) {
                 openPluginEditor(c.instrument->instance, QString::fromStdString(c.name));
                 return;
             }
@@ -2379,70 +2624,49 @@ QWidget* MainWindow::createWorkspace()
             [this, snap](int row) { pianoRoll_->setSnapTicks(snap->itemData(row).toInt()); });
         pianoRollFrame_->addHeaderWidget(snap);
     }
-    const auto notesEdited = [this] {
-        pianoRoll_->viewport()->update();
+    // An edit arrives as the whole list of notes; a drag sends one on every
+    // move. The notes before the first one are kept, so the edit is one step
+    // to undo once it is finished.
+    connect(pianoRoll_, &PianoRollView::notesChanged, this, [this](const std::vector<Note>& notes) {
+        const NoteHistory::Target target{currentPattern_, currentChannel_};
+        const auto* now = project_.notes(target.pattern, target.channel);
+        if (now == nullptr)
+            return;
+        if (!noteEditBefore_ || noteEditTarget_ != target) {
+            recordUndo(tr("Piano Roll Notes"));
+            noteEditBefore_ = *now;
+            noteEditTarget_ = target;
+        }
+        project_.setNotes(target.pattern, target.channel, notes);
         playlist_->viewport()->update(); // clip lengths follow the pattern
         scheduleChannelRackSync();
-    };
-    connect(pianoRoll_, &PianoRollView::noteAdded, this, [this, notesEdited](Note note) {
-        recordUndo(tr("Add Note"));
-        project_.addNote(currentPattern_, currentChannel_, note);
-        notesEdited();
     });
-    connect(pianoRoll_, &PianoRollView::noteChanged, this, [this, notesEdited](std::size_t index, Note note) {
-        if (const auto* list = project_.notes(currentPattern_, currentChannel_);
-            list != nullptr && index < list->size() && (*list)[index] == note) {
+    connect(pianoRoll_, &PianoRollView::editFinished, this, [this] {
+        if (!noteEditBefore_)
             return;
-        }
-        recordUndo(tr("Edit Note"), "pr.note." + std::to_string(index));
-        project_.setNote(currentPattern_, currentChannel_, index, note);
-        notesEdited();
-    });
-    connect(pianoRoll_, &PianoRollView::noteRemoved, this, [this](std::size_t index) {
-        recordUndo(tr("Delete Note"));
-        project_.removeNote(currentPattern_, currentChannel_, index);
-        pianoRoll_->refresh();
+        if (const auto* now = project_.notes(noteEditTarget_.pattern, noteEditTarget_.channel))
+            noteHistory_.record(noteEditTarget_, std::move(*noteEditBefore_), *now);
+        noteEditBefore_.reset();
+        undoHistory_.breakCoalescing();
         playlist_->refresh();
-        syncChannelRack();
+        syncChannelRack(); // the engine plays the notes
     });
-    connect(pianoRoll_, &PianoRollView::notesAddedBatch, this, [this](const std::vector<Note>& notes) {
-        if (notes.empty())
+    connect(pianoRoll_, &PianoRollView::undoRequested, this, [this] { performUndo(); });
+    connect(pianoRoll_, &PianoRollView::redoRequested, this, [this] { performRedo(); });
+    // A key of the piano roll sounds through the channel's instrument plugin.
+    connect(pianoRoll_, &PianoRollView::keyPressed, this, [this](int key, int velocity) {
+        if (currentChannel_ >= project_.channels().size())
             return;
-        recordUndo(tr("Paste Notes"));
-        for (const Note& n : notes)
-            project_.addNote(currentPattern_, currentChannel_, n);
-        pianoRoll_->refresh();
-        playlist_->refresh();
-        syncChannelRack();
+        const Channel& channel = project_.channels()[currentChannel_];
+        auto instance = channel.instrument ? pluginHost_.instance(channel.instrument->instance) : nullptr;
+        if (instance != nullptr && instance->playNote(key, static_cast<float>(velocity) / 128.0f))
+            previewInstrument_ = std::move(instance);
     });
-    connect(
-        pianoRoll_, &PianoRollView::notesRemovedBatch, this, [this](const std::vector<std::size_t>& indices) {
-            if (indices.empty())
-                return;
-            recordUndo(tr("Delete Notes"));
-            for (auto it = indices.rbegin(); it != indices.rend(); ++it)
-                project_.removeNote(currentPattern_, currentChannel_, *it);
-            pianoRoll_->refresh();
-            playlist_->refresh();
-            syncChannelRack();
-        });
-    connect(pianoRoll_, &PianoRollView::notesChangedBatch, this,
-        [this, notesEdited](const std::vector<std::pair<std::size_t, Note>>& edits) {
-            bool anyChanged = false;
-            const auto* list = project_.notes(currentPattern_, currentChannel_);
-            for (const auto& [index, note] : edits) {
-                if (list != nullptr && index < list->size() && !((*list)[index] == note)) {
-                    anyChanged = true;
-                    break;
-                }
-            }
-            if (!anyChanged)
-                return;
-            recordUndo(tr("Move Notes"), "pr.notes.batch");
-            for (const auto& [index, note] : edits)
-                project_.setNote(currentPattern_, currentChannel_, index, note);
-            notesEdited();
-        });
+    connect(pianoRoll_, &PianoRollView::keyReleased, this, [this](int key) {
+        if (previewInstrument_ != nullptr)
+            (void)previewInstrument_->stopNote(key);
+        previewInstrument_.reset();
+    });
 
     // Playlist.
     playlist_ = new PlaylistView;
@@ -3651,13 +3875,10 @@ void MainWindow::showEffectsMenu(std::size_t track, const QPoint& globalPos)
             = sub->addAction(tr("Open Editor"), this, [this, handle = effect.instance, name, insertName] {
                   openPluginEditor(handle, tr("%1 - %2").arg(name, insertName));
               });
-        open->setEnabled(instance != nullptr && instance->processor().hasEditor());
-        QAction* bypass = sub->addAction(tr("Bypass"), this, [this, track, i](bool on) {
-            recordUndo(tr("Bypass Effect"));
-            mixer_.setEffectBypassed(track, i, on);
-            updateMixer();
-            syncEffectCounts();
-        });
+        open->setEnabled(instance != nullptr
+            && (instance->processor().hasEditor() || !instance->processor().parameters().empty()));
+        QAction* bypass = sub->addAction(
+            tr("Bypass"), this, [this, track, i](bool on) { setEffectBypassed(track, i, on); });
         bypass->setCheckable(true);
         bypass->setChecked(effect.bypassed);
         sub->addSeparator();
@@ -3718,14 +3939,11 @@ void MainWindow::showEffectSlotContextMenu(std::size_t track, std::size_t slot, 
         = menu.addAction(tr("Open Editor"), this, [this, handle = effect.instance, effectName, trackName] {
               openPluginEditor(handle, tr("%1 - %2").arg(effectName, trackName));
           });
-    open->setEnabled(instance != nullptr && instance->processor().hasEditor());
+    open->setEnabled(instance != nullptr
+        && (instance->processor().hasEditor() || !instance->processor().parameters().empty()));
 
-    QAction* bypass = menu.addAction(tr("Bypass"), this, [this, track, slot](bool on) {
-        recordUndo(tr("Bypass Effect"));
-        mixer_.setEffectBypassed(track, slot, on);
-        updateMixer();
-        syncEffectCounts();
-    });
+    QAction* bypass = menu.addAction(
+        tr("Bypass"), this, [this, track, slot](bool on) { setEffectBypassed(track, slot, on); });
     bypass->setCheckable(true);
     bypass->setChecked(effect.bypassed);
 
@@ -4027,9 +4245,67 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
     const auto instance = pluginHost_.instance(handle);
     if (instance == nullptr)
         return;
+    if (!instance->processor().hasEditor() && EqEditorWindow::edits(*instance)) {
+        auto* eq = new EqEditorWindow(instance, title, static_cast<double>(settings_.sampleRate), this);
+        connect(eq, &EqEditorWindow::edited, this, [this] {
+            pluginsEdited_ = true; // unsaved changes
+            setWindowModified(true);
+        });
+        // The power button bypasses the insert effect this instance is.
+        const auto slotOf = [this, handle]() -> std::optional<std::pair<std::size_t, std::size_t>> {
+            for (std::size_t track = 0; track < mixer_.size(); ++track) {
+                const auto& effects = mixer_.track(track).effects;
+                for (std::size_t slot = 0; slot < effects.size(); ++slot)
+                    if (effects[slot].instance == handle)
+                        return std::pair{track, slot};
+            }
+            return std::nullopt;
+        };
+        if (const auto at = slotOf())
+            eq->setBypassed(mixer_.track(at->first).effects[at->second].bypassed);
+        connect(eq, &EqEditorWindow::bypassToggled, this, [this, slotOf](bool bypassed) {
+            if (const auto at = slotOf())
+                setEffectBypassed(at->first, at->second, bypassed);
+        });
+        pluginEditors_[handle] = eq;
+        eq->show();
+        return;
+    }
+    if (!instance->processor().hasEditor() && SynthEditorWindow::edits(*instance)) {
+        auto* synth = new SynthEditorWindow(instance, title, this);
+        connect(synth, &SynthEditorWindow::edited, this, [this] {
+            pluginsEdited_ = true; // unsaved changes
+            setWindowModified(true);
+        });
+        // The power button switches off the channel's instrument this instance is.
+        const auto channelOf = [this, handle]() -> std::optional<std::size_t> {
+            const auto& channels = project_.channels();
+            for (std::size_t channel = 0; channel < channels.size(); ++channel)
+                if (channels[channel].instrument && channels[channel].instrument->instance == handle)
+                    return channel;
+            return std::nullopt;
+        };
+        if (const auto channel = channelOf())
+            synth->setBypassed(project_.channels()[*channel].instrument->bypassed);
+        connect(synth, &SynthEditorWindow::bypassToggled, this, [this, channelOf](bool bypassed) {
+            const auto channel = channelOf();
+            if (!channel)
+                return;
+            recordUndo(tr("Bypass Instrument"));
+            PluginSlot slot = *project_.channels()[*channel].instrument;
+            slot.bypassed = bypassed;
+            project_.setChannelInstrument(*channel, std::move(slot));
+            syncChannelRack();
+            pluginsEdited_ = true; // unsaved changes
+            setWindowModified(true);
+        });
+        pluginEditors_[handle] = synth;
+        synth->show();
+        return;
+    }
     PluginEditorContext context = buildPluginEditorContext(handle);
     if (!instance->processor().hasEditor()) {
-        // No editor of its own (the built-in effects): a knob per parameter.
+        // No editor of its own (the other built-in effects): a knob per parameter.
         if (instance->processor().parameters().empty())
             return;
         auto* controls = new ParameterEditorWindow(instance, title, this);
@@ -4056,6 +4332,20 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
     }
     pluginEditors_[handle] = editor;
     updatePluginIdle();
+}
+
+void MainWindow::setEffectBypassed(std::size_t track, std::size_t slot, bool bypassed)
+{
+    if (track >= mixer_.size() || slot >= mixer_.track(track).effects.size())
+        return;
+    recordUndo(tr("Bypass Effect"));
+    mixer_.setEffectBypassed(track, slot, bypassed);
+    updateMixer();
+    syncEffectCounts();
+    const auto editor = pluginEditors_.find(mixer_.track(track).effects[slot].instance);
+    if (editor != pluginEditors_.end())
+        if (auto* eq = qobject_cast<EqEditorWindow*>(editor->second.data()))
+            eq->setBypassed(bypassed);
 }
 
 std::vector<std::uint64_t> MainWindow::pluginsInUse() const
@@ -4136,6 +4426,8 @@ void MainWindow::resetProject()
     transport_->keyDisplay()->setRootNote(0); // C
     transport_->keyDisplay()->setScale(Scale::Major);
     pianoRoll_->setKey(0, Scale::Major);
+    noteHistory_.clear(); // another project: nothing of the old one to undo
+    noteEditBefore_.reset();
     project_ = Project{};
     rackAudio_.reset();
     clipAudio_.clear();
@@ -4338,8 +4630,8 @@ void MainWindow::performCut()
         return;
     }
     if (isPianoRollActive()) {
-        if (pianoRoll_ != nullptr && pianoRoll_->hasSelectedNotes()) {
-            pianoRoll_->cutSelectedNotes();
+        if (pianoRoll_ != nullptr && pianoRoll_->hasSelection()) {
+            pianoRoll_->cutSelection();
             statusBar()->showMessage(tr("Cut selected notes"), 2500);
         }
         return;
@@ -4357,8 +4649,8 @@ void MainWindow::performCopy()
         return;
     }
     if (isPianoRollActive()) {
-        if (pianoRoll_ != nullptr && pianoRoll_->hasSelectedNotes()) {
-            pianoRoll_->copySelectedNotes();
+        if (pianoRoll_ != nullptr && pianoRoll_->hasSelection()) {
+            pianoRoll_->copySelection();
             statusBar()->showMessage(tr("Copied selected notes"), 2500);
         }
         return;
@@ -4376,8 +4668,8 @@ void MainWindow::performPaste()
         return;
     }
     if (isPianoRollActive()) {
-        if (pianoRoll_ != nullptr && pianoRoll_->hasNoteClipboard())
-            pianoRoll_->pasteNotes();
+        if (pianoRoll_ != nullptr && pianoRoll_->canPaste())
+            pianoRoll_->paste();
         return;
     }
     if (playlist_ != nullptr && playlist_->hasClipClipboard())
@@ -4389,8 +4681,8 @@ void MainWindow::performDuplicate()
     if (qobject_cast<QLineEdit*>(QApplication::focusWidget()) != nullptr)
         return;
     if (isPianoRollActive()) {
-        if (pianoRoll_ != nullptr && pianoRoll_->hasSelectedNotes())
-            pianoRoll_->duplicateSelectedNotes();
+        if (pianoRoll_ != nullptr && pianoRoll_->hasSelection())
+            pianoRoll_->duplicateSelection();
         return;
     }
     if (playlist_ != nullptr && playlist_->hasSelectedClips())
@@ -4404,8 +4696,8 @@ void MainWindow::performDelete()
         return;
     }
     if (isPianoRollActive()) {
-        if (pianoRoll_ != nullptr && pianoRoll_->hasSelectedNotes())
-            pianoRoll_->deleteSelectedNotes();
+        if (pianoRoll_ != nullptr && pianoRoll_->hasSelection())
+            pianoRoll_->deleteSelection();
         return;
     }
     if (playlist_ != nullptr && playlist_->hasSelectedClips())
@@ -4420,11 +4712,24 @@ void MainWindow::performSelectAll()
     }
     if (isPianoRollActive()) {
         if (pianoRoll_ != nullptr)
-            pianoRoll_->selectAllNotes();
+            pianoRoll_->selectAll();
         return;
     }
     if (playlist_ != nullptr)
         playlist_->selectAllClips();
+}
+
+void MainWindow::performQuantize()
+{
+    if (qobject_cast<QLineEdit*>(QApplication::focusWidget()) != nullptr)
+        return;
+    if (isPianoRollActive()) {
+        if (pianoRoll_ != nullptr)
+            pianoRoll_->quantize();
+        return;
+    }
+    if (playlist_ != nullptr)
+        playlist_->quantizeSelectedClips();
 }
 
 void MainWindow::updateUndoActions()
@@ -4765,6 +5070,8 @@ void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
     transport_->keyDisplay()->setRootNote(incoming.song.keyRoot);
     transport_->keyDisplay()->setScale(incoming.song.scale);
     pianoRoll_->setKey(incoming.song.keyRoot, incoming.song.scale);
+    noteHistory_.clear(); // another project: nothing of the old one to undo
+    noteEditBefore_.reset();
     rackAudio_.reset();
     clipAudio_.clear();
     playlist_->clearWaveCache();

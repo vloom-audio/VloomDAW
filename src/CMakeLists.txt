@@ -13,11 +13,16 @@ target_sources(vloomdaw_core PRIVATE
     core/AudioFormat.cpp
     core/BrowserFilter.cpp
     core/Decibels.cpp
+    core/EqResponse.cpp
+    core/PluginPresets.cpp
+    core/SpectrumAnalyzer.cpp
     core/DeviceRef.cpp
     core/DeviceWatch.cpp
     core/FrameStats.cpp
     core/MixerModel.cpp
     core/Names.cpp
+    core/NoteEdits.cpp
+    core/NoteHistory.cpp
     core/NoteNames.cpp
     core/PluginMetadata.cpp
     core/PluginScanner.cpp
@@ -27,6 +32,8 @@ target_sources(vloomdaw_core PRIVATE
     core/ProjectFile.cpp
     core/SampleFolder.cpp
     core/Scales.cpp
+    core/StemChunks.cpp
+    core/StemModels.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
     core/TrackRouting.cpp
@@ -40,9 +47,10 @@ target_sources(vloomdaw_core PRIVATE
     audio/TempoDetector.cpp
     audio/TimeStretch.cpp
     audio/MixerAudio.cpp
-    audio/PluginHost.cpp)
+    audio/PluginHost.cpp
+    audio/StemAudio.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(vloomdaw_core PUBLIC vloom::engine PRIVATE vloomdaw::ffmpeg signalsmith-stretch nlohmann_json::nlohmann_json)
+target_link_libraries(vloomdaw_core PUBLIC vloom::engine vloom::dsp PRIVATE vloomdaw::ffmpeg signalsmith-stretch nlohmann_json::nlohmann_json)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
 vloom_set_warnings(vloomdaw_core)
 
@@ -65,6 +73,11 @@ endif()
 if(NOT VLOOMDAW_BUILD_APP)
     return()
 endif()
+
+# ---------------------------------------------------------------- stem separator (no Qt)
+# Separates audio into stems with a Demucs model; the app runs it as a child
+# process (it takes minutes, and ending the process cancels it). See stems/main.cpp.
+add_subdirectory(stems)
 
 # ---------------------------------------------------------------- ui (Qt)
 qt_add_library(vloomdaw_ui STATIC
@@ -119,10 +132,18 @@ qt_add_library(vloomdaw_ui STATIC
     ui/pianoroll/PianoRollView.hpp
     ui/playlist/PlaylistView.cpp
     ui/playlist/PlaylistView.hpp
+    ui/plugins/PresetBar.cpp
+    ui/plugins/PresetBar.hpp
     ui/plugins/PluginDrag.cpp
     ui/plugins/PluginDrag.hpp
+    ui/plugins/EqEditorWindow.cpp
+    ui/plugins/EqEditorWindow.hpp
     ui/plugins/ParameterEditorWindow.cpp
     ui/plugins/ParameterEditorWindow.hpp
+    ui/plugins/ParameterText.cpp
+    ui/plugins/ParameterText.hpp
+    ui/plugins/SynthEditorWindow.cpp
+    ui/plugins/SynthEditorWindow.hpp
     ui/plugins/PluginEditorWindow.cpp
     ui/plugins/PluginEditorWindow.hpp
     ui/plugins/PluginManagerDialog.cpp
@@ -131,6 +152,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/PluginPickerPopup.hpp
     ui/plugins/PluginProber.cpp
     ui/plugins/PluginProber.hpp
+    ui/stems/StemModelStore.cpp
+    ui/stems/StemModelStore.hpp
+    ui/stems/StemSeparator.cpp
+    ui/stems/StemSeparator.hpp
     ui/plugins/PluginsPanel.cpp
     ui/plugins/PluginsPanel.hpp
     ui/plugins/PluginStore.cpp
@@ -180,7 +205,7 @@ qt_add_library(vloomdaw_ui STATIC
     ui/widgets/ViewButtons/ViewButtons.cpp
     ui/widgets/ViewButtons/ViewButtons.hpp)
 # Qt6::Svg provides the SVG icon engine the icons below need at run time.
-target_link_libraries(vloomdaw_ui PUBLIC vloomdaw_core Qt6::Widgets Qt6::Svg)
+target_link_libraries(vloomdaw_ui PUBLIC vloomdaw_core Qt6::Widgets Qt6::Svg PRIVATE Qt6::Network)
 if(APPLE)
     target_sources(vloomdaw_ui PRIVATE ui/MacWindow.hpp ui/MacWindow.mm)
     target_link_libraries(vloomdaw_ui PRIVATE "-framework AppKit")
@@ -200,6 +225,8 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/browser-folder.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/channel-rack.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/chevron-down.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/chevron-left.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/chevron-right.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/chevrons-right.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/detach.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/dock.svg
@@ -275,14 +302,14 @@ endif()
 target_link_libraries(VloomDAW PRIVATE vloomdaw_ui)
 vloomdaw_copy_ffmpeg_dlls(VloomDAW)
 # The app finds the probe next to its own executable (inside the bundle on macOS).
-add_dependencies(VloomDAW vloomdaw-plugin-probe)
+add_dependencies(VloomDAW vloomdaw-plugin-probe vloomdaw-stems)
 if(APPLE)
     add_custom_command(TARGET VloomDAW POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:vloomdaw-plugin-probe> $<TARGET_FILE_DIR:VloomDAW>/
+            $<TARGET_FILE:vloomdaw-plugin-probe> $<TARGET_FILE:vloomdaw-stems> $<TARGET_FILE_DIR:VloomDAW>/
         VERBATIM)
 else()
-    set_target_properties(vloomdaw-plugin-probe PROPERTIES
+    set_target_properties(vloomdaw-plugin-probe vloomdaw-stems PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:VloomDAW>)
 endif()
 vloom_set_warnings(VloomDAW)
@@ -301,7 +328,7 @@ install(TARGETS VloomDAW
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(NOT APPLE)
-    install(TARGETS vloomdaw-plugin-probe RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS vloomdaw-plugin-probe vloomdaw-stems RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 # Windows: FFmpeg's DLLs (LGPL) go next to the app, with FFmpeg's licence.
 # macOS and Linux release builds link a static FFmpeg (scripts/build-ffmpeg.sh).

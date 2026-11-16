@@ -83,6 +83,23 @@ void ChannelRackAudio::setLoading(const std::string& path, bool loading)
 
 bool ChannelRackAudio::isLoading(const std::string& path) const { return loading_.contains(path); }
 
+namespace {
+
+/// The piano roll's notes as the engine plays them.
+std::vector<vloom::Note> engineNotes(const std::vector<Note>& notes)
+{
+    std::vector<vloom::Note> out;
+    out.reserve(notes.size());
+    for (const Note& note : notes)
+        out.push_back(vloom::Note{.start = note.start,
+            .length = note.length,
+            .key = note.key,
+            .velocity = static_cast<float>(note.velocity) / 128.0f});
+    return out;
+}
+
+} // namespace
+
 std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
     vloom::Engine& engine, const Project& project, std::size_t pattern, double sampleRate, bool song)
 {
@@ -109,7 +126,8 @@ std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
         voices_.push_back(std::make_shared<vloom::ChannelVoices>());
 
     auto state = std::make_unique<vloom::SequencerState>();
-    state->stepCount = project.patternSteps(pattern);
+    // The pattern's whole length: its step pads, or further when notes reach past them.
+    state->stepCount = project.patternLength(pattern) / kTicksPerStep;
     state->ticksPerStep = kTicksPerStep;
     state->channels.reserve(channels.size());
     const Pattern& p = project.patterns()[pattern];
@@ -122,9 +140,11 @@ std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
         out.gain = static_cast<float>(faderToGain(channel.volume));
         out.pan = static_cast<float>(channel.pan);
         out.insert = channel.insert;
-        if (c < p.channels.size())
+        if (c < p.channels.size()) {
             for (const bool on : p.channels[c].steps)
                 out.steps.push_back(on ? 1 : 0);
+            out.notes = engineNotes(p.channels[c].notes);
+        }
         out.sample = load(channel.samplePath, c, &errors);
         if (channel.instrument && plugins_) {
             if (auto plugin = plugins_(channel.instrument->instance)) {
@@ -141,15 +161,19 @@ std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
     state->song = song;
     if (song) {
         state->patterns.reserve(project.patterns().size());
-        for (const Pattern& each : project.patterns()) {
+        for (std::size_t index = 0; index < project.patterns().size(); ++index) {
+            const Pattern& each = project.patterns()[index];
             vloom::SongPattern rows;
-            rows.stepCount = each.steps; // a longer clip repeats the pattern
+            rows.stepCount
+                = project.patternLength(index) / kTicksPerStep; // a longer clip repeats the pattern
             rows.steps.reserve(each.channels.size());
+            rows.notes.reserve(each.channels.size());
             for (const ChannelPattern& cp : each.channels) {
                 auto& row = rows.steps.emplace_back();
                 row.reserve(cp.steps.size());
                 for (const bool on : cp.steps)
                     row.push_back(on ? 1 : 0);
+                rows.notes.push_back(engineNotes(cp.notes));
             }
             state->patterns.push_back(std::move(rows));
         }
@@ -179,14 +203,16 @@ std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
                     // pitch kept) when the stretched copy is ready, resampled
                     // (its pitch following) otherwise.
                     const double speed = tempo_ / clip.sourceBpm;
-                    std::shared_ptr<const vloom::SampleBuffer> stretched;
-                    if (clip.fit == AudioClip::Fit::Stretch && stretch_
-                        && clip.channel < project.channels().size())
-                        stretched = stretch_(project.channels()[clip.channel].samplePath, 1.0 / speed);
-                    if (stretched != nullptr)
-                        out.sample = std::move(stretched);
-                    else
-                        out.rate = speed;
+                    if (std::isfinite(speed) && speed > 0.0) {
+                        std::shared_ptr<const vloom::SampleBuffer> stretched;
+                        if (clip.fit == AudioClip::Fit::Stretch && stretch_
+                            && clip.channel < project.channels().size())
+                            stretched = stretch_(project.channels()[clip.channel].samplePath, 1.0 / speed);
+                        if (stretched != nullptr)
+                            out.sample = std::move(stretched);
+                        else
+                            out.rate = speed;
+                    }
                 }
                 state->audioClips.push_back(out);
             }

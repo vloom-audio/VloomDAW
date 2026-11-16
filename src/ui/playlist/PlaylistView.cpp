@@ -1184,12 +1184,20 @@ void PlaylistView::paintEvent(QPaintEvent* event)
         p.restore();
     }
 
+    if (!dirtyRegion.intersected(grid).isEmpty()) {
+        p.save();
+        p.setClipRegion(dirtyRegion.intersected(grid));
+        timeline::paintPlayhead(p, grid, scale, playhead_);
+        p.restore();
+    }
+
     const QRect ruler(headerWidth_, 0, grid.width(), timeline::kRulerHeight);
     const QRegion rulerDirty = dirtyRegion.intersected(ruler);
     if (!rulerDirty.isEmpty()) {
         p.save();
         p.setClipRegion(rulerDirty);
         timeline::paintRuler(p, ruler, scale);
+        timeline::paintPlayheadHead(p, ruler, scale, playhead_);
         p.restore();
     }
 
@@ -1250,10 +1258,6 @@ void PlaylistView::paintEvent(QPaintEvent* event)
                 resizingHeaderWidth_ ? c.accent : c.border);
         }
     }
-
-    const QRect playZone(grid.left(), 0, grid.width(), viewport()->height());
-    if (!dirtyRegion.intersected(playZone).isEmpty())
-        timeline::paintPlayhead(p, playZone, scale, playhead_);
 }
 
 void PlaylistView::beginDrag(ClipRef clip, const QPoint& pos)

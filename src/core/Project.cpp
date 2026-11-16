@@ -425,6 +425,7 @@ Note Project::clamped(Note note)
     note.key = std::clamp(note.key, kLowestKey, kHighestKey);
     note.start = std::max(0, note.start);
     note.length = std::max(kMinNoteLength, note.length);
+    note.velocity = std::clamp(note.velocity, kMinVelocity, kMaxVelocity);
     return note;
 }
 
@@ -448,6 +449,18 @@ void Project::setNote(std::size_t pattern, std::size_t channel, std::size_t inde
     ChannelPattern* cp = channelPattern(pattern, channel);
     if (cp != nullptr && index < cp->notes.size())
         cp->notes[index] = clamped(note);
+}
+
+void Project::setNotes(std::size_t pattern, std::size_t channel, std::vector<Note> notes)
+{
+    ChannelPattern* cp = channelPattern(pattern, channel);
+    if (cp == nullptr)
+        return;
+    if (notes.size() > kMaxPatternNotes)
+        notes.resize(kMaxPatternNotes);
+    for (Note& note : notes)
+        note = clamped(note);
+    cp->notes = std::move(notes);
 }
 
 void Project::removeNote(std::size_t pattern, std::size_t channel, std::size_t index)
