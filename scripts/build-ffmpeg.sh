@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Builds a small static FFmpeg into PREFIX for VloomDAW's release builds on
 # macOS and Linux: only what audio/FileDecoder uses (local files; MP3, FLAC,
-# Ogg, WAV, AIFF and M4A; their audio decoders; libswresample), so the app
-# carries little FFmpeg code and needs no FFmpeg on the user's system.
+# Ogg, WAV, AIFF and M4A; their audio decoders; libswresample) and what
+# audio/FileEncoder can write with FFmpeg's own encoders (FLAC, M4A), so the
+# app carries little FFmpeg code and needs no FFmpeg on the user's system.
+# MP3 and Ogg Vorbis export need LAME and libvorbis, which this build does
+# not have: the export dialog greys those formats out.
 #
 #   scripts/build-ffmpeg.sh PREFIX            # this machine's architecture
 #   scripts/build-ffmpeg.sh PREFIX universal  # macOS: arm64 + x86_64 in one
@@ -37,12 +40,15 @@ SRC="$WORK/ffmpeg-$VERSION"
 DEMUXERS=mp3,flac,ogg,wav,aiff,mov
 DECODERS=mp3,mp3float,flac,vorbis,opus,aac,alac,pcm_u8,pcm_s8,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_f64le,pcm_f64be
 PARSERS=mpegaudio,flac,vorbis,opus,aac
+# Keep in step with targetOf() in src/audio/FileEncoder.cpp.
+ENCODERS=flac,aac
+MUXERS=flac,ipod
 COMMON=(
     --disable-everything --disable-autodetect --disable-programs --disable-doc
     --disable-network --disable-avdevice --disable-avfilter --disable-swscale
     --disable-debug --enable-static --disable-shared --enable-pic
     --enable-protocol=file --enable-demuxer="$DEMUXERS" --enable-decoder="$DECODERS"
-    --enable-parser="$PARSERS" --enable-swresample
+    --enable-parser="$PARSERS" --enable-encoder="$ENCODERS" --enable-muxer="$MUXERS" --enable-swresample
 )
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
