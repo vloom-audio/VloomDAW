@@ -21,6 +21,7 @@
 #include <QKeySequence>
 #include <QLayout>
 #include <QScreen>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QToolButton>
 
@@ -38,6 +39,8 @@ QIcon icon(const QString& name) { return Theme::icon(name); }
 /// "Play / pause (Space)" — tool tips always name the shortcut.
 QString tipWithShortcut(const QString& text, const QKeySequence& shortcut)
 {
+    if (shortcut.isEmpty())
+        return text;
     return QStringLiteral("%1 (%2)").arg(text, shortcut.toString(QKeySequence::NativeText));
 }
 
@@ -51,6 +54,26 @@ TransportBar::TransportBar(QWidget* parent)
     setFloatable(false);
     setIconSize(QSize(18, 18));
 
+    rewindAction_ = makeAction(
+        QStringLiteral("rewind"), tr("Go to Start"), tr("Return to start"), QKeySequence(Qt::Key_Home));
+    connect(rewindAction_, &QAction::triggered, this, &TransportBar::rewindRequested);
+
+    stepBackAction_ = makeAction(
+        QStringLiteral("step-back"), tr("Rewind Bar"), tr("Step back one bar"), QKeySequence(Qt::Key_Comma));
+    connect(stepBackAction_, &QAction::triggered, this, &TransportBar::stepBackwardRequested);
+
+    stepForwardAction_ = makeAction(QStringLiteral("step-forward"), tr("Forward Bar"),
+        tr("Step forward one bar"), QKeySequence(Qt::Key_Period));
+    connect(stepForwardAction_, &QAction::triggered, this, &TransportBar::stepForwardRequested);
+
+    goToEndAction_ = makeAction(
+        QStringLiteral("skip-end"), tr("Go to End"), tr("Jump to project end"), QKeySequence(Qt::Key_End));
+    connect(goToEndAction_, &QAction::triggered, this, &TransportBar::goToEndRequested);
+
+    stopAction_ = makeAction(QStringLiteral("stop"), tr("Stop"), tr("Stop and return to start"),
+        QKeySequence(Qt::SHIFT | Qt::Key_Space));
+    connect(stopAction_, &QAction::triggered, this, &TransportBar::stopRequested);
+
     playAction_
         = makeAction(QStringLiteral("play"), tr("Play"), tr("Play / pause"), QKeySequence(Qt::Key_Space));
     playAction_->setCheckable(true);
@@ -61,19 +84,16 @@ TransportBar::TransportBar(QWidget* parent)
         emit playToggled();
     });
 
-    stopAction_ = makeAction(QStringLiteral("stop"), tr("Stop"), tr("Stop and return to start"),
-        QKeySequence(Qt::SHIFT | Qt::Key_Space));
-    connect(stopAction_, &QAction::triggered, this, &TransportBar::stopRequested);
-
     recordAction_
         = makeAction(QStringLiteral("record"), tr("Record"), tr("Arm recording"), QKeySequence(Qt::Key_R));
     recordAction_->setCheckable(true);
     connect(recordAction_, &QAction::toggled, this, &TransportBar::recordArmedChanged);
 
-    // Menu-only: Stop already returns to start from the bar.
-    rewindAction_ = new QAction(tr("Go to Start"), this);
-    rewindAction_->setShortcut(QKeySequence(Qt::Key_Home));
-    connect(rewindAction_, &QAction::triggered, this, &TransportBar::rewindRequested);
+    loopAction_ = makeAction(
+        QStringLiteral("loop"), tr("Loop"), tr("Toggle cycle loop"), QKeySequence(Qt::Key_Slash));
+    loopAction_->setCheckable(true);
+    loopAction_->setChecked(true);
+    connect(loopAction_, &QAction::toggled, this, &TransportBar::loopToggled);
 
     tapAction_ = new QAction(tr("TAP"), this);
     tapAction_->setShortcut(QKeySequence(Qt::Key_T));
@@ -86,8 +106,7 @@ TransportBar::TransportBar(QWidget* parent)
     metronomeAction_->setChecked(true);
     connect(metronomeAction_, &QAction::toggled, this, &TransportBar::metronomeToggled);
 
-    // FL Studio's L: pattern mode plays the current pattern on a loop, song
-    // mode plays the playlist.
+    // Pattern mode plays the current pattern on a loop; song mode plays the playlist.
     songModeAction_ = new QAction(tr("PAT"), this);
     songModeAction_->setCheckable(true);
     songModeAction_->setShortcut(QKeySequence(Qt::Key_L));
@@ -97,20 +116,31 @@ TransportBar::TransportBar(QWidget* parent)
         emit songModeChanged(song);
     });
 
-    // Layout: [ PAT ▶ ■ ● ] [ Pattern 1 ▾ + − ]  ...  [ BPM | SIG ][ ROOT | SCALE ][ BAR · BEAT · TICK ]  ...
-    //         [ CPU | RAM ] VOL PITCH [ TAP 🎵 ] [ views ] [ » ]
-    //
-    // The groups are children of the bar but not tool bar items: relayout()
-    // places them itself (core/TransportLayout), so the displays stay centred
-    // and groups that do not fit go into a drop-down behind our own » button.
-    // Qt's own » expanded the bar into a second row, pushing the workspace
-    // down, and that row was sometimes left blank.
-    QFrame* playGroup
-        = makeToolGroup(this, {songModeAction_, playAction_, stopAction_, recordAction_}, iconSize());
-    const auto playButtons = playGroup->findChildren<QToolButton*>();
-    playButtons.at(0)->setObjectName(QStringLiteral("modeButton"));
-    playButtons.at(1)->setObjectName(QStringLiteral("playButton"));
-    playButtons.at(3)->setObjectName(QStringLiteral("recordButton"));
+    // Studio One-inspired transport deck:
+    // [ PAT |< << >> >| ■ ▶ ● Loop ]
+    QFrame* playGroup = makeToolGroup(this,
+        {songModeAction_, rewindAction_, stepBackAction_, stepForwardAction_, goToEndAction_, stopAction_,
+            playAction_, recordAction_, loopAction_},
+        iconSize());
+    for (QToolButton* btn : playGroup->findChildren<QToolButton*>()) {
+        const QAction* act = btn->defaultAction();
+        if (act == songModeAction_) {
+            btn->setObjectName(QStringLiteral("modeButton"));
+        } else if (act == stopAction_) {
+            btn->setObjectName(QStringLiteral("stopButton"));
+        } else if (act == playAction_) {
+            btn->setObjectName(QStringLiteral("playButton"));
+        } else if (act == recordAction_) {
+            btn->setObjectName(QStringLiteral("recordButton"));
+        } else if (act == loopAction_) {
+            btn->setObjectName(QStringLiteral("loopButton"));
+        } else if (act == stepBackAction_ || act == stepForwardAction_) {
+            btn->setAutoRepeat(true);
+            btn->setAutoRepeatDelay(260);
+            btn->setAutoRepeatInterval(85);
+        }
+    }
+
     patternSelector_ = new PatternSelector(iconSize(), this);
 
     tempoDisplay_ = new TempoDisplay(this);
@@ -120,8 +150,41 @@ TransportBar::TransportBar(QWidget* parent)
 
     performanceMeter_ = new PerformanceMeter(this);
 
+    // Master Output Audio Group: [ Mute | Vol- | VOL Knob | Vol+ | DIM ]
+    auto* volumeGroup = new QFrame(this);
+    volumeGroup->setObjectName(QStringLiteral("volumeControlGroup"));
+    auto* volLayout = new QHBoxLayout(volumeGroup);
+    volLayout->setContentsMargins(4, 2, 4, 2);
+    volLayout->setSpacing(3);
+
+    masterMuteBtn_ = new QToolButton(volumeGroup);
+    masterMuteBtn_->setObjectName(QStringLiteral("masterMuteButton"));
+    masterMuteBtn_->setCheckable(true);
+    masterMuteBtn_->setIcon(icon(QStringLiteral("speaker")));
+    masterMuteBtn_->setIconSize(QSize(16, 16));
+    masterMuteBtn_->setFixedSize(26, 26);
+    masterMuteBtn_->setFocusPolicy(Qt::NoFocus);
+    masterMuteBtn_->setToolTip(tr("Mute Master Output"));
+    connect(masterMuteBtn_, &QToolButton::toggled, this, [this](bool muted) {
+        masterMuted_ = muted;
+        masterMuteBtn_->setIcon(icon(muted ? QStringLiteral("speaker-mute") : QStringLiteral("speaker")));
+        emit masterMuteToggled(muted);
+    });
+
+    volDownBtn_ = new QToolButton(volumeGroup);
+    volDownBtn_->setObjectName(QStringLiteral("volumeStepButton"));
+    volDownBtn_->setIcon(icon(QStringLiteral("volume-down")));
+    volDownBtn_->setIconSize(QSize(15, 15));
+    volDownBtn_->setFixedSize(24, 26);
+    volDownBtn_->setFocusPolicy(Qt::NoFocus);
+    volDownBtn_->setAutoRepeat(true);
+    volDownBtn_->setAutoRepeatDelay(250);
+    volDownBtn_->setAutoRepeatInterval(75);
+    volDownBtn_->setToolTip(tr("Decrease Master Volume (-5%)"));
+    connect(volDownBtn_, &QToolButton::clicked, this, [this] { stepMasterVolume(-5.0); });
+
     // Volume 0..125 %, unity at 100 % (MainWindow maps it to a gain).
-    volumeKnob_ = new Knob(tr("VOL"), 0.0, 125.0, 100.0, this);
+    volumeKnob_ = new Knob(tr("VOL"), 0.0, 125.0, 100.0, volumeGroup);
     volumeKnob_->setDescription(tr("Master volume"));
     volumeKnob_->setValueText([](double percent) {
         const double gain = (percent / 100.0) * (percent / 100.0);
@@ -131,6 +194,36 @@ TransportBar::TransportBar(QWidget* parent)
         return QStringLiteral("%1% (%2)").arg(QString::number(percent, 'f', 0), db);
     });
     connect(volumeKnob_, &Knob::valueChanged, this, &TransportBar::masterVolumeChanged);
+
+    volUpBtn_ = new QToolButton(volumeGroup);
+    volUpBtn_->setObjectName(QStringLiteral("volumeStepButton"));
+    volUpBtn_->setIcon(icon(QStringLiteral("volume-up")));
+    volUpBtn_->setIconSize(QSize(15, 15));
+    volUpBtn_->setFixedSize(24, 26);
+    volUpBtn_->setFocusPolicy(Qt::NoFocus);
+    volUpBtn_->setAutoRepeat(true);
+    volUpBtn_->setAutoRepeatDelay(250);
+    volUpBtn_->setAutoRepeatInterval(75);
+    volUpBtn_->setToolTip(tr("Increase Master Volume (+5%)"));
+    connect(volUpBtn_, &QToolButton::clicked, this, [this] { stepMasterVolume(+5.0); });
+
+    masterDimBtn_ = new QToolButton(volumeGroup);
+    masterDimBtn_->setObjectName(QStringLiteral("masterDimButton"));
+    masterDimBtn_->setText(tr("DIM"));
+    masterDimBtn_->setCheckable(true);
+    masterDimBtn_->setFixedHeight(24);
+    masterDimBtn_->setFocusPolicy(Qt::NoFocus);
+    masterDimBtn_->setToolTip(tr("Dim Master Output (-15 dB monitor attenuation)"));
+    connect(masterDimBtn_, &QToolButton::toggled, this, [this](bool dimmed) {
+        masterDimmed_ = dimmed;
+        emit masterDimToggled(dimmed);
+    });
+
+    volLayout->addWidget(masterMuteBtn_, 0, Qt::AlignVCenter);
+    volLayout->addWidget(volDownBtn_, 0, Qt::AlignVCenter);
+    volLayout->addWidget(volumeKnob_, 0, Qt::AlignVCenter);
+    volLayout->addWidget(volUpBtn_, 0, Qt::AlignVCenter);
+    volLayout->addWidget(masterDimBtn_, 0, Qt::AlignVCenter);
 
     pitchKnob_ = new Knob(tr("PITCH"), -12.0, 12.0, 0.0, this);
     pitchKnob_->setDescription(tr("Master pitch"));
@@ -154,8 +247,8 @@ TransportBar::TransportBar(QWidget* parent)
         {keyDisplay_, Zone::Centre, 4, 2},
         {positionDisplay_, Zone::Centre, 4, 0},
         {performanceMeter_, Zone::Right, 0, 7},
-        {volumeKnob_, Zone::Right, kGroupSpacing, 3},
-        {pitchKnob_, Zone::Right, 2, 6},
+        {volumeGroup, Zone::Right, kGroupSpacing, 3},
+        {pitchKnob_, Zone::Right, 4, 6},
         {toolsGroup, Zone::Right, kGroupSpacing, 5},
         {viewButtons_, Zone::Right, kGroupSpacing, 4},
     };
@@ -173,15 +266,11 @@ TransportBar::TransportBar(QWidget* parent)
 
     overflow_ = new QFrame(this, Qt::Popup);
     overflow_->setObjectName(QStringLiteral("transportOverflow"));
-    // A press outside closes the drop-down and is not passed on, so pressing
-    // » while it is open closes it instead of reopening it.
     overflow_->setAttribute(Qt::WA_NoMouseReplay);
     auto* overflowLayout = new QHBoxLayout(overflow_);
     overflowLayout->setContentsMargins(10, 8, 10, 8);
     overflowLayout->setSpacing(kGroupSpacing);
 
-    // The one real tool bar item: gives the bar its height, ignores the
-    // mouse (so empty bar space still moves the window) and never overflows.
     int rowHeight = 0;
     for (const Group& group : groups_)
         rowHeight = std::max(rowHeight, group.widget->sizeHint().height());
@@ -191,16 +280,26 @@ TransportBar::TransportBar(QWidget* parent)
     rowHolder_->setFixedHeight(rowHeight);
     rowHolder_->setMinimumWidth(0);
     addWidget(rowHolder_);
-    rowHolder_->lower(); // the groups paint and take clicks above it
+    rowHolder_->lower();
 }
 
 QAction* TransportBar::makeAction(
     const QString& iconName, const QString& text, const QString& tip, const QKeySequence& shortcut)
 {
     auto* action = new QAction(icon(iconName), text, this);
-    action->setShortcut(shortcut);
+    if (!shortcut.isEmpty())
+        action->setShortcut(shortcut);
     action->setToolTip(tipWithShortcut(tip, shortcut));
     return action;
+}
+
+void TransportBar::stepMasterVolume(double deltaPercent)
+{
+    const double next = std::clamp(std::round(volumeKnob_->value() + deltaPercent), 0.0, 125.0);
+    if (std::abs(next - volumeKnob_->value()) < 1e-6)
+        return;
+    volumeKnob_->setValue(next);
+    emit masterVolumeChanged(next);
 }
 
 void TransportBar::setLeadingSpace(int pixels)
@@ -212,7 +311,7 @@ void TransportBar::setLeadingSpace(int pixels)
 void TransportBar::resizeEvent(QResizeEvent* event)
 {
     QToolBar::resizeEvent(event);
-    relayout(); // at once: the groups must not lag behind a window resize
+    relayout();
 }
 
 void TransportBar::showEvent(QShowEvent* event)
@@ -223,7 +322,6 @@ void TransportBar::showEvent(QShowEvent* event)
 
 bool TransportBar::event(QEvent* event)
 {
-    // A group's size hint changed (e.g. wider text): place everything again.
     if (event->type() == QEvent::LayoutRequest)
         scheduleRelayout();
     return QToolBar::event(event);
@@ -279,7 +377,6 @@ void TransportBar::relayout()
     }
 
     if (overflowChanged) {
-        // The drop-down lists its groups in bar order.
         auto* list = static_cast<QHBoxLayout*>(overflow_->layout());
         while (list->count() > 0)
             delete list->takeAt(0);
@@ -292,7 +389,7 @@ void TransportBar::relayout()
         if (!placement.showMoreButton)
             overflow_->hide();
         else if (overflow_->isVisible())
-            showOverflow(); // resize and re-anchor what is open
+            showOverflow();
     }
 }
 
@@ -307,7 +404,6 @@ void TransportBar::toggleOverflow()
 void TransportBar::showOverflow()
 {
     overflow_->adjustSize();
-    // Below », right-aligned with it, kept on the screen.
     QPoint at = moreButton_->mapToGlobal(QPoint(moreButton_->width(), moreButton_->height() + 4));
     at.rx() -= overflow_->width();
     if (const QScreen* screen = moreButton_->screen()) {
@@ -323,6 +419,8 @@ void TransportBar::showOverflow()
 double TransportBar::tempo() const { return tempoDisplay_->tempo(); }
 
 bool TransportBar::metronomeEnabled() const { return metronomeAction_->isChecked(); }
+
+bool TransportBar::loopEnabled() const { return loopAction_->isChecked(); }
 
 double TransportBar::masterVolume() const { return volumeKnob_->value(); }
 
@@ -343,6 +441,29 @@ void TransportBar::setTimeSignature(int beatsPerBar, int beatUnit)
 void TransportBar::setPositionShowsTime(bool time)
 {
     positionDisplay_->setMode(time ? PositionDisplay::Mode::Time : PositionDisplay::Mode::BarsBeats);
+}
+
+void TransportBar::setLoopEnabled(bool enabled)
+{
+    const QSignalBlocker blocker(loopAction_);
+    loopAction_->setChecked(enabled);
+}
+
+void TransportBar::setMasterVolume(double percent) { volumeKnob_->setValue(std::clamp(percent, 0.0, 125.0)); }
+
+void TransportBar::setMasterMuted(bool muted)
+{
+    masterMuted_ = muted;
+    const QSignalBlocker blocker(masterMuteBtn_);
+    masterMuteBtn_->setChecked(muted);
+    masterMuteBtn_->setIcon(icon(muted ? QStringLiteral("speaker-mute") : QStringLiteral("speaker")));
+}
+
+void TransportBar::setMasterDimmed(bool dimmed)
+{
+    masterDimmed_ = dimmed;
+    const QSignalBlocker blocker(masterDimBtn_);
+    masterDimBtn_->setChecked(dimmed);
 }
 
 void TransportBar::setPlaying(bool playing)

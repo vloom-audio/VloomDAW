@@ -115,6 +115,35 @@ QFrame#toolGroup QToolButton#modeButton {
 }
 QFrame#toolGroup QToolButton#modeButton:checked { background: @accentTint; color: @accent; }
 
+/* Master output / volume control group on the transport bar. */
+QFrame#volumeControlGroup {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+QFrame#volumeControlGroup QToolButton {
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    padding: 4px;
+    color: @textDim;
+    font-size: 7.5pt;
+    font-weight: 700;
+}
+QFrame#volumeControlGroup QToolButton:hover { background: @raised; color: @text; }
+QFrame#volumeControlGroup QToolButton:pressed { background: @border; }
+QFrame#volumeControlGroup QToolButton#masterMuteButton:checked {
+    background: @dangerTint;
+    color: @danger;
+}
+QFrame#volumeControlGroup QToolButton#masterDimButton {
+    padding: 3px 6px;
+}
+QFrame#volumeControlGroup QToolButton#masterDimButton:checked {
+    background: @accentTint;
+    color: @accent;
+}
+
 /* Pattern selector on the transport bar. */
 QFrame#toolGroup QToolButton#patternButton { padding: 5px 24px 5px 9px; text-align: left; }
 QFrame#toolGroup QToolButton#patternButton::menu-indicator {
@@ -214,12 +243,89 @@ QLabel#activityHint {
 }
 
 QWidget#browserPanel, QWidget#pluginsPanel { background: @sidebar; }
-QWidget#browserPanel QComboBox { background: @window; }
+QWidget#browserPanel QComboBox, QWidget#pluginsPanel QComboBox { background: @window; }
 QLabel#panelTitle { color: @textDim; font-size: 9pt; font-weight: 700; letter-spacing: 1px; }
 QLabel#panelAppName { color: @accent; font-size: 9pt; font-weight: 700; letter-spacing: 1px; }
 QLabel#panelHint { color: @textDim; }
 QWidget#browserPanel QToolButton, QWidget#pluginsPanel QToolButton { border: none; border-radius: 6px; padding: 5px; }
 QWidget#browserPanel QToolButton:hover, QWidget#pluginsPanel QToolButton:hover { background: @raised; }
+QWidget#pluginsPanel QToolButton#pluginThumbToggle:checked { background: @accentTint; }
+QWidget#pluginTabStrip {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 6px;
+}
+QPushButton#pluginTabButton {
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    color: @textDim;
+    font-size: 8.5pt;
+    font-weight: 700;
+    padding: 5px 8px;
+}
+QPushButton#pluginTabButton:hover { color: @text; background: @raised; }
+QPushButton#pluginTabButton:checked { background: @accentTint; color: @accent; }
+QLabel#pluginInlineThumb {
+    background: @base;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 2px;
+}
+QWidget#pluginInspectorCard {
+    background: @panel;
+    border: 1px solid @border;
+    border-radius: 6px;
+}
+QLabel#pluginInspectorBadge {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @accent;
+    font-size: 7.5pt;
+    font-weight: 700;
+}
+QLabel#pluginInspectorName { font-size: 9pt; font-weight: 700; color: @text; }
+QLabel#pluginInspectorThumb {
+    background: @base;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 2px;
+}
+/* Studio One-style header bar inside open plugin editor windows. */
+QWidget#pluginEditorHeader {
+    background: @panel;
+    border-bottom: 1px solid @border;
+}
+QToolButton#pluginPowerBtn {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 5px;
+    padding: 3px;
+}
+QToolButton#pluginPowerBtn:hover { border-color: @textDim; }
+QToolButton#pluginPowerBtn:checked {
+    background: @accentTint;
+    border-color: @accent;
+}
+QLabel#pluginHeaderLocation {
+    color: @textDim;
+    font-size: 8pt;
+    font-weight: 600;
+}
+QPushButton#pluginSlotMenuBtn, QPushButton#pluginCaptureBtn {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 5px;
+    color: @text;
+    font-size: 8.5pt;
+    font-weight: 600;
+    padding: 2px 8px;
+}
+QPushButton#pluginSlotMenuBtn:hover, QPushButton#pluginCaptureBtn:hover {
+    background: @raised;
+    border-color: @textDim;
+}
 QPushButton#accentButton { background: @accent; border-color: @accent; color: @window; font-weight: 600; }
 QPushButton#accentButton:hover { border-color: @text; }
 QPushButton#accentButton:disabled { background: @raised; border-color: @border; color: @textDim; }
@@ -286,11 +392,15 @@ QWidget#mixerPanel { background: @rail; }
 QScrollArea#mixerScroll, QWidget#mixerInserts { background: transparent; }
 QFrame#mixerStrip { background: @panel; border: 1px solid @border; border-radius: 6px; }
 QFrame#mixerStrip[master="true"] { border-color: @accent; }
+QFrame#mixerStrip[selected="true"] { background: @raised; }
+QFrame#mixerStrip[selected="true"] QLabel#stripName { color: @text; font-weight: 700; }
+QFrame#mixerStrip[selected="true"] QLabel#stripNumber { color: @text; }
 QFrame#mixerStrip[silenced="true"] { background: @sidebar; }
 QFrame#mixerStrip[silenced="true"] QLabel { color: @border; }
 QLabel#stripName { font-size: 8pt; font-weight: 600; }
 QLabel#stripDb, QLabel#stripNumber { color: @textDim; font-size: 8pt; }
 QLabel#stripNumber { font-weight: 700; }
+QLabel#stripRoute { color: @textDim; font-size: 7pt; }
 QToolButton#muteButton, QToolButton#soloButton {
     background: @window;
     border: 1px solid @border;
@@ -325,6 +435,39 @@ QToolButton#stripEffects[active="true"] { background: @accentTint; color: @accen
 QFrame#mixerStrip[silenced="true"] QToolButton#stripEffects[active="true"] { color: @textDim; }
 QToolButton#panelClose { border: none; border-radius: 6px; padding: 4px; }
 QToolButton#panelClose:hover { background: @raised; }
+QFrame#mixerFooter {
+    background: @panel;
+    border: 1px solid @border;
+    border-radius: 6px;
+}
+QPushButton#mixerFooterPill {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @textDim;
+    font-size: 8pt;
+    font-weight: 600;
+    padding: 2px 8px;
+}
+QPushButton#mixerFooterPill:hover { background: @raised; color: @text; border-color: @textDim; }
+QPushButton#mixerFooterPill:pressed { background: @border; }
+QPushButton#mixerFooterPill:checked {
+    background: @accentTint;
+    color: @accent;
+    border-color: @accent;
+}
+QFrame#mixerFooterSep {
+    background: @border;
+    border: none;
+    max-width: 1px;
+    margin: 2px 2px;
+}
+QLabel#mixerSelectedReadout {
+    color: @textDim;
+    font-size: 8pt;
+    font-weight: 600;
+    padding: 0 2px;
+}
 
 /* Settings window: categories with icons on the left, pages of cards. */
 QWidget#settingsDialog { background: @window; }
@@ -345,6 +488,48 @@ QLabel#statusPill { border-radius: 10px; padding: 4px 12px; font-weight: 600; }
 QLabel#statusPill[running="true"] { background: @playingTint; color: @playing; }
 QLabel#statusPill[running="false"] { background: @dangerTint; color: @text; }
 QLabel#themeWarning { background: @dangerTint; color: @text; border-radius: 6px; padding: 6px 10px; }
+
+/* Plugin Manager: filter sidebar + collapsible folders card + plugin table. */
+QDialog#pluginManager { background: @window; }
+QFrame#pluginManagerSidebar { background: @sidebar; border-right: 1px solid @border; }
+QFrame#pluginManagerFoldersPanel { background: @panel; border: 1px solid @border; border-radius: 8px; }
+QListWidget#pluginFilterList {
+    background: @base;
+    border: 1px solid @border;
+    border-radius: 5px;
+    padding: 2px;
+    outline: none;
+}
+QListWidget#pluginFilterList::item { padding: 2px 4px; color: @text; }
+QListWidget#pluginFilterList::item:hover { background: @raised; border-radius: 3px; }
+QToolButton#filterLinkBtn {
+    background: transparent;
+    border: none;
+    color: @accent;
+    font-size: 8pt;
+    font-weight: 600;
+    padding: 0 3px;
+}
+QToolButton#filterLinkBtn:hover { color: @text; background: @raised; border-radius: 3px; }
+QTableWidget#pluginTable {
+    background: @base;
+    alternate-background-color: @panel;
+    border: 1px solid @border;
+    border-radius: 6px;
+    outline: none;
+}
+QTableWidget#pluginTable::item { padding: 2px 6px; }
+QTableWidget#pluginTable::item:selected { background: @accentTint; color: @text; }
+QTableWidget#pluginTable QHeaderView::section {
+    background: @panel;
+    color: @textDim;
+    border: none;
+    border-bottom: 1px solid @border;
+    border-right: 1px solid @border;
+    font-size: 8pt;
+    font-weight: 700;
+    padding: 5px 6px;
+}
 
 QWidget#emptyState QLabel#emptyTitle { font-size: 22pt; font-weight: 600; }
 QWidget#emptyState QLabel#emptyHint { color: @textDim; }

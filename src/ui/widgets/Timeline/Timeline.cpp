@@ -7,6 +7,7 @@
 
 #include <QFontMetrics>
 #include <QPainter>
+#include <QPolygonF>
 
 #include <cmath>
 #include <limits>
@@ -111,9 +112,23 @@ void paintPlayhead(QPainter& painter, const QRect& rect, const Scale& scale, dou
         return;
     // Anti-aliased at its exact position, so it glides instead of stepping
     // a whole pixel at a time.
+    const Theme::Colors& c = Theme::colors();
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillRect(QRectF(x - 1.0, rect.top(), 2.0, rect.height()), Theme::colors().playing);
+    const double lineTop = rect.top() < kRulerHeight ? std::min<double>(rect.bottom() + 1, kRulerHeight - 2.0)
+                                                     : static_cast<double>(rect.top());
+    if (rect.bottom() + 1 > lineTop)
+        painter.fillRect(QRectF(x - 1.0, lineTop, 2.0, rect.bottom() + 1.0 - lineTop), c.playing);
+
+    if (rect.top() < kRulerHeight) {
+        // DAW ruler marker cap (pentagon head pointing down onto the playhead line).
+        QPolygonF head;
+        head << QPointF(x - 5.5, 2.0) << QPointF(x + 5.5, 2.0) << QPointF(x + 5.5, 12.0)
+             << QPointF(x, kRulerHeight - 1.0) << QPointF(x - 5.5, 12.0);
+        painter.setPen(QPen(c.playing.darker(160), 1.0));
+        painter.setBrush(c.playing);
+        painter.drawPolygon(head);
+    }
     painter.restore();
 }
 
@@ -122,7 +137,7 @@ QRect playheadRect(const QRect& rect, const Scale& scale, double tick)
     const double x = playheadX(rect, scale, tick);
     if (std::isnan(x))
         return {};
-    return {static_cast<int>(std::floor(x)) - 2, rect.top(), 5, rect.height()};
+    return {static_cast<int>(std::floor(x)) - 8, rect.top(), 17, rect.height()};
 }
 
 bool playheadMoved(const QRect& rect, const Scale& scale, double from, double to)

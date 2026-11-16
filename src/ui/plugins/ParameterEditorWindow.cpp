@@ -53,16 +53,29 @@ double fromPosition(const vloom::ParameterInfo& parameter, double position)
 
 } // namespace
 
-ParameterEditorWindow::ParameterEditorWindow(
-    std::shared_ptr<vloom::PluginInstance> instance, const QString& title, QWidget* parent)
+ParameterEditorWindow::ParameterEditorWindow(std::shared_ptr<vloom::PluginInstance> instance,
+    const QString& title, QWidget* parent, PluginEditorContext context)
     : QWidget(parent, Qt::Window | Qt::Tool)
     , instance_(std::move(instance))
 {
     setObjectName(QStringLiteral("parameterEditor"));
     setAttribute(Qt::WA_DeleteOnClose);
     setWindowTitle(title);
+    if (context.slotTitle.isEmpty())
+        context.slotTitle = title;
 
-    auto* row = new QHBoxLayout(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+
+    header_ = new PluginEditorHeader(std::move(context), nullptr, this, this);
+    outer->addWidget(header_);
+
+    auto* body = new QWidget(this);
+    header_->setCaptureTarget(body);
+    outer->addWidget(body);
+
+    auto* row = new QHBoxLayout(body);
     row->setContentsMargins(14, 12, 14, 12);
     row->setSpacing(16);
 
@@ -153,7 +166,20 @@ ParameterEditorWindow::ParameterEditorWindow(
     for (int i = 0; i < row->count(); ++i)
         if (auto* each = qobject_cast<QVBoxLayout*>(row->itemAt(i)->layout()))
             each->addStretch(1); // short columns stay at the top
-    setFixedSize(sizeHint());
+    const QSize hint = sizeHint();
+    setFixedSize(std::max(hint.width(), 320), hint.height());
+}
+
+void ParameterEditorWindow::setEditorContext(PluginEditorContext context)
+{
+    if (header_ != nullptr)
+        header_->setContext(std::move(context));
+}
+
+void ParameterEditorWindow::setBypassedState(bool bypassed)
+{
+    if (header_ != nullptr)
+        header_->setBypassedState(bypassed);
 }
 
 } // namespace vloomdaw

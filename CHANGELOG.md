@@ -6,12 +6,125 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- Refused UNC and network-share paths (`\\server\share\...`, `//server/share/...`) across `.vloom` plugin slots, relative sample resolution, project load/save/summary, CLI startup paths, recent projects, launcher file dialogs, and plugin scan folders/manual files (`ProjectFile`, `FilePaths`, `MainWindow`, `LauncherDialog`, `RecentProjects`, `PluginStore`, `PluginManagerDialog`, `main.cpp`) to prevent silent Windows SMB/NTLM credential leakage.
+- Hardened plugin thumbnail cache IDs and file lookups (`PluginMetadata::pluginThumbnailId`, `isValidPluginThumbnailId`, `PluginThumbnails`) against ill-formed non-UTF-8/unpaired-surrogate paths, `Builtin` vs. `Vst3` digest collisions, and directory traversal outside `thumbnails/`.
+
 ### Fixed
+- Guarded asynchronous background sample-load callbacks (`MainWindow::projectGeneration_`) against project reset/open/undo/redo races and pruned unloaded plugin handles from `unpublishedInstruments_` during undo cleanup.
+- Fixed `bindAudioToTrack` channel reuse to inspect per-channel step/note usage across all patterns (`isChannelUsedInAnyPattern`) rather than Pattern 1 globally, and hardened clipboard tick arithmetic, `UndoHistory` timestamp coalescing, and non-finite `±infinity` parameter/tempo guards (`TrackRouting`, `UndoHistory`, `Project`, `MixerModel`, `ChannelRackAudio`, `PlaylistView`, `PianoRollView`).
+- Timeline track & Mixer strip synchronization: unified 1:1 state and routing
+  across Playlist tracks and Mixer inserts (`bindAudioToTrack`, `pairTrackWithInsert`,
+  and persisted `PlaylistTrack::insert`), eliminating orphaned mixer strips when
+  dropping audio stems onto pre-created or named tracks and keeping Mute (`M`),
+  Solo (`S`), Rename, Volume, Pan, Color, Selection, Add, Delete, and Move in
+  lockstep between the Timeline and Mixer.
+- Keyboard shortcuts & `Edit` menu: replaced `notYetIn` stubs in `MainWindow`
+  with real Undo/Redo (`Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`) and active editor
+  selection/clipboard commands (`Delete` / `Backspace`, `Ctrl+A`, `Ctrl+D`,
+  `Ctrl+X`, `Ctrl+C`, `Ctrl+V`, `Escape`) across `PlaylistView`, `PianoRollView`,
+  and detached `FloatingPanel` windows while delegating text editing keys cleanly
+  when a `QLineEdit` has focus.
+- Startup launcher window: `Start - VloomDAW` now opens standalone before
+  constructing or showing `MainWindow` (or any detached editor/mixer panels),
+  loading the main workspace only after choosing `Empty project` or opening a
+  `.vloom` project.
+- Mixer compact vertical layout: shrinking the mixer panel dynamically compacts
+  each strip's FX slot rack from 9 visible slots down to 4 wheel-scrollable
+  slots (with a right-edge mini scrollbar), keeping faders tall and responsive
+  without squishing the slider or clipping routing labels.
+- New project mixer state: new/empty projects now start with only `Master` in
+  the mixer (`0` pre-populated empty inserts); dedicated inserts are created
+  automatically as stems, samples, instruments, or channels are added.
+- Playlist rendering & drag performance: fixed audio clip waveform painting so it
+  clips strictly to the dirty region instead of redrawing the entire viewport width
+  on every playhead tick or mouse drag, added multi-resolution waveform peak mipmaps
+  plus a 256 px `QPixmap` waveform tile cache, split header vs. grid invalidation,
+  and coalesced live `ChannelRackAudio` rebuilds during high-rate clip drags.
+- Playlist: dropping multiple audio files at once now places each file on its
+  own consecutive track (creating new tracks as needed, and starting on Track 1
+  when dropped into an empty untouched playlist) instead of keeping only one or
+  stacking on a single track. Multiple files can also be selected and dragged
+  together from the sample browser and onto the channel rack.
 - Windows: a plugin file that cannot be loaded (not a plugin, or missing its
   own DLLs) no longer shows a system "Bad Image" message box that stops the
   app (vloom-engine #27). The same box hung the Windows CI job.
 
 ### Added
+- Studio One-style Plugins Side Browser & Plug-in Thumbnails (`PluginsPanel`,
+  `PluginThumbnails`, `PluginEditorWindow`, `ParameterEditorWindow`):
+  - Segmented **`Instruments`** and **`FX`** top tabs with live counts, sort/group
+    modes (`By type / category`, `By vendor`, `By format`, `Flat (A-Z)`), inline
+    thumbnail preview rows, a `Show Thumbnails` toggle, and a bottom plugin
+    inspector card (`INST`/`FX` + format badge, name, vendor, category, preview).
+  - Studio One-style plugin editor header bar (`#pluginEditorHeader`) with active
+    power/bypass toggle, slot dropdown menu (`Favorite`, `Replace...`, `Disable`,
+    `Remove`, `Show in Console`, **`Update Plug-in Thumbnail`**, and
+    `Remove Plug-in Thumbnail`), plus a 1-click **`Update Thumbnail`** capture
+    button that snapshots native VST3/CLAP editor views cleanly.
+- Expanded Transport & Master Monitor Controls (`TransportBar`):
+  - Full transport deck (`PAT/SONG`, `Go to Start`, `Step Back 1 Bar`,
+    `Step Forward 1 Bar`, `Go to End`, `Stop`, `Play/Pause`, `Record`, and
+    `Loop` cycle toggle).
+  - Master volume & monitor group (`Mute` speaker toggle, `Vol -` / `Vol +`
+    step buttons, `VOL` knob, and `-15 dB` `DIM` monitor attenuator).
+- Mixer Console Bottom Toolbar (`#mixerFooter`) & Playlist Quick Toolbar:
+  - Channel filter bank (`All`, `Audio`, `Instruments`, `With FX`), strip view
+    toggles (`Wide Strips`, `FX Rack`), and console batch actions (`+ Add FX`,
+    non-destructive global `Bypass All FX`, `Clear Solo`, `Clear Mute`, and
+    `Reset Peaks`).
+  - Playlist header quick buttons (`Snap` on/off toggle, `Q` quantize,
+    `Follow Playhead`, and `-` / `+` horizontal zoom).
+- Timeline Ruler Mouse-Wheel Zoom (`PlaylistView` & `PianoRollView`):
+  - Pointing at the timeline ruler and scrolling the mouse wheel zooms
+    horizontally in/out anchored at the cursor position without holding `Ctrl`
+    (plus `Shift+Wheel` horizontal pan), alongside disjoint `event->region()`
+    repainting during playback so simultaneous meter + playhead updates stay fast.
+- Bounded gesture-coalescing Undo/Redo engine (`UndoHistory`): 100-step undo/redo
+  across timeline clips, audio stems, piano roll notes, step sequencer pads,
+  patterns, tracks, mixer faders/pans/mute/solo/colors, and instrument/effect
+  plugins (preserving live plugin instances and parameter state across unload/reload).
+- Detailed Studio Plugin Manager (`PluginManagerDialog`):
+  - Two-pane layout with a filter sidebar (`Search`, `Favorites Only`,
+    `Failed Only`, `Disabled Only`, and `Format`, `Category`, `Sub-Type`, and
+    `Vendor` checklists with `All` / `Clear`, `Uncheck All Vendors`, and
+    `Reset Filters`) using clean studio typography with no emojis or external icons.
+  - Sortable plugin table (`On` enable checkbox, `Fav` toggle, `Plugin Name`,
+    `Format`, `Category`, `Sub-Type`, `Vendor`, `Version`, `Status`, `Path`),
+    multi-row context menu (`Mark/Remove Favorite`, `Enable/Disable`,
+    `Set Category`, `Rescan Selected`, `Open Containing Folder`, `Remove from List`),
+    `Retry Failed`, `Add Plugin File...`, and collapsible `Scan Folders` card.
+  - Favorites group and enabled-only filtering integrated into `PluginsPanel`
+    and `PluginPickerPopup`, persisted in `PluginStore`.
+- Fender Studio-style active track & mixer strip highlighting: clicking a
+  playlist track header/clip or a mixer strip visually marks the active
+  channel/track with an elevated highlight frame and synchronizes selection
+  between the Playlist, Mixer, and Channel Rack (plus `Up`/`Down` arrow
+  navigation in the playlist).
+- Studio One-style playlist track headers:
+  - Horizontally resizable track header column (`160..420 px`, double-click the
+    divider to reset, saved across sessions).
+  - Track index badge, `[M]` / `[S]` toggle pills, waveform/MIDI type icon, and
+    horizontal **Volume** & **Pan** bars linked 1:1 with each track's mixer insert
+    (with `Shift` fine drag, double-click reset and dB/pan readouts).
+  - Vertically stretching a track header taller (or double-clicking its bottom
+    edge) progressively reveals clickable **Channel (`CH`)** and **Mixer Routing
+    (`OUT`)** inspector menus.
+  - Live per-track stereo **VU meters (`L | R`)** with peak hold on the right
+    edge of each track header.
+- Playlist instant stem drop: dropping multiple audio files immediately creates
+  all tracks, channels, mixer inserts and named audio clips on the UI thread,
+  while audio decoding and waveform peak extraction run in the background and
+  fill in each clip's length and waveform as it finishes.
+- Timeline playhead marker: the green playhead line in the playlist and piano
+  roll now carries a marker head cap in the top bar-number ruler.
+- Track & mixer colour picker: tracks and channels receive distinct spectrum
+  colours automatically, and clicking a playlist track's left colour strip (or
+  a mixer strip's top colour bar, or "Color" in right-click menus) opens a
+  16-column swatch grid popup with custom colour and reset options.
+- Studio One-style mixer auto-routing: channels automatically link to dedicated
+  mixer inserts (growing past 16 inserts as needed) that sum into Master
+  (`Channel -> Insert N -> Master`), with a routing readout on each strip.
 - Built-in effects: the effects that come with VloomDAW (EQ and Gain, from
   vloom-dsp) are listed with the scanned plugins, in the Plugins panel and
   the mixer's plugin picker. They have no editor of their own: a window with

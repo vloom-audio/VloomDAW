@@ -51,9 +51,10 @@ signals:
     void muteToggled(std::size_t channel);
     void channelSelected(std::size_t channel);
     void channelOpened(std::size_t channel);
-    /// A WAV file was dropped on `channel`; channel == the channel count
-    /// means below the last one (a new channel). `path` is a local path.
-    void sampleDropped(std::size_t channel, const QString& path);
+    /// Audio files were dropped on `channel`; channel == the channel count
+    /// means below the last one (a new channel), and multiple files add a
+    /// channel each.
+    void sampleDropped(std::size_t channel, const QStringList& paths);
     /// Plugin `plugin` (an index into the plugin store) was dragged from the
     /// Plugins panel onto `channel`; channel == the channel count means a
     /// new channel.

@@ -226,8 +226,11 @@ LauncherDialog::LauncherDialog(const AudioStatus& audio, double tempo, QWidget* 
         QFrame#launcherStatus { background: %4; border-top: 1px solid %2; }
         QToolButton#launcherFilter { padding: 4px 12px; border: 1px solid transparent; border-radius: 6px; }
         QToolButton#launcherFilter:checked { background: %5; border-color: %2; }
+        QDoubleSpinBox { background: %6; border: 1px solid %2; border-radius: 6px; padding: 2px 8px; }
+        QDoubleSpinBox:focus { border-color: %7; }
     )")
-            .arg(c.sidebar.name(), c.border.name(), c.textDim.name(), c.panel.name(), c.raised.name()));
+            .arg(c.sidebar.name(), c.border.name(), c.textDim.name(), c.panel.name(), c.raised.name(),
+                c.base.name(), c.accent.name()));
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -418,6 +421,8 @@ void LauncherDialog::rebuildCards()
 
     int shown = 0;
     for (const QString& path : paths) {
+        if (!isLocalPath(path))
+            continue;
         const QFileInfo info(path);
         const bool pinned = recent::isPinned(path);
         if (filter == Filter::Pinned && !pinned)

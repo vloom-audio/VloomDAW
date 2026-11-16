@@ -2,15 +2,20 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "core/MixerModel.hpp"
 #include "core/Project.hpp"
 
 #include <QAbstractScrollArea>
+#include <QColor>
+#include <QPixmap>
+#include <QStringList>
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -24,51 +29,44 @@ struct PlaylistClipEdit {
     std::vector<std::pair<std::size_t, AudioClip>> audioClips{};
 };
 
+/// Multi-resolution peak pyramid level for fast waveform rendering at any zoom.
+struct PeakMip {
+    double stepSeconds = 0.0;
+    std::vector<float> peaks{};
+};
+
 /// What the playlist needs to draw an audio clip.
 struct ClipAudio {
     double seconds = 0.0; ///< length
     double peakSeconds = 0.01; ///< time each entry of `peaks` covers
     std::vector<float> peaks; ///< largest absolute sample per peakSeconds, both channels
+    std::vector<PeakMip> mips; ///< coarser mip levels (8x, 64x, 512x) built on the loader thread
+    bool loading = false; ///< decoding in the background: show placeholder until ready
 };
 
-/// The playlist: track names on the left, a bar ruler on top and pattern
-/// clips arranged on the tracks. Reads the Project; edits are emitted as
-/// signals for MainWindow to apply, which then calls refresh().
-///
-/// Left-click an empty spot to place the current pattern there (snapped to
-/// the bar) and keep dragging to position it; drag a clip to move it (Shift:
-/// snap to beats); right-click a clip to delete it; double-click a clip to
-/// make its pattern current. Ctrl+wheel zooms horizontally. Drop a WAV file
-/// (from the browser or the desktop) on a track for an audio clip; audio
-/// clips move and delete like pattern clips. Dropped below the last track,
-/// it asks for a new track. Double-click a track name to rename it inline;
-/// right-click it to rename, move, delete or group the track. The mute and
-/// solo buttons on a track's header mute and solo it (and its sub-tracks);
-/// clips on a track that does not play are drawn faded. Drag the bottom edge
-/// of a track's header to make it taller or shorter (double-click: back to
-/// the default). A track can be a sub-track of the one above it ("Make
-/// Sub-track"); the arrow on a track with sub-tracks hides or shows them.
-///
-/// Tools (setTool()) change what the left button does in the grid: Draw
-/// (the above), Paint (drag along a track to lay the current pattern again
-/// and again), Delete (click or drag over clips), Mute (click or drag over
-/// clips to mute or unmute them), Slice (as in FL Studio: a line follows the
-/// pointer; click, or drag up or down across tracks, to cut every clip the
-/// line crosses at the nearest beat; Shift: step), Select (drag a box; Ctrl adds; drag a
-/// selected clip to move them all), Zoom (drag a range to fill the view,
-/// click to zoom in, right-click out) and Playback (hold to play from there,
-/// drag to scrub). Delete removes the selection, Ctrl+A selects every clip,
-/// Escape clears it. With Draw, Paint and Select, drag a clip's left or
-/// right edge to trim or stretch it (beat grid; Shift: step): a pattern clip
-/// repeats its pattern when longer, an audio clip reaches no further than its
-/// sample, at either end.
+/// The playlist: resizable Studio One-style track headers on the left (with
+/// track number, mute/solo, volume & pan bars, progressive channel/insert
+/// menus when stretched vertically, and live stereo VU meters), a bar ruler on
+/// top, and pattern/audio clips arranged on the tracks.
 class PlaylistView : public QAbstractScrollArea {
     Q_OBJECT
 
 public:
+    static constexpr int kDefaultHeaderWidth = 236;
+    static constexpr int kMinHeaderWidth = 160;
+    static constexpr int kMaxHeaderWidth = 420;
+
     explicit PlaylistView(QWidget* parent = nullptr);
 
     void setProject(const Project* project);
+    void setMixer(const MixerModel* mixer);
+
+    [[nodiscard]] int headerWidth() const { return headerWidth_; }
+    void setHeaderWidth(int width);
+
+    [[nodiscard]] int selectedTrack() const { return selectedTrack_; }
+    void setSelectedTrack(int track);
+
     /// What Draw and Paint place: a pattern clip of pattern `index`, or an
     /// audio clip of channel `index`'s sample.
     struct ClipSource {
@@ -85,41 +83,65 @@ public:
     /// Looks up an audio clip's length and waveform by path (null: unknown,
     /// drawn one bar long).
     void setAudioInfo(std::function<const ClipAudio*(const std::string& path)> info);
+    /// Clears cached waveform pixmap tiles (e.g. when a project resets).
+    void clearWaveCache();
     /// Tempo in BPM: an audio clip's length in bars depends on it.
     void setTempo(double bpm);
     void refresh();
+    /// Repaints only the clip grid and ruler, skipping track headers during clip drags.
+    void updateGrid();
+    /// Repaints only the track headers column (e.g. when mixer faders/FX change).
+    void updateHeaders();
+    /// Advances per-track stereo VU meters using `insertPeaks` (index 0 = Master,
+    /// 1..N = Insert) and repaints only the narrow meter strip when levels move.
+    void updateTrackMeters(const std::vector<std::pair<float, float>>& insertPeaks, double dt);
 
     enum class Tool { Draw, Paint, Delete, Mute, Slice, Select, Zoom, Playback };
 
-    /// What placing, moving, trimming and cutting clips snap to. Auto: the
-    /// finest grid line far enough apart at the zoom to aim at (a 1/32 note
-    /// when zoomed far in, up to a bar when zoomed out). Shift snaps to steps
-    /// whatever this is, and Alt does not snap at all. Step: a 16th note; HalfStep: a 32nd note.
+    /// What placing, moving, trimming and cutting clips snap to.
     enum class Snap { Auto, Bar, Beat, Step, HalfStep };
     void setSnap(Snap snap)
     {
         snap_ = snap;
-        viewport()->update(); // the grid shows what clips snap to
+        updateGrid(); // the grid shows what clips snap to
     }
     [[nodiscard]] Snap snap() const { return snap_; }
+    void setSnapEnabled(bool enabled);
+    [[nodiscard]] bool snapEnabled() const { return snapEnabled_; }
+    void setFollowPlayhead(bool follow) { followPlayhead_ = follow; }
+    [[nodiscard]] bool followPlayhead() const { return followPlayhead_; }
+    void zoomBy(double factor);
+    void quantizeSelectedClips();
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }
+
+    // ---- selection & clipboard actions (Edit menu / keyboard shortcuts)
+    [[nodiscard]] bool hasSelectedClips();
+    [[nodiscard]] bool hasClipClipboard() const
+    {
+        return !clipboardClips_.empty() || !clipboardAudio_.empty();
+    }
+    void selectAllClips();
+    void deleteSelectedClips();
+    void copySelectedClips();
+    void cutSelectedClips();
+    void pasteClips();
+    void duplicateSelectedClips();
 
 signals:
     void clipAdded(vloomdaw::Clip clip);
     void clipChanged(std::size_t index, vloomdaw::Clip clip);
     void clipRemoved(std::size_t index);
+    void clipsAddedBatch(
+        const std::vector<vloomdaw::Clip>& clips, const std::vector<vloomdaw::AudioClip>& audioClips);
     void patternPicked(std::size_t pattern);
-    /// A clip was clicked with Draw, Paint or Select: what it is (its
-    /// pattern or its channel's sample) becomes the source, as in FL Studio.
+    /// A clip was clicked with Draw, Paint or Select: what it is becomes the source.
     void sourcePicked(vloomdaw::PlaylistView::ClipSource source);
-    /// A WAV file was dropped: an audio clip at `track` (== the track count:
-    /// below the last one) and `start` ticks.
-    void audioDropped(const QString& path, int track, int start);
+    /// Audio files were dropped: one audio clip per file starting at `track` and `start` ticks.
+    void audioDropped(const QStringList& paths, int track, int start);
     void audioClipChanged(std::size_t index, vloomdaw::AudioClip clip);
     void audioClipRemoved(std::size_t index);
-    /// The user right-clicked an audio clip's title strip: show its menu at
-    /// `globalPos` (fit to tempo).
+    /// The user right-clicked an audio clip's title strip: show its menu at `globalPos`.
     void audioClipMenuRequested(std::size_t index, QPoint globalPos);
     /// An audio clip was made (the second part of a cut one).
     void audioClipAdded(vloomdaw::AudioClip clip);
@@ -144,6 +166,13 @@ signals:
     void trackOutdentRequested(std::size_t track);
     void trackMuteToggled(std::size_t track, bool muted);
     void trackSoloToggled(std::size_t track, bool solo);
+    /// Header fader (`0..1`) or pan (`-1..+1`) adjusted on `track`.
+    void trackVolumeChanged(std::size_t track, double volume);
+    void trackPanChanged(std::size_t track, double pan);
+    /// Expandable track inspector menu rows clicked on `track`.
+    void trackChannelMenuRequested(std::size_t track, QPoint globalPos);
+    void trackRoutingMenuRequested(std::size_t track, QPoint globalPos);
+    void trackSelected(std::size_t track);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -164,6 +193,40 @@ protected:
     bool viewportEvent(QEvent* event) override;
 
 private:
+    enum class HeaderSlider { None, Volume, Pan };
+
+    struct TrackMeter {
+        double level[2] = {0.0, 0.0};
+        double hold[2] = {0.0, 0.0};
+        double holdAge[2] = {0.0, 0.0};
+        bool clipped[2] = {false, false};
+    };
+
+    struct WaveTileKey {
+        const ClipAudio* info = nullptr;
+        std::size_t peakCount = 0;
+        int tileIndex = 0;
+        int heightPx = 0;
+        long long nsPerPixel = 0;
+        QRgb rgba = 0;
+        int dprPct = 100;
+        friend bool operator==(const WaveTileKey&, const WaveTileKey&) = default;
+    };
+    struct WaveTileKeyHash {
+        std::size_t operator()(const WaveTileKey& k) const noexcept
+        {
+            std::size_t h = std::hash<const void*>{}(k.info);
+            auto mix = [&h](std::size_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
+            mix(k.peakCount);
+            mix(static_cast<std::size_t>(k.tileIndex));
+            mix(static_cast<std::size_t>(k.heightPx));
+            mix(static_cast<std::size_t>(k.nsPerPixel));
+            mix(static_cast<std::size_t>(k.rgba));
+            mix(static_cast<std::size_t>(k.dprPct));
+            return h;
+        }
+    };
+
     [[nodiscard]] double pixelsPerTick() const;
     [[nodiscard]] int lengthTicks() const;
     [[nodiscard]] QRect gridRect() const;
@@ -173,21 +236,39 @@ private:
     [[nodiscard]] double tickAt(int x) const;
     [[nodiscard]] int trackAt(int y) const;
     [[nodiscard]] int trackCount() const;
-    /// The track whose name is at `pos`, or -1.
+    [[nodiscard]] bool onHeaderDivider(const QPoint& pos) const;
+    /// The track whose header is at `pos`, or -1.
     [[nodiscard]] int headerTrackAt(const QPoint& pos) const;
-    [[nodiscard]] QRect trackNameRect(int track) const;
+    [[nodiscard]] QRect trackColorRect(int track) const;
+    [[nodiscard]] int headerTopRowY(int track) const;
+    [[nodiscard]] QRect trackNumberRect(int track) const;
     [[nodiscard]] QRect muteButtonRect(int track) const;
     [[nodiscard]] QRect soloButtonRect(int track) const;
-    /// Toggles mute or solo when `pos` is on one of `track`'s buttons;
-    /// whether it was.
-    bool toggleTrackButton(int track, const QPoint& pos);
-    void paintTrackButton(
-        QPainter& p, const QRect& r, const QString& icon, bool on, const QColor& onColor) const;
+    [[nodiscard]] QRect trackBadgeRect(int track) const;
+    [[nodiscard]] QRect trackNameRect(int track) const;
+    [[nodiscard]] QRect volumeBarRect(int track) const;
+    [[nodiscard]] QRect panBarRect(int track) const;
+    /// `row`: 0 = Channel/Input, 1 = Mixer Insert Output. Empty when hidden.
+    [[nodiscard]] QRect inspectorRowRect(int track, int row) const;
+    [[nodiscard]] QRect trackMeterRect(int track) const;
+    void selectTrackByUser(int track);
+    void repaintTrackRow(int track);
+    /// Toggles mute, solo, collapse or opens an inspector menu when `pos` hits one.
+    bool handleTrackHeaderClick(int track, const QPoint& pos, const QPoint& globalPos);
+    void paintTrackHeader(QPainter& p, int track) const;
+    void paintTrackMeter(QPainter& p, int track) const;
+    void paintPillButton(
+        QPainter& p, const QRect& r, const QString& label, bool on, const QColor& onColor) const;
+    void paintInspectorBox(
+        QPainter& p, const QRect& r, const QString& prefix, const QString& text, bool active) const;
+    [[nodiscard]] QPixmap waveTile(const ClipAudio* info, int tileIndex, int waveH, double secondsPerPixel,
+        const QColor& lineColor, qreal dpr) const;
+    void showSliderTooltip(int track, HeaderSlider slider, double value, const QPoint& globalPos) const;
+
     [[nodiscard]] int yOfTrack(int track) const;
     /// Lane height of `track` in pixels; 0 for a hidden sub-track.
     [[nodiscard]] int trackHeight(int track) const;
-    /// Rebuilds the track positions from the project: call before using
-    /// yOfTrack(), trackAt() or trackHeight() in an event.
+    /// Rebuilds the track positions from the project.
     void syncLayout();
     /// The track whose header's bottom edge is at `pos` (to resize it), or -1.
     [[nodiscard]] int resizeEdgeAt(const QPoint& pos) const;
@@ -203,27 +284,24 @@ private:
     [[nodiscard]] int audioLength(const AudioClip& clip) const; ///< ticks
     [[nodiscard]] const ClipAudio* audioOf(const AudioClip& clip) const; ///< its channel's sample
     [[nodiscard]] std::optional<ClipRef> clipAt(const QPoint& pos) const;
-    void paintAudioClip(QPainter& p, const AudioClip& clip, bool dragged, bool selected) const;
+    void paintAudioClip(
+        QPainter& p, const AudioClip& clip, const QRect& clipArea, bool dragged, bool selected) const;
     /// Whether a clip is selected (Select tool).
     [[nodiscard]] bool isSelected(ClipRef clip) const;
     [[nodiscard]] std::size_t selectionSize() const;
     void clearSelection();
     /// Drops the selection when clips were added or removed elsewhere (indices moved).
     void syncSelection();
-    /// Selects the clips touching `band` (viewport coordinates), adding to the
-    /// selection when `add`.
+    /// Selects the clips touching `band` (viewport coordinates), adding when `add`.
     void selectIn(const QRect& band, bool add);
     /// Starts moving every selected clip with the pointer.
     void beginGroupDrag(const QPoint& pos);
     void moveGroup(const QPoint& pos, int grid);
-    /// Paint tool: lays the current pattern on the paint track in every slot
-    /// from the last one painted to the one under `tick`.
+    /// Paint tool: lays the current pattern on the paint track in every slot.
     void paintTo(double tick);
-    /// Places a clip of the source on `track` at `start`; whether there was
-    /// one to place (an audio source needs a channel with a sample).
+    /// Places a clip of the source on `track` at `start`.
     bool placeSource(int track, int start);
-    /// The colour of `track` (chosen by the user), else `fallback`: clips
-    /// on a coloured track take its colour.
+    /// The colour of `track` (chosen by the user), else `fallback`.
     [[nodiscard]] QColor trackColorOr(int track, const QColor& fallback) const;
     /// How long a clip of the source is, in ticks.
     [[nodiscard]] int sourceLength() const;
@@ -234,28 +312,16 @@ private:
     /// Zooms so ticks `from`..`to` fill the grid.
     void zoomToRange(double from, double to);
     void updateToolCursor(const QPoint& pos);
-    /// The snap grid in ticks for an edit made with `modifiers` held (Alt: 1,
-    /// no snapping; Shift: a step).
     [[nodiscard]] int snapTicks(Qt::KeyboardModifiers modifiers) const;
-    /// The whole sample of an audio clip in ticks at the tempo; 0 when unknown.
     [[nodiscard]] int sampleTicks(const AudioClip& clip) const;
-    /// The tempo a clip's sample is counted at: its own when fitted to the
-    /// song's tempo, else the song's.
     [[nodiscard]] double clipTempo(const AudioClip& clip) const
     {
         return clip.fitted() ? clip.sourceBpm : tempo_;
     }
-    /// A clip's edge under `pos`, to trim or stretch it: the clip, and
-    /// whether it is the right edge.
     [[nodiscard]] std::optional<std::pair<ClipRef, bool>> edgeAt(const QPoint& pos) const;
     void resizeClipTo(double tick, int grid);
-    /// Slice tool: cuts every clip on tracks `fromTrack`..`toTrack` that
-    /// `tick` falls inside in two there.
     void sliceAcross(int tick, int fromTrack, int toTrack);
-    /// Slice tool: the tick the line is at for the pointer at `x`.
     [[nodiscard]] int sliceTick(int x, Qt::KeyboardModifiers modifiers) const;
-    /// Where a drop at `pos` would land: track (may be the track count) and
-    /// start tick; nullopt outside the grid.
     [[nodiscard]] std::optional<std::pair<int, int>> dropTarget(const QPoint& pos) const;
     void updateScrollBars();
     void beginDrag(ClipRef clip, const QPoint& pos);
@@ -263,13 +329,33 @@ private:
     void commitTrackNameEdit();
 
     const Project* project_ = nullptr;
+    const MixerModel* mixer_ = nullptr;
+    int selectedTrack_ = 0;
+    int headerWidth_ = kDefaultHeaderWidth;
+    bool resizingHeaderWidth_ = false;
+    int headerResizeStartX_ = 0;
+    int headerResizeStartWidth_ = kDefaultHeaderWidth;
+
+    HeaderSlider draggingSlider_ = HeaderSlider::None;
+    int sliderTrack_ = -1;
+    int sliderLastX_ = 0;
+    double sliderValue_ = 0.0;
+
+    std::vector<TrackMeter> meters_;
+    mutable std::unordered_map<WaveTileKey, QPixmap, WaveTileKeyHash> waveTiles_;
+    mutable unsigned cachedThemeGen_ = 0;
+
     ClipSource source_; ///< what Draw and Paint place
     Snap snap_ = Snap::Auto;
+    bool snapEnabled_ = true;
+    bool followPlayhead_ = true;
     double playhead_ = -1.0;
     double pixelsPerBar_ = 72.0;
     double tempo_ = 120.0;
     std::function<const ClipAudio*(const std::string&)> audioInfo_;
-    std::optional<QRectF> dropHint_; ///< where a dragged file would land
+    std::vector<QRectF> dropHints_; ///< where dragged audio files would land
+    std::optional<std::pair<int, int>> lastDropTarget_;
+    qsizetype lastDropCount_ = 0;
 
     bool dragging_ = false;
     ClipRef dragClip_;
@@ -277,8 +363,7 @@ private:
     AudioClip dragStartAudio_;
     double dragStartTick_ = 0.0;
 
-    /// Top of each track from the first one's, in pixels, plus the bottom
-    /// of the last (hidden sub-tracks take no room).
+    /// Top of each track from the first one's, in pixels, plus the bottom of the last.
     std::vector<int> tops_{0};
     int resizingTrack_ = -1; ///< whose height a drag changes
     int resizeStartY_ = 0;
@@ -304,8 +389,6 @@ private:
     bool muteState_ = false; ///< what the Mute tool drag gives clips
     bool playing_ = false; ///< Playback tool held
     double lastPlaybackTick_ = -1.0;
-    /// Slice tool: where the cut line is (tick, first and last track) while
-    /// the pointer is over the grid or dragging; none otherwise.
     struct SliceLine {
         int tick = 0;
         int fromTrack = 0;
@@ -321,6 +404,10 @@ private:
 
     QLineEdit* inlineEditor_ = nullptr;
     int editingTrack_ = -1;
+    std::vector<Clip> clipboardClips_;
+    std::vector<AudioClip> clipboardAudio_;
+    int clipboardMinStart_ = 0;
+    int clipboardMaxEnd_ = 0;
 };
 
 } // namespace vloomdaw

@@ -11,9 +11,11 @@
 #include "core/Project.hpp"
 #include "core/ProjectFile.hpp"
 #include "core/TapTempo.hpp"
+#include "core/UndoHistory.hpp"
 #include "ui/AppSettings.hpp"
 #include "ui/dialogs/SettingsDialog/SettingsDialog.hpp"
 #include "ui/plugins/PluginStore.hpp"
+#include "ui/plugins/PluginThumbnails.hpp"
 #include "ui/widgets/ViewButtons/ViewButtons.hpp"
 
 #include <vloom/engine/io/AudioDevice.hpp>
@@ -86,6 +88,9 @@ public:
     /// (File > Open and Open Recent ask first; so does the command line's
     /// caller, which has nothing open yet).
     void openProjectFile(const QString& path);
+    /// Initializes an empty project at `tempo` BPM (used when launching from
+    /// the Start Window before `MainWindow` is shown).
+    void startEmptyProject(double tempo);
     /// The start window (File > Start Window, and at startup): a new
     /// project, or a recent one.
     void showLauncher();
@@ -150,11 +155,13 @@ private:
     void addPlaylistTrack();
     void removePlaylistTrack(std::size_t track);
     void renamePlaylistTrack(std::size_t track);
-    void dropAudio(const QString& path, int track, int start);
+    void showTrackChannelMenu(std::size_t track, const QPoint& globalPos);
+    void showTrackRoutingMenu(std::size_t track, const QPoint& globalPos);
+    void dropAudioFiles(const QStringList& paths, int track, int start);
     /// Loads (decoding if needed) the sample at `path` on a background thread,
     /// then calls `then` on this thread; the UI stays responsive meanwhile.
-    /// Reports a file that cannot be loaded instead of calling `then`.
-    void loadSampleThen(const QString& path, std::function<void()> then);
+    /// Calls `onFailed` (if set) and reports in the status bar when loading fails.
+    void loadSampleThen(const QString& path, std::function<void()> then, std::function<void()> onFailed = {});
     /// Starts the loader thread (loaderThread_, loader_) if it is not running.
     void startLoader();
     /// Audio clip `index`'s menu (fit to tempo) at `globalPos`.
@@ -233,6 +240,9 @@ private:
     /// Sends the channel rack of the current pattern to the engine and
     /// reports samples that could not be loaded.
     void syncChannelRack();
+    /// Coalesces rapid clip/channel edits (mouse drags) into ~40 Hz engine updates.
+    void scheduleChannelRackSync();
+    void flushChannelRackSync();
     /// Ticks where the song ends: the end of its last clip, rounded up to a
     /// bar; 0 for an empty playlist. Audio clips count at the current tempo.
     [[nodiscard]] int songEndTicks();
@@ -271,10 +281,20 @@ private:
     void showEffectSlotContextMenu(std::size_t track, std::size_t slot, const QPoint& globalPos);
     /// Menu of effect plugins to load into slot `slot` of insert `track`.
     void showEffectChooserMenu(std::size_t track, std::size_t slot, const QPoint& globalPos);
+    /// Menu of instrument plugins to load into `channel` on the channel rack.
+    void showInstrumentChooserMenu(std::size_t channel, const QPoint& globalPos);
     /// Handles a plugin dropped onto slot `slot` of insert `track`.
     void handlePluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin);
     /// Opens (or raises) the editor of loaded plugin `handle`.
     void openPluginEditor(std::uint64_t handle, const QString& title);
+    /// Builds the Studio One-style header context for an open plugin editor.
+    [[nodiscard]] PluginEditorContext buildPluginEditorContext(std::uint64_t handle);
+    /// Refreshes header bar state (slot name, bypass/power, favorite) on open plugin editors.
+    void refreshOpenPluginEditors();
+    /// Returns mixer_ (or a copy with all effects bypassed when global FX bypass is active).
+    [[nodiscard]] MixerModel effectiveMixerModel() const;
+    /// Returns the master output gain including transport Vol, Master fader/mute, Mute & Dim.
+    [[nodiscard]] float effectiveMasterGain() const;
     /// Drops the plugins the project no longer uses (the engine was sent
     /// states without them), closing their editors.
     void releaseUnusedPlugins();
@@ -287,6 +307,21 @@ private:
     void newProject();
     /// Starts over without asking: an empty project, mixer and song settings.
     void resetProject();
+
+    // ---- undo / redo & Edit menu commands
+    [[nodiscard]] UndoSnapshot captureUndoSnapshot() const;
+    void recordUndo(const QString& label, std::string coalesceKey = {});
+    void applyUndoSnapshot(UndoSnapshot snapshot);
+    void performUndo();
+    void performRedo();
+    void performCut();
+    void performCopy();
+    void performPaste();
+    void performDuplicate();
+    void performDelete();
+    void performSelectAll();
+    [[nodiscard]] bool isPianoRollActive() const;
+    void updateUndoActions();
 
     // ---- project files (the File menu)
     void openProject();
@@ -358,6 +393,8 @@ private:
     QThread* loaderThread_ = nullptr;
     QObject* loader_ = nullptr;
     int loading_ = 0; ///< loads under way, for the status bar
+    using LoadCallbacks = std::pair<std::function<void()>, std::function<void()>>;
+    std::map<std::string, std::vector<LoadCallbacks>> pendingLoads_;
     QComboBox* clipSource_ = nullptr; ///< what the playlist's Draw and Paint place
     /// Fit to tempo: tempi measured per sample path, stretched copies by
     /// (path, ratio x 10000), and the copies asked for, being made, and used
@@ -371,6 +408,9 @@ private:
     double fitTempo_ = 0.0; ///< the song tempo the fitted clips were last sent with
     double songLoopEnd_ = -1.0; ///< the loop end last sent to the engine (0: off; < 0: never sent)
     bool songMode_ = false; ///< the engine plays the playlist instead of looping the pattern
+    bool allEffectsBypassed_ = false; ///< global console FX bypass (preserves per-slot bypass)
+    std::uint64_t projectGeneration_
+        = 0; ///< guards async sample-load callbacks across project switches/undos
     /// Length and waveform of the playlist's audio files, by path.
     std::map<std::string, std::shared_ptr<const ClipAudio>> clipAudio_;
     std::size_t currentPattern_ = 0;
@@ -429,7 +469,10 @@ private:
     QElapsedTimer tapClock_;
     QToolButton* deviceStatus_ = nullptr; ///< device readout, click to switch
     QTimer* refreshTimer_ = nullptr;
+    QTimer* rackSyncTimer_ = nullptr; ///< coalesces rapid playlist clip/slider drags
     QTimer* themeApplyTimer_ = nullptr; ///< coalesces theme edits (knob drags)
+    std::vector<std::pair<float, float>>
+        insertPeaks_; ///< reused per refresh tick for mixer & playlist meters
     QAction* fullScreenAction_ = nullptr;
     WindowButtons* windowButtons_ = nullptr; ///< Windows only: replaces the title bar's
 
@@ -443,6 +486,19 @@ private:
     bool scrubPlaySent_ = false; ///< the engine took this scrub's play
     bool scrubStopPending_ = false; ///< a scrub's stop the engine has not acted on yet
     bool scrubStopSent_ = false; ///< the engine took that stop
+
+    // Undo / redo history and shared window actions
+    UndoHistory undoHistory_;
+    bool applyingUndoRedo_ = false;
+    QAction* undoAction_ = nullptr;
+    QAction* redoAction_ = nullptr;
+    QAction* cutAction_ = nullptr;
+    QAction* copyAction_ = nullptr;
+    QAction* pasteAction_ = nullptr;
+    QAction* duplicateAction_ = nullptr;
+    QAction* deleteAction_ = nullptr;
+    QAction* selectAllAction_ = nullptr;
+    std::vector<QAction*> sharedWindowActions_;
 };
 
 } // namespace vloomdaw

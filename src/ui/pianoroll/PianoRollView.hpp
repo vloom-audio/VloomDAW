@@ -41,10 +41,23 @@ public:
     [[nodiscard]] int snapTicks() const { return snapTicks_; }
     void refresh();
 
+    // ---- selection & clipboard actions (Edit menu / keyboard shortcuts)
+    [[nodiscard]] bool hasSelectedNotes();
+    [[nodiscard]] bool hasNoteClipboard() const { return !clipboardNotes_.empty(); }
+    void selectAllNotes();
+    void deleteSelectedNotes();
+    void copySelectedNotes();
+    void cutSelectedNotes();
+    void pasteNotes();
+    void duplicateSelectedNotes();
+
 signals:
     void noteAdded(vloomdaw::Note note);
     void noteChanged(std::size_t index, vloomdaw::Note note);
     void noteRemoved(std::size_t index);
+    void notesAddedBatch(const std::vector<vloomdaw::Note>& notes);
+    void notesRemovedBatch(const std::vector<std::size_t>& indices);
+    void notesChangedBatch(const std::vector<std::pair<std::size_t, vloomdaw::Note>>& edits);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -53,11 +66,12 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void scrollContentsBy(int dx, int dy) override;
 
 private:
-    enum class Drag { None, Move, Resize };
+    enum class Drag { None, Move, GroupMove, Resize, Band };
 
     [[nodiscard]] const std::vector<Note>* notes() const;
     [[nodiscard]] double pixelsPerTick() const;
@@ -69,6 +83,10 @@ private:
     [[nodiscard]] QRectF noteRect(const Note& note) const;
     /// Topmost note under `pos`, and whether `pos` is on its resize edge.
     [[nodiscard]] std::optional<std::pair<std::size_t, bool>> noteAt(const QPoint& pos) const;
+    [[nodiscard]] bool isNoteSelected(std::size_t index) const;
+    [[nodiscard]] std::size_t selectedNoteCount() const;
+    void clearNoteSelection();
+    void syncNoteSelection();
     void updateScrollBars();
     void beginDrag(std::size_t index, Drag drag, const QPoint& pos);
 
@@ -88,6 +106,14 @@ private:
     Note dragStartNote_;
     double dragStartTick_ = 0.0;
     int dragStartKey_ = 0;
+    std::vector<char> selectedNotes_;
+    std::vector<std::pair<std::size_t, Note>> groupStartNotes_;
+    QPoint bandStart_;
+    std::optional<QRect> band_;
+    bool bandAdds_ = false;
+    std::vector<Note> clipboardNotes_;
+    int clipboardMinStart_ = 0;
+    int clipboardMaxEnd_ = 0;
 };
 
 } // namespace vloomdaw
