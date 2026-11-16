@@ -5987,8 +5987,8 @@ void MainWindow::closeProject()
     // Remember which detached editor / mixer windows were open so they return
     // automatically once the user picks or creates a new project.
     const bool mixerWinWasVisible = mixerWindow_ != nullptr && mixerWindow_->isVisible();
-    std::array<bool, std::size(detachable_)> pageWinWasVisible{};
-    for (std::size_t i = 0; i < std::size(detachable_); ++i) {
+    std::array<bool, std::tuple_size_v<decltype(detachable_)>> pageWinWasVisible{};
+    for (std::size_t i = 0; i < pageWinWasVisible.size(); ++i) {
         pageWinWasVisible[i] = detachable_[i].window != nullptr && detachable_[i].window->isVisible();
     }
 
@@ -6008,7 +6008,7 @@ void MainWindow::closeProject()
 
     const auto restoreWorkspaceWindows = [&, this] {
         show();
-        for (std::size_t i = 0; i < std::size(detachable_); ++i) {
+        for (std::size_t i = 0; i < pageWinWasVisible.size(); ++i) {
             if (pageWinWasVisible[i] && detachable_[i].window != nullptr)
                 detachable_[i].window->show();
         }

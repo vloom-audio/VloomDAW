@@ -1301,7 +1301,7 @@ void PlaylistView::paintEvent(QPaintEvent* event)
                             for (std::size_t rowIdx = 0; rowIdx < stepChannels.size(); ++rowIdx) {
                                 const auto& steps = pat.channels[stepChannels[rowIdx]].steps;
                                 const double y0 = noteArea.top()
-                                    + (static_cast<double>(rowIdx) / stepChannels.size())
+                                    + (static_cast<double>(rowIdx) / static_cast<double>(stepChannels.size()))
                                         * std::max(0.0, noteArea.height() - rowH);
                                 for (std::size_t s = 0; s < steps.size(); ++s) {
                                     if (!steps[s])
