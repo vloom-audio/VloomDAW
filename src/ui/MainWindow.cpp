@@ -24,9 +24,11 @@
 #include "ui/browser/SamplePreviewer.hpp"
 #include "ui/browser/SampleWaveform.hpp"
 #include "ui/channelrack/ChannelRackView.hpp"
+#include "ui/dialogs/ExportDialog.hpp"
 #include "ui/dialogs/SettingsDialog/AudioSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/SettingsDialog.hpp"
+#include "ui/dialogs/SettingsDialog/StemSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp"
 #include "ui/launcher/LauncherDialog.hpp"
 #include "ui/mixer/MixerPanel.hpp"
@@ -73,6 +75,7 @@
 #include <QCryptographicHash>
 #include <QCursor>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QEvent>
 #include <QFileDialog>
@@ -103,10 +106,12 @@
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -333,7 +338,7 @@ void MainWindow::createMenus()
 
     fileMenu->addSeparator();
     addFileAction(tr("&Import Audio…"), QKeySequence(Qt::CTRL | Qt::Key_I), [this] { importAudioFiles(); });
-    addFileAction(tr("&Export WAV…"), QKeySequence(Qt::CTRL | Qt::Key_E), [this] { exportSong(); });
+    addFileAction(tr("&Export…"), QKeySequence(Qt::CTRL | Qt::Key_E), [this] { exportSong(); });
 
     // The title's "*" follows unsaved changes; the snapshot is taken once
     // the window is built.
@@ -457,6 +462,8 @@ void MainWindow::createMenus()
     optionsMenu->addSeparator();
     optionsMenu->addAction(tr("Plugin Manager…"), this, &MainWindow::showPluginManager);
     optionsMenu->addAction(tr("Stem Models…"), this, [this] { (void)showStemModels(); });
+    optionsMenu->addAction(
+        tr("Stem Extractor Settings…"), this, [this] { showSettings(SettingsDialog::Page::Stems); });
 
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
     fullScreenAction_ = viewMenu->addAction(tr("Enter Full Screen"), this, &MainWindow::toggleFullScreen);
@@ -1099,7 +1106,11 @@ void MainWindow::showAudioClipMenu(std::size_t index, const QPoint& globalPos)
 
 bool MainWindow::showStemModels()
 {
-    StemModelStore store(settings_.stemModel, this);
+    StemModelStore store(settings_.stemModel, settings_.stemUseGpu, this);
+    connect(&store, &StemModelStore::useGpuChanged, this, [this](bool on) {
+        settings_.stemUseGpu = on;
+        settings_.save();
+    });
     const auto keep = [this](const QString& id) {
         settings_.stemModel = id;
         settings_.save();
@@ -1108,6 +1119,7 @@ bool MainWindow::showStemModels()
     store.exec();
     if (store.chosen() != settings_.stemModel)
         keep(store.chosen()); // the saved one was not on this computer any more
+    refreshStemSettings(); // what is downloaded and in use may have changed
     return !settings_.stemModel.isEmpty();
 }
 
@@ -1143,6 +1155,28 @@ void MainWindow::extractStems(std::size_t index)
         if (model == nullptr)
             return;
     }
+    // A model from before the faster engine came: say so once, since nothing
+    // else tells the user why it takes minutes.
+    const bool fasterExists = std::ranges::any_of(
+        stemModels(), [](const StemModel& other) { return other.engine == StemModel::Engine::Onnx; });
+    if (model->engine == StemModel::Engine::Demucs && fasterExists && !settings_.stemFasterOffered) {
+        settings_.stemFasterOffered = true;
+        settings_.save();
+        QMessageBox ask(QMessageBox::Question, tr("Stem Extractor"),
+            tr("%1 runs on the processor only and takes several times as long as the audio lasts.\n\n"
+               "The model store has faster ones; \"HT Demucs\" also runs on the graphics card.")
+                .arg(QString::fromLatin1(model->name.data(), static_cast<qsizetype>(model->name.size()))),
+            QMessageBox::NoButton, this);
+        QAbstractButton* pick = ask.addButton(tr("Choose a Faster Model…"), QMessageBox::AcceptRole);
+        ask.addButton(tr("Continue with This One"), QMessageBox::RejectRole);
+        ask.exec();
+        if (ask.clickedButton() == pick) {
+            (void)showStemModels();
+            model = modelInUse();
+            if (model == nullptr)
+                return;
+        }
+    }
 
     const QFileInfo source(QString::fromStdString(project_.channels()[clip.channel].samplePath));
     StemJob job;
@@ -1150,17 +1184,24 @@ void MainWindow::extractStems(std::size_t index)
     job.baseName = source.completeBaseName();
     job.modelId = QString::fromLatin1(model->id.data(), static_cast<qsizetype>(model->id.size()));
     job.modelFolder = StemSeparator::modelFolder();
+    job.useGpu = settings_.stemUseGpu;
+    // demucs.cpp has its own, fixed overlap. Stems made with another overlap
+    // are another set: they get their own folder, so neither is taken for the other.
+    const bool overlaps = model->engine == StemModel::Engine::Onnx;
+    job.overlapPercent = overlaps ? settings_.stemOverlap : 25;
+    const QString set = job.overlapPercent == 25
+        ? job.modelId
+        : QStringLiteral("%1-overlap%2").arg(job.modelId).arg(job.overlapPercent);
     // Next to the file, so the stems travel with it; in the app's own folder
     // when that place cannot be written to (a read-only sample pack).
-    const QString beside
-        = QStringLiteral("%1/%2 - stems/%3").arg(source.absolutePath(), job.baseName, job.modelId);
+    const QString beside = QStringLiteral("%1/%2 - stems/%3").arg(source.absolutePath(), job.baseName, set);
     const QByteArray pathHash
         = QCryptographicHash::hash(job.source.toUtf8(), QCryptographicHash::Sha256).toHex().left(12);
     job.outputFolder = QDir().mkpath(beside) && QFileInfo(beside).isWritable()
         ? beside
         : QStringLiteral("%1/stems/%2-%3/%4")
               .arg(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation), job.baseName,
-                  QString::fromLatin1(pathHash), job.modelId);
+                  QString::fromLatin1(pathHash), set);
 
     // Extracted before with this model, and the file has not changed since: use those.
     QList<StemFile> ready;
@@ -1197,14 +1238,17 @@ void MainWindow::extractStems(std::size_t index)
             closeProgress();
             placeStems(clip, stems);
         });
+    connect(stemSeparator_, &StemSeparator::deviceChanged, this, [this](bool, const QString& note) {
+        if (!note.isEmpty())
+            statusBar()->showMessage(note, 8000);
+    });
     connect(stemSeparator_, &StemSeparator::failed, this, [this, closeProgress](const QString& reason) {
         closeProgress();
         QMessageBox::warning(this, tr("Stem Extractor"), reason);
     });
 
     const QString what
-        = tr("Extracting stems from %1 with %2.\nThis takes several times as long as the audio "
-             "lasts; you can keep working meanwhile.")
+        = tr("Extracting stems from %1 with %2.\nYou can keep working meanwhile.")
               .arg(source.fileName(),
                   QString::fromLatin1(model->name.data(), static_cast<qsizetype>(model->name.size())));
     stemProgress_ = new QProgressDialog(what, tr("Cancel"), 0, 1000, this);
@@ -1278,10 +1322,11 @@ void MainWindow::placeStems(const AudioClip& clip, const QList<StemFile>& stems,
         statusBar()->showMessage(tr("The stems could not be loaded."), 6000);
         return;
     }
-    // The clip itself goes quiet: its stems play in its place. (Tracks added
-    // above did not move it: they went in below it.)
+    // The clip itself goes quiet, unless the user wants it kept: its stems
+    // play in its place. (Tracks added above did not move it: they went in
+    // below it.)
     bool mutedClip = false;
-    for (std::size_t i = 0; i < project_.audioClips().size() && !mutedClip; ++i)
+    for (std::size_t i = 0; settings_.stemMuteOriginal && i < project_.audioClips().size() && !mutedClip; ++i)
         if (project_.audioClips()[i] == clip) {
             AudioClip muted = clip;
             muted.muted = true;
@@ -1295,7 +1340,8 @@ void MainWindow::placeStems(const AudioClip& clip, const QList<StemFile>& stems,
     rebuildClipSources();
     updateMixer();
     syncChannelRack();
-    // Not found: the clip was moved or changed while its stems were made.
+    // Not muted: the user keeps it playing, or it was moved or changed
+    // while its stems were made.
     statusBar()->showMessage(mutedClip
             ? tr("%n stem(s) placed under the clip; the clip itself is muted.", nullptr, placed)
             : tr("%n stem(s) placed where the clip was; mute the clip to hear them alone.", nullptr, placed),
@@ -2290,6 +2336,42 @@ void MainWindow::createSettingsDialog()
         settings_.metronomeOnStartup = on;
         settings_.save();
     });
+
+    StemSettingsPage* stems = settingsDialog_->stemPage();
+    refreshStemSettings();
+    connect(stems, &StemSettingsPage::modelChosen, this, [this](const QString& id) {
+        settings_.stemModel = id;
+        settings_.save();
+    });
+    connect(stems, &StemSettingsPage::useGpuChanged, this, [this](bool on) {
+        settings_.stemUseGpu = on;
+        settings_.save();
+    });
+    connect(stems, &StemSettingsPage::overlapChanged, this, [this](int percent) {
+        settings_.stemOverlap = percent;
+        settings_.save();
+    });
+    connect(stems, &StemSettingsPage::muteOriginalChanged, this, [this](bool on) {
+        settings_.stemMuteOriginal = on;
+        settings_.save();
+    });
+    connect(stems, &StemSettingsPage::storeRequested, this, [this] { (void)showStemModels(); });
+}
+
+void MainWindow::refreshStemSettings()
+{
+    if (settingsDialog_ == nullptr)
+        return;
+    QStringList installed;
+    const std::filesystem::path folder = toPath(StemSeparator::modelFolder());
+    for (const StemModel& model : stemModels())
+        if (stemModelInstalled(model, folder))
+            installed << QString::fromLatin1(model.id.data(), static_cast<qsizetype>(model.id.size()));
+    StemSettingsPage* page = settingsDialog_->stemPage();
+    page->setModels(installed, settings_.stemModel);
+    page->setUseGpu(settings_.stemUseGpu);
+    page->setOverlap(settings_.stemOverlap);
+    page->setMuteOriginal(settings_.stemMuteOriginal);
 }
 
 void MainWindow::previewTheme()
@@ -3469,6 +3551,7 @@ void MainWindow::openSelectedDevice() { startDevice(listDevices()); }
 void MainWindow::showSettings(SettingsDialog::Page page)
 {
     listDevices(); // show what is plugged in now
+    refreshStemSettings();
     settingsDialog_->showPage(page);
 }
 
@@ -5186,29 +5269,42 @@ void MainWindow::exportSong()
         return;
     }
 
-    const QString name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
-    QString path = QFileDialog::getSaveFileName(this, tr("Export WAV"),
-        QDir(projectFolder()).filePath(name + QStringLiteral(".wav")), tr("WAV audio (*.wav)"));
-    if (path.isEmpty())
+    ExportSong about;
+    about.folder = projectFolder();
+    about.name = projectPath_.empty() ? tr("Untitled") : toQString(projectPath_.stem());
+    const std::int64_t endTicks = vloom::songEndTicks(*state, transport_->tempo());
+    about.bars = static_cast<int>((endTicks + kTicksPerBar - 1) / kTicksPerBar);
+    about.seconds = static_cast<double>(endTicks) / kTicksPerBeat * 60.0 / transport_->tempo();
+    about.sampleRate = rate;
+    ExportDialog dialog(about, this);
+    if (dialog.exec() != QDialog::Accepted)
         return;
+    const ExportSettings chosen = dialog.settings();
+    const QString path = chosen.path;
     if (!isLocalPath(path)) {
         QMessageBox::warning(
-            this, tr("Could not export"), tr("WAV files cannot be exported directly to network shares."));
+            this, tr("Could not export"), tr("Songs cannot be exported directly to network shares."));
         return;
     }
-    if (!path.endsWith(QStringLiteral(".wav"), Qt::CaseInsensitive))
-        path += QStringLiteral(".wav");
-    const QStringList formats{tr("24-bit (recommended)"), tr("16-bit (CD)"), tr("32-bit float")};
-    bool ok = false;
-    const QString chosen
-        = QInputDialog::getItem(this, tr("Export WAV"), tr("Sample format:"), formats, 0, false, &ok);
-    if (!ok)
+    const bool wav = chosen.format == AudioFileFormat::Wav;
+
+    // Other formats: the engine renders a 32-bit float WAV into a temporary
+    // folder, which FFmpeg then encodes.
+    QTemporaryDir scratch;
+    if (!wav && !scratch.isValid()) {
+        QMessageBox::critical(this, tr("Could not export"), tr("No room for temporary files."));
         return;
+    }
+    const QString rendered = wav ? path : scratch.filePath(QStringLiteral("render.wav"));
 
     vloom::SongExportOptions options;
-    options.format = chosen == formats[1] ? vloom::WavFormat::Pcm16
-        : chosen == formats[2]            ? vloom::WavFormat::Float32
-                                          : vloom::WavFormat::Pcm24;
+    options.format = !wav || chosen.wavDepth == ExportSettings::WavDepth::Float32 ? vloom::WavFormat::Float32
+        : chosen.wavDepth == ExportSettings::WavDepth::Pcm16                      ? vloom::WavFormat::Pcm16
+                                                                                  : vloom::WavFormat::Pcm24;
+    options.dither = chosen.dither;
+    options.channels = chosen.mono ? 1 : 2;
+    if (!chosen.tail)
+        options.maxTailSeconds = 0.0;
     options.tempo = transport_->tempo();
     options.masterGain = volumeToGain(transport_->masterVolume())
         * static_cast<float>(mixer_.effectiveGain(MixerModel::kMaster));
@@ -5226,12 +5322,41 @@ void MainWindow::exportSong()
         tr("Exporting %1…").arg(QFileInfo(path).fileName()), tr("Cancel"), 0, 1000, this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(300);
-    const vloom::SongExportResult result
-        = vloom::exportSong(path.toStdString(), *copy, mixer.get(), rate, options, [&progress](double done) {
-              progress.setValue(static_cast<int>(done * 1000.0));
-              QApplication::processEvents();
-              return !progress.wasCanceled();
-          });
+    // Rendering is most of the work; encoding takes the rest of the bar.
+    const double renderShare = wav ? 1.0 : 0.8;
+    const auto step = [&progress](double done) {
+        progress.setValue(static_cast<int>(done * 1000.0));
+        QApplication::processEvents();
+        return !progress.wasCanceled();
+    };
+    vloom::SongExportResult result = vloom::exportSong(rendered.toStdString(), *copy, mixer.get(), rate,
+        options, [&step, renderShare](double done) { return step(done * renderShare); });
+    if (result.ok && !wav) {
+        EncodeOptions encode;
+        encode.format = chosen.format;
+        encode.bitDepth = chosen.flacBits;
+        encode.dither = chosen.dither;
+        encode.bitrateKbps = chosen.bitrateKbps;
+        encode.metadata = chosen.metadata;
+        std::string why;
+        try {
+            result.ok = encodeWavFile(rendered.toStdString(), path.toStdString(), encode, &why,
+                [&step, renderShare](double done) { return step(renderShare + done * (1.0 - renderShare)); });
+        } catch (const std::exception&) {
+            result.ok = false;
+            why = "not enough memory";
+        }
+        result.cancelled = !result.ok && why.empty();
+        result.error = why;
+    }
+    // A WAV file gets its tags after the engine has written the audio. One
+    // that cannot take them is still a good export: said, not failed.
+    QString tagsNote;
+    if (result.ok && wav) {
+        std::string why;
+        if (!writeWavMetadata(path.toStdString(), chosen.metadata, &why))
+            tagsNote = tr(" The tags could not be added (%1).").arg(QString::fromStdString(why));
+    }
     progress.reset();
     openSelectedDevice();
 
@@ -5242,11 +5367,15 @@ void MainWindow::exportSong()
         QMessageBox::critical(this, tr("Could not export"),
             tr("%1 could not be written.\n\n%2")
                 .arg(QDir::toNativeSeparators(path), QString::fromStdString(result.error)));
-    else
+    else {
         statusBar()->showMessage(tr("Exported %1 (%2 s)")
                                      .arg(QFileInfo(path).fileName())
-                                     .arg(static_cast<double>(result.frames) / rate, 0, 'f', 1),
+                                     .arg(static_cast<double>(result.frames) / rate, 0, 'f', 1)
+                + tagsNote,
             6000);
+        if (chosen.showFile)
+            QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
+    }
 }
 
 void MainWindow::togglePlay()

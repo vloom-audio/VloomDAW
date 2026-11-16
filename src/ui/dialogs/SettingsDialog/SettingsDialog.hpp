@@ -11,10 +11,11 @@ namespace vloomdaw {
 
 class AudioSettingsPage;
 class GeneralSettingsPage;
+class StemSettingsPage;
 class ThemeSettingsPage;
 
 /// The Settings window: categories with icons on the left (General, Audio,
-/// Theme), one page of settings cards per category.
+/// Theme, Stem Extractor), one page of settings cards per category.
 /// Changes apply as they are made, so there is only a Close button.
 ///
 /// To add a category: write a page class next to the others and register it
@@ -23,13 +24,14 @@ class SettingsDialog : public QDialog {
     Q_OBJECT
 
 public:
-    enum class Page { General, Audio, Theme };
+    enum class Page { General, Audio, Theme, Stems };
 
     explicit SettingsDialog(QWidget* parent = nullptr);
 
     [[nodiscard]] GeneralSettingsPage* generalPage() const { return general_; }
     [[nodiscard]] AudioSettingsPage* audioPage() const { return audio_; }
     [[nodiscard]] ThemeSettingsPage* themePage() const { return theme_; }
+    [[nodiscard]] StemSettingsPage* stemPage() const { return stems_; }
 
     /// Shows the window on `page`.
     void showPage(Page page);
@@ -43,6 +45,7 @@ private:
     GeneralSettingsPage* general_ = nullptr;
     AudioSettingsPage* audio_ = nullptr;
     ThemeSettingsPage* theme_ = nullptr;
+    StemSettingsPage* stems_ = nullptr;
 };
 
 } // namespace vloomdaw

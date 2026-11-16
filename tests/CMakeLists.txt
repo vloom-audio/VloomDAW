@@ -11,6 +11,7 @@ CPMAddPackage(
 add_executable(vloomdaw_tests
     audio/ChannelRackAudioTests.cpp
     audio/FileDecoderTests.cpp
+    audio/FileEncoderTests.cpp
     audio/TempoTests.cpp
     audio/MixerAudioTests.cpp
     audio/PluginHostTests.cpp
@@ -36,8 +37,10 @@ add_executable(vloomdaw_tests
     core/ProjectTests.cpp
     core/SampleFolderTests.cpp
     core/ScalesTests.cpp
+    core/MdxSpectrogramTests.cpp
     core/StemChunksTests.cpp
     core/StemModelsTests.cpp
+    core/StemSpectrogramTests.cpp
     core/TapTempoTests.cpp
     core/ThemePresetsTests.cpp
     core/TrackRoutingTests.cpp

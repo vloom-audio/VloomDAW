@@ -6,6 +6,7 @@
 #include "ui/FilePaths.hpp"
 #include "ui/stems/StemSeparator.hpp"
 
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QCryptographicHash>
 #include <QDir>
@@ -64,22 +65,22 @@ bool installed(const StemModel& model)
 
 } // namespace
 
-StemModelStore::StemModelStore(const QString& chosen, QWidget* parent)
+StemModelStore::StemModelStore(const QString& chosen, bool useGpu, QWidget* parent)
     : QDialog(parent)
     , chosen_(chosen)
 {
     setWindowTitle(tr("Stem Models"));
     setObjectName(QStringLiteral("stemModelStore"));
-    resize(640, 420);
+    resize(780, 460);
 
     auto* layout = new QVBoxLayout(this);
     auto* heading = new QLabel(tr("Stem Models"), this);
     heading->setObjectName(QStringLiteral("settingsHeading"));
     layout->addWidget(heading);
     auto* intro
-        = new QLabel(tr("The stem extractor splits an audio clip into drums, bass, vocals and the rest "
-                        "with a Demucs model. Download the one you want; it then works offline. Models "
-                        "come from huggingface.co and each file is checked before it is used."),
+        = new QLabel(tr("The stem extractor splits an audio clip into its parts with a Demucs or an "
+                        "MDX-Net model. Download the one you want; it then works offline. Models come "
+                        "from huggingface.co and github.com, and each file is checked before it is used."),
             this);
     intro->setObjectName(QStringLiteral("settingsSubtitle"));
     intro->setWordWrap(true);
@@ -88,7 +89,7 @@ StemModelStore::StemModelStore(const QString& chosen, QWidget* parent)
     list_ = new QTreeWidget(this);
     list_->setRootIsDecorated(false);
     list_->setUniformRowHeights(true);
-    list_->setHeaderLabels({tr("Model"), tr("Stems"), tr("Download"), tr("Status")});
+    list_->setHeaderLabels({tr("Model"), tr("Stems"), tr("Runs on"), tr("Download"), tr("Status")});
     for (const StemModel& model : stemModels()) {
         auto* row = new QTreeWidgetItem(list_);
         row->setData(0, kIdRole, text(model.id));
@@ -97,7 +98,11 @@ StemModelStore::StemModelStore(const QString& chosen, QWidget* parent)
         for (const std::string_view stem : model.stems)
             stems << text(stem);
         row->setText(1, stems.join(QStringLiteral(", ")));
-        row->setText(2, sizeText(model.bytes()));
+        row->setText(2,
+            model.gpu                                     ? tr("Graphics card")
+                : model.engine == StemModel::Engine::Onnx ? tr("Processor")
+                                                          : tr("Processor (slow)"));
+        row->setText(3, sizeText(model.bytes()));
     }
     list_->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     list_->resizeColumnToContents(0);
@@ -117,6 +122,21 @@ StemModelStore::StemModelStore(const QString& chosen, QWidget* parent)
     status_->setObjectName(QStringLiteral("settingsSubtitle"));
     status_->setWordWrap(true);
     layout->addWidget(status_);
+
+    // Only where some model has a graphics-card path at all.
+    bool anyGpu = false;
+    for (const StemModel& model : stemModels())
+        anyGpu = anyGpu || model.gpu;
+    if (anyGpu) {
+        gpu_ = new QCheckBox(
+            tr("Use the graphics card for the models that can (falls back to the processor)"), this);
+        gpu_->setToolTip(
+            tr("Any DirectX 12 graphics card: NVIDIA, AMD or Intel. Much faster than the processor. If the "
+               "card cannot run a model, or gives a wrong result, the processor takes over."));
+        gpu_->setChecked(useGpu);
+        connect(gpu_, &QCheckBox::toggled, this, &StemModelStore::useGpuChanged);
+        layout->addWidget(gpu_);
+    }
 
     auto* buttons = new QHBoxLayout;
     downloadButton_ = new QPushButton(this);
@@ -171,6 +191,8 @@ void StemModelStore::closeEvent(QCloseEvent* event)
     QDialog::closeEvent(event);
 }
 
+bool StemModelStore::useGpu() const { return gpu_ != nullptr && gpu_->isChecked(); }
+
 const StemModel* StemModelStore::selected() const
 {
     const QTreeWidgetItem* row = list_->currentItem();
@@ -184,7 +206,7 @@ void StemModelStore::refresh()
         const QString id = row->data(0, kIdRole).toString();
         const StemModel* model = findStemModel(id.toStdString());
         const bool here = model != nullptr && installed(*model);
-        row->setText(3,
+        row->setText(4,
             model == downloading_ && downloading_ != nullptr ? tr("Downloading…")
                 : id == chosen_ && here                      ? tr("In use")
                 : here                                       ? tr("Downloaded")
@@ -290,7 +312,7 @@ void StemModelStore::nextFile()
     }
     hash_ = std::make_unique<QCryptographicHash>(QCryptographicHash::Sha256);
     fileBytes_ = 0;
-    QNetworkRequest request(QUrl(QString::fromStdString(stemModelUrl(file))));
+    QNetworkRequest request(QUrl(QString::fromStdString(stemModelUrl(*downloading_, file))));
     request.setTransferTimeout(kIdleTimeoutMs);
     request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
     reply_ = network_->get(request);

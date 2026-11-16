@@ -26,6 +26,11 @@ struct StemJob {
     QString baseName; ///< the stems are named "<baseName> - <stem>.wav"
     QString modelId; ///< core/StemModels
     QString modelFolder; ///< where the model's files are
+    /// Run it on the graphics card when the model and the computer can
+    /// (ONNX models on Windows); the processor otherwise, and always when off.
+    bool useGpu = true;
+    /// ONNX models: how much neighbouring pieces overlap, 25 .. 75 percent.
+    int overlapPercent = 25;
 };
 
 /// One stem of a finished job.
@@ -66,6 +71,9 @@ public:
 
 signals:
     void progress(double fraction, const QString& stage);
+    /// What the separation runs on, once known: the graphics card or the
+    /// processor; `note` says why when the card was given up part-way.
+    void deviceChanged(bool gpu, const QString& note);
     void finished(const QList<vloomdaw::StemFile>& stems);
     void failed(const QString& reason);
 
@@ -98,6 +106,7 @@ private:
     QString helperError_;
     std::int64_t frames_ = 0;
     int stems_ = 0; ///< how many the helper says it wrote
+    QString stage_; ///< shown with the progress while the helper works
     int run_ = 0; ///< counts jobs: results of an earlier one are dropped
     bool running_ = false;
 };

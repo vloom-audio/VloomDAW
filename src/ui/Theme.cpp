@@ -469,6 +469,9 @@ QLabel#mixerSelectedReadout {
     padding: 0 2px;
 }
 
+)"
+                                 // A new literal: MSVC takes at most 16 KB in one.
+                                 R"(
 /* Settings window: categories with icons on the left, pages of cards. */
 QWidget#settingsDialog { background: @window; }
 QWidget#settingsNavBox { background: @sidebar; border-right: 1px solid @border; }
@@ -477,6 +480,11 @@ QListWidget#settingsNav::item { padding: 0 10px; border-radius: 8px; margin: 2px
 QListWidget#settingsNav::item:hover { background: @raised; color: @text; }
 QListWidget#settingsNav::item:selected { background: @accentTint; color: @text; }
 QScrollArea#settingsScroll, QWidget#settingsPage { background: transparent; }
+QScrollArea#settingsScroll QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
+QScrollArea#settingsScroll QScrollBar::handle:vertical { background: @border; border-radius: 3px; min-height: 32px; margin: 0 2px; }
+QScrollArea#settingsScroll QScrollBar::handle:vertical:hover { background: @textDim; }
+QScrollArea#settingsScroll QScrollBar::add-line:vertical, QScrollArea#settingsScroll QScrollBar::sub-line:vertical { height: 0; }
+QScrollArea#settingsScroll QScrollBar::add-page:vertical, QScrollArea#settingsScroll QScrollBar::sub-page:vertical { background: transparent; }
 QLabel#settingsHeading { font-size: 18pt; font-weight: 600; }
 QLabel#settingsSubtitle { color: @textDim; }
 QFrame#settingsCard { background: @panel; border: 1px solid @border; border-radius: 10px; }
@@ -530,6 +538,17 @@ QTableWidget#pluginTable QHeaderView::section {
     font-weight: 700;
     padding: 5px 6px;
 }
+
+/* Export window (ui/dialogs/ExportDialog): a tile per format, then cards. */
+QWidget#exportDialog { background: @window; }
+QToolButton#exportFormat { background: @panel; border: 1px solid @border; border-radius: 10px; }
+QToolButton#exportFormat:hover { border-color: @textDim; }
+QToolButton#exportFormat:checked { background: @accentTint; border-color: @accent; }
+QToolButton#exportFormat:disabled { background: transparent; }
+QLabel#exportFormatName { font-size: 12pt; font-weight: 700; background: transparent; }
+QLabel#exportFormatName:disabled { color: @textDim; }
+QLabel#exportFormatHint { color: @textDim; font-size: 8pt; background: transparent; }
+QLabel#exportSize { font-size: 12pt; font-weight: 600; }
 
 /* Editors of the built-in plugins (ui/plugins/EqEditorWindow, SynthEditorWindow). */
 QWidget#eqEditor { background: @base; }

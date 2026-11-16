@@ -58,6 +58,10 @@ const std::array<Role, 5> kRoles{{
     {QT_TRANSLATE_NOOP("vloomdaw::ThemeSettingsPage", "Text"), &ThemeOverrides::text, &ResolvedTheme::text},
 }};
 
+constexpr int kPresetColumns = 4;
+constexpr int kPresetTileHeight = 108;
+constexpr int kAdjustKnobSize = 38;
+
 /// Base for the clickable tiles and swatches: repaints on hover.
 class HoverButton : public QAbstractButton {
 public:
@@ -89,8 +93,13 @@ public:
         setCursor(Qt::PointingHandCursor);
         setToolTip(qstring(palette.name));
         setAccessibleName(QStringLiteral("%1 preset").arg(qstring(palette.name)));
-        setFixedSize(160, 118);
+        // As wide as its column of the grid; the miniature is drawn to fit.
+        setFixedHeight(kPresetTileHeight);
+        setMinimumWidth(104);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     }
+
+    [[nodiscard]] QSize sizeHint() const override { return {140, kPresetTileHeight}; }
 
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
@@ -242,10 +251,11 @@ ThemeSettingsPage::ThemeSettingsPage(QWidget* parent)
         auto* tile = new PresetTile(palette, tiles);
         presets_->addButton(tile, index);
         presetTiles_.append(tile);
-        grid->addWidget(tile, index / 3, index % 3);
+        grid->addWidget(tile, index / kPresetColumns, index % kPresetColumns);
         ++index;
     }
-    grid->setColumnStretch(3, 1);
+    for (int column = 0; column < kPresetColumns; ++column)
+        grid->setColumnStretch(column, 1); // equal columns across the card
     presetCard->addWide(tiles);
     connect(presets_, &QButtonGroup::idClicked, this, [this](int id) {
         choice_.paletteId = std::string(palettes()[static_cast<std::size_t>(id)].id);
@@ -254,10 +264,14 @@ ThemeSettingsPage::ThemeSettingsPage(QWidget* parent)
 
     // Adjustments.
     auto* adjustCard = new SettingsCard(tr("Adjustments"), this);
-    auto* knobs = new QWidget;
+    auto* adjust = new QWidget;
+    auto* adjustLayout = new QVBoxLayout(adjust);
+    adjustLayout->setContentsMargins(0, 8, 0, 6);
+    adjustLayout->setSpacing(10);
+    auto* knobs = new QWidget(adjust);
     auto* knobRow = new QHBoxLayout(knobs);
-    knobRow->setContentsMargins(0, 6, 0, 2);
-    knobRow->setSpacing(18);
+    knobRow->setContentsMargins(4, 0, 0, 0);
+    knobRow->setSpacing(26);
     const auto percent = [](double v) { return QStringLiteral("%1%").arg(QString::number(v, 'f', 0)); };
     const auto signedValue = [](double v) {
         return QStringLiteral("%1%2").arg(
@@ -267,6 +281,7 @@ ThemeSettingsPage::ThemeSettingsPage(QWidget* parent)
         = [&](const QString& caption, const QString& description, double min, double max, double def,
               std::function<QString(double)> text, std::function<void(double)> apply) {
               auto* knob = new Knob(caption, min, max, def, knobs);
+              knob->setDialSize(kAdjustKnobSize);
               knob->setDescription(description);
               knob->setValueText(std::move(text));
               connect(knob, &Knob::valueChanged, this, [this, apply = std::move(apply)](double v) {
@@ -296,14 +311,17 @@ ThemeSettingsPage::ThemeSettingsPage(QWidget* parent)
         edit();
     });
     knobRow->addWidget(reset, 0, Qt::AlignVCenter);
-    adjustCard->addWide(knobs);
+    adjustLayout->addWidget(knobs);
 
+    // In the same block as the knobs: a card draws a line above each block,
+    // which would show under the knobs while the warning is hidden.
     warning_ = new QLabel(
-        tr("Some text is now hard to read (below WCAG AA contrast). Raise TEXT or lower BRIGHT."));
+        tr("Some text is now hard to read (below WCAG AA contrast). Raise TEXT or lower BRIGHT."), adjust);
     warning_->setObjectName(QStringLiteral("themeWarning"));
     warning_->setWordWrap(true);
     warning_->hide();
-    adjustCard->addWide(warning_);
+    adjustLayout->addWidget(warning_);
+    adjustCard->addWide(adjust);
 
     // Colours.
     auto* colourCard = new SettingsCard(tr("Colours"), this);

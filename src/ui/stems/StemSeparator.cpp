@@ -177,12 +177,23 @@ void StemSeparator::prepared(int run, std::int64_t frames, const QString& error)
     const StemModel* model = findStemModel(job_.modelId.toStdString());
     QStringList arguments{QStringLiteral("--in"),
         QDir::toNativeSeparators(work_->path() + QStringLiteral("/in.f32")), QStringLiteral("--out"),
-        QDir::toNativeSeparators(work_->path() + QStringLiteral("/out")),
-        // One chunk of the song per core; hyper-threads do not help this kind of work.
-        QStringLiteral("--threads"),
-        QString::number(std::clamp(QThread::idealThreadCount() / 2, 1, kMaxThreads))};
-    if (model->v3)
-        arguments << QStringLiteral("--v3");
+        QDir::toNativeSeparators(work_->path() + QStringLiteral("/out"))};
+    if (model->engine == StemModel::Engine::Onnx) {
+        // ONNX Runtime: the graphics card for the models that can, when the
+        // user lets it; it falls back to the processor by itself.
+        arguments << QStringLiteral("--onnx") << QStringLiteral("--device")
+                  << (model->gpu && job_.useGpu ? QStringLiteral("auto") : QStringLiteral("cpu"));
+        arguments << QStringLiteral("--overlap") << QString::number(std::clamp(job_.overlapPercent, 25, 75));
+        if (model->mdxFft != 0)
+            arguments << QStringLiteral("--mdx-fft") << QString::number(model->mdxFft)
+                      << QStringLiteral("--mdx-gain") << QString::number(model->mdxGain);
+    } else {
+        // demucs.cpp: one chunk of the song per core; hyper-threads do not help this kind of work.
+        arguments << QStringLiteral("--threads")
+                  << QString::number(std::clamp(QThread::idealThreadCount() / 2, 1, kMaxThreads));
+        if (model->v3)
+            arguments << QStringLiteral("--v3");
+    }
     for (const StemModelFile& file : model->files)
         arguments << QStringLiteral("--model")
                   << QDir::toNativeSeparators(
@@ -205,7 +216,8 @@ void StemSeparator::prepared(int run, std::int64_t frames, const QString& error)
         if (problem == QProcess::FailedToStart)
             helperFinished(true, -1);
     });
-    emit progress(kPrepared, tr("Separating…"));
+    stage_ = tr("Separating…");
+    emit progress(kPrepared, stage_);
     process_->start(program(), arguments, QIODevice::ReadOnly);
 }
 
@@ -223,7 +235,14 @@ void StemSeparator::readOutput()
             continue; // the library's own chatter
         if (fields[1] == "progress") {
             const double done = std::clamp(fields[2].toDouble(), 0.0, 1.0);
-            emit progress(kPrepared + (kSeparated - kPrepared) * done, tr("Separating…"));
+            emit progress(kPrepared + (kSeparated - kPrepared) * done, stage_);
+        } else if (fields[1] == "device") {
+            // "gpu", "cpu", or "cpu: <why the card was given up>" (not for the user as it is).
+            const bool gpu = fields[2] == "gpu";
+            const bool gaveUp = fields[2].startsWith("cpu:");
+            stage_ = gpu ? tr("Separating on the graphics card…") : tr("Separating on the processor…");
+            emit deviceChanged(
+                gpu, gaveUp ? tr("The graphics card could not run it; the processor took over.") : QString());
         } else if (fields[1] == "done") {
             stems_ = fields[2].toInt();
         } else if (fields[1] == "error") {
