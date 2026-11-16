@@ -53,7 +53,9 @@ std::uint64_t StemModel::bytes() const
 
 const std::vector<StemModel>& stemModels()
 {
+#if defined(VLOOMDAW_STEMS_ONNX)
     using Engine = StemModel::Engine;
+#endif
     static const std::vector<StemModel> kModels = {
 #if defined(VLOOMDAW_STEMS_ONNX)
         {"htdemucs_onnx", "HT Demucs",

@@ -146,6 +146,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   copy, paste (where the mouse points), duplicate, delete, quantize to the
   snap, arrow keys to move, and right-drag to delete. The Edit menu's
   commands act on the piano roll.
+- Piano roll: undo and redo of note edits (200 steps).
 - Stem extractor on the graphics card (Windows): the new HT Demucs model runs
   through ONNX Runtime with DirectML on any DirectX 12 card (NVIDIA, AMD,
   Intel). On a GTX 1650, 20 s of audio took 10 s all told, where the

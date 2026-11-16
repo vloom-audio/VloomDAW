@@ -13,7 +13,6 @@ namespace {
 constexpr int kSize = StemSpectrogram::kFftSize;
 constexpr int kHop = StemSpectrogram::kHop;
 constexpr int kLength = StemSpectrogram::kSegmentFrames;
-constexpr int kBins = StemSpectrogram::kBins;
 constexpr int kFrames = StemSpectrogram::kFrames;
 // Demucs pads the segment by 3/2 hops at each end (and at the right up to a
 // whole number of hops), then the transform centres its frames: half a
