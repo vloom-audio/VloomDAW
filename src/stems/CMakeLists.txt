@@ -55,6 +55,20 @@ set_target_properties(vloomdaw-stems PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC 
 if(MSVC)
     target_compile_options(vloomdaw-stems PRIVATE /bigobj)
 endif()
+# ONNX models, on the graphics card where there is one (cmake/OnnxRuntime.cmake).
+if(VLOOMDAW_STEMS_ONNX)
+    target_sources(vloomdaw-stems PRIVATE Onnx.cpp ../core/StemSpectrogram.cpp ../core/MdxSpectrogram.cpp)
+    target_compile_definitions(vloomdaw-stems PRIVATE VLOOMDAW_STEMS_ONNX)
+    target_link_libraries(vloomdaw-stems PRIVATE vloomdaw::onnxruntime)
+    # dml_provider_factory.h wants DirectML.h; the SDK's d3d12.h comes with Windows.
+    get_filename_component(_dml_include "${VLOOMDAW_DIRECTML_INCLUDE}" ABSOLUTE)
+    target_include_directories(vloomdaw-stems SYSTEM PRIVATE "${_dml_include}")
+    target_compile_definitions(vloomdaw-stems PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    # Its DLLs next to the helper, so it runs from the build folder.
+    add_custom_command(TARGET vloomdaw-stems POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VLOOMDAW_ONNX_DLLS} $<TARGET_FILE_DIR:vloomdaw-stems>
+        VERBATIM)
+endif()
 find_package(Threads REQUIRED)
 target_link_libraries(vloomdaw-stems PRIVATE Threads::Threads)
 vloom_set_warnings(vloomdaw-stems)

@@ -10,6 +10,10 @@
 //
 //   vloomdaw-stems --in <audio.f32> --out <folder> --threads <n> [--v3]
 //                  --model <file> [--model <file> ...]
+//   vloomdaw-stems --in <audio.f32> --out <folder> --onnx [--device auto|cpu]
+//                  [--overlap <percent>]
+//                  [--mdx-fft <samples> --mdx-gain <thousandths>]
+//                  --model <file> [--model <file> ...]
 //
 // The input is raw 32-bit float samples, stereo interleaved, at 44100 Hz.
 // Each stem is written the same way to <folder>/<index>.f32.
@@ -18,14 +22,31 @@
 // (the fine-tuned set, one model per stem). --v3: the files are Hybrid
 // Demucs (v3) models.
 //
+// --overlap: how much of each piece given to the model is shared with the
+// next, 25 (the default) to 75 percent; more is smoother and slower.
+//
+// --mdx-fft: the model is an MDX-Net one, made for a transform window of
+// that many samples. It gives two stems: its own, multiplied by --mdx-gain,
+// and the rest of the song.
+//
+// Without --onnx the models are demucs.cpp's and run on the processor.
+// With it (Windows builds) they are ONNX models run by ONNX Runtime: on the
+// graphics card through DirectML when there is one that can (any DirectX 12
+// card: NVIDIA, AMD, Intel), else on the processor, which is still many
+// times faster than demucs.cpp. --device cpu leaves the card alone.
+//
 // Output (one record per line, tab-separated; other lines are the library's
 // own and to be ignored):
 //   @@vloom	stems	1
 //   @@vloom	progress	<0 .. 1>
+//   @@vloom	device	gpu | cpu[: why the graphics card was given up]   (--onnx)
 //   @@vloom	done	<number of stems>
 //   @@vloom	error	<message>              (exit code 1)
 
 #include "core/StemChunks.hpp"
+#if defined(VLOOMDAW_STEMS_ONNX)
+#include "stems/Onnx.hpp"
+#endif
 
 #include <Eigen/Dense>
 #include <algorithm>
@@ -64,6 +85,12 @@ struct Args {
     std::vector<fs::path> models;
     int threads = 1;
     bool v3 = false;
+    bool onnx = false;
+    bool gpu = true; ///< --onnx: try the graphics card first
+    bool unsafeFusion = false;
+    int overlap = 25; ///< --onnx: percent
+    int mdxFft = 0; ///< --onnx: an MDX-Net model, its transform window
+    float mdxGain = 1.0f;
 };
 
 struct Failure {
@@ -210,10 +237,71 @@ std::string enterModelFolder(const fs::path& model)
     return name;
 }
 
+void writeStems(const Args& args, const Stems& stems)
+{
+    for (std::size_t i = 0; i < stems.size(); ++i) {
+        const fs::path path = args.out / (std::to_string(i) + ".f32");
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(stems[i].data()),
+            static_cast<std::streamsize>(stems[i].size() * sizeof(float)));
+        out.flush();
+        if (!out)
+            throw Failure{"cannot write the stems"};
+    }
+    say("done", std::to_string(stems.size()));
+}
+
+#if defined(VLOOMDAW_STEMS_ONNX)
+int runOnnx(const Args& args, const Eigen::MatrixXf& audio)
+{
+    const auto frames = static_cast<std::size_t>(audio.cols());
+    std::vector<float> left(frames);
+    std::vector<float> right(frames);
+    for (std::size_t i = 0; i < frames; ++i) {
+        left[i] = audio(0, static_cast<Eigen::Index>(i));
+        right[i] = audio(1, static_cast<Eigen::Index>(i));
+    }
+    vloomdaw::stems::OnnxJob job;
+    job.models = args.models;
+    job.allowGpu = args.gpu;
+    job.unsafeFusion = args.unsafeFusion;
+    job.overlapPercent = args.overlap;
+    job.mdxFft = args.mdxFft;
+    job.mdxGain = args.mdxGain;
+    float said = -1.0f;
+    job.progress = [&said](double done) {
+        if (static_cast<float>(done) - said < 0.002f)
+            return;
+        said = static_cast<float>(done);
+        say("progress", std::to_string(done));
+    };
+    job.device = [](const std::string& device) { say("device", device); };
+    try {
+        writeStems(args, vloomdaw::stems::separateOnnx(left, right, job));
+    } catch (const Failure&) {
+        throw;
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const std::exception& e) {
+        // ONNX Runtime's own messages name files and lines: not for the user.
+        std::fprintf(stderr, "onnx: %s\n", e.what());
+        throw Failure{"the model could not be run"};
+    }
+    return 0;
+}
+#endif
+
 int run(const Args& args)
 {
     say("stems", "1");
     const Eigen::MatrixXf audio = readInput(args.in);
+    if (args.onnx) {
+#if defined(VLOOMDAW_STEMS_ONNX)
+        return runOnnx(args, audio);
+#else
+        throw Failure{"this build cannot run ONNX models"};
+#endif
+    }
     const auto frames = static_cast<std::int64_t>(audio.cols());
     const std::vector<StemChunk> chunks
         = vloomdaw::stemChunks(frames, args.threads, kOverlap, kMinChunkFrames);
@@ -256,16 +344,7 @@ int run(const Args& args)
         }
     }
 
-    for (std::size_t i = 0; i < stems.size(); ++i) {
-        const fs::path path = args.out / (std::to_string(i) + ".f32");
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        out.write(reinterpret_cast<const char*>(stems[i].data()),
-            static_cast<std::streamsize>(stems[i].size() * sizeof(float)));
-        out.flush();
-        if (!out)
-            throw Failure{"cannot write the stems"};
-    }
-    say("done", std::to_string(stems.size()));
+    writeStems(args, stems);
     return 0;
 }
 
@@ -291,6 +370,19 @@ template <typename Char> int start(int argc, Char** argv)
                 args.threads = std::clamp(std::atoi(value().string().c_str()), 1, kMaxThreads);
             else if (option == "--v3")
                 args.v3 = true;
+            else if (option == "--onnx")
+                args.onnx = true;
+            else if (option == "--device")
+                args.gpu = value().string() != "cpu";
+            else if (option == "--mdx-fft")
+                args.mdxFft = std::clamp(std::atoi(value().string().c_str()), 0, 16384);
+            else if (option == "--mdx-gain") // thousandths, so no decimal point to mind
+                args.mdxGain = static_cast<float>(std::clamp(std::atoi(value().string().c_str()), 500, 2000))
+                    / 1000.0f;
+            else if (option == "--overlap")
+                args.overlap = std::clamp(std::atoi(value().string().c_str()), 25, 75);
+            else if (option == "--unsafe-fusion") // test only: see OnnxJob::unsafeFusion
+                args.unsafeFusion = true;
             else
                 throw Failure{"unknown option"};
         }

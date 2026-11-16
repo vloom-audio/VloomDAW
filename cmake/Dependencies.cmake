@@ -55,6 +55,10 @@ set_target_properties(nlohmann_json PROPERTIES SYSTEM TRUE)
 # ---------------------------------------------------------------- FFmpeg
 include(${CMAKE_CURRENT_LIST_DIR}/FFmpeg.cmake)
 
+# ---------------------------------------------------------------- ONNX Runtime
+# The stem separator's graphics-card path (Windows x64).
+include(${CMAKE_CURRENT_LIST_DIR}/OnnxRuntime.cmake)
+
 # ---------------------------------------------------------------- Qt 6
 if(VLOOMDAW_BUILD_APP)
     # Network: only the stem model store downloads anything (ui/stems/StemModelStore).
