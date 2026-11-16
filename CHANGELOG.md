@@ -11,6 +11,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Hardened plugin thumbnail cache IDs and file lookups (`PluginMetadata::pluginThumbnailId`, `isValidPluginThumbnailId`, `PluginThumbnails`) against ill-formed non-UTF-8/unpaired-surrogate paths, `Builtin` vs. `Vst3` digest collisions, and directory traversal outside `thumbnails/`.
 
 ### Fixed
+- Fixed Mixer `0.0 dB` label overlapping the fader when horizontal scrollbars or compact heights reduced strip space (`MixerStrip`, `MixerSlotRack`, `Fader`), and added guaranteed bottom overscroll space (`+ Right-click to Add Track`) below the last Playlist track so users can always right-click or double-click empty space to add tracks (`PlaylistView`).
+- Eliminated the UI stall when switching between `Instruments` and `FX` in `PluginsPanel` (`PluginsPanel`, `PluginThumbnails`): each tab now owns a pre-built `QTreeWidget` inside a `QStackedWidget` with fixed format-column width, detached batch population, on-demand hover tooltips, and an in-memory `thumbnails/` directory index so switching tabs with 300+ plugins is an instant page flip.
+- Changed startup metronome default from `ON` to `OFF` (`AppSettings`, `TransportBar`, `main.cpp`) so launching VloomDAW starts with the metronome silent unless explicitly enabled in Settings.
+- Replaced the silent wait-cursor freeze when opening `.vloom` projects with a Studio One-style `ProjectLoadDialog` (`Loading <ProjectName>…`) showing live stage progress (`Reading project file…`, `Loading Device: <Plugin>`, `Loading Audio: <File>`, `Building mixer & arrangement…`) and a responsive `Cancel` button (`ProjectLoadDialog`, `MainWindow`).
 - Guarded asynchronous background sample-load callbacks (`MainWindow::projectGeneration_`) against project reset/open/undo/redo races and pruned unloaded plugin handles from `unpublishedInstruments_` during undo cleanup.
 - Fixed `bindAudioToTrack` channel reuse to inspect per-channel step/note usage across all patterns (`isChannelUsedInAnyPattern`) rather than Pattern 1 globally, and hardened clipboard tick arithmetic, `UndoHistory` timestamp coalescing, and non-finite `±infinity` parameter/tempo guards (`TrackRouting`, `UndoHistory`, `Project`, `MixerModel`, `ChannelRackAudio`, `PlaylistView`, `PianoRollView`).
 - Timeline track & Mixer strip synchronization: unified 1:1 state and routing
@@ -55,6 +59,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
   format and its options, instead of a file dialog followed by a question.
 
 ### Added
+- Studio-grade `About VloomDAW` dialog (`AboutDialog`, `MainWindow`):
+  - Custom-painted obsidian-violet studio hero banner with harmonic waveform graphic, emblem, version pill, segmented `System & Engine` and `License & Credits` tabs, live audio I/O & plug-in count cards, 1-click `Copy System Info` diagnostics button, and direct `GitHub` / `Report Issue` links.
+- Mixer `Mono / Stereo` DSP toggle, enlarged pan bars, inline rename, VSTi playlist drag-and-drop, synced channel deletion, and clean zero-track empty projects (`MixerModel`, `MixerAudio`, `MixerStrip`, `MixerPanel`, `PlaylistView`, `Project`, `ProjectFile`, `MainWindow`):
+  - Studio One-style `Stereo` / `Mono` button on every Mixer channel strip and on `Main` (Master), performing real DSP stereo-to-mono summing (`0.5 * (L + R)`) and persisting in `.vloom` projects.
+  - Slim `82 px` Insert / `88 px` Master console strips (`108 px` / `114 px` in `Wide Strips` mode) with a draggable `Inserts` FX rack resize handle (`0..9` visible slots, stretching faders taller across all strips in unison and saved in `QSettings`), enlarged `30 px` horizontal bipolar `<C>` pan controls, inline bottom-plate rename on double-click (no popup dialog), drag-and-drop of VSTi/CLAP/built-in instruments directly onto the Playlist with automatic 1:1 Mixer channel creation, synced Playlist track removal when deleting a Mixer channel, and `0` initial Playlist tracks on empty projects.
+- Studio One-inspired Mixer Console (`MixerModel`, `MixerAudio`, `MixerPanel`, `MixerStrip`, `ProjectFile`, `MainWindow`):
+  - Dedicated `Bus`, `FX` (Effect Return), and `Aux` channels via right-click context menus (`Add Bus Channel`, `Add FX Channel`, `Add Aux Channel`, `Add Bus for Selected Channel`, `Add FX Send for Selected Channel`) and console header buttons, with solo-safe upstream/downstream audibility and full `.vloom` persistence.
+  - Per-strip `Inserts` and `Sends` racks (with interactive send level bars, mute & Pre-Fader toggles), Instrument source pills (clicking the loaded instrument name opens its plug-in editor directly), Audio output routing pills (`Main`, `→ Bus`, `→ Aux`), horizontal bipolar `<C>` pan sliders, sculpted silver/cyan fader caps, channel type badges (Instrument keys, Audio waveform, `FX`, `BUS`, `AUX`), full-colour bottom name plates, and right-anchored `Main` bus.
+- Right-click Playlist track creation menu & Studio One-style `Add Tracks` dialog (`AddTracksDialog`, `PlaylistView`, `MainWindow`):
+  - Right-clicking empty track-header space, a track header, or the `+ Track` button offers `Add Tracks…` (`Ctrl+T`), `Add Audio Track (mono)`, `Add Audio Track (stereo)`, and `Add Instrument Track`.
+  - `Add Tracks` dialog with `Audio` and `Instrument` mode cards, `Name`, `Count`, `Pack Folder`, `Color` swatch + `Auto-Color`, Audio `Format`/`FX Chain`/`Output` + `Ascending`, and Instrument `New Instrument` (plugin picker + `Open Editor`) / `Existing Instrument` + `Ascending`.
 - Export to FLAC (16 or 24-bit), MP3, Ogg Vorbis and M4A (AAC, 96 to
   320 kbps) besides WAV; stereo or mono; dithering on or off; with or without
   the tail after the song's end; "show the file when it is done". The export

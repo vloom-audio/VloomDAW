@@ -2,9 +2,11 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "core/MixerModel.hpp"
 #include "core/PluginSlot.hpp"
 
 #include <QFrame>
+#include <QString>
 
 #include <cstddef>
 #include <cstdint>
@@ -12,19 +14,40 @@
 #include <vector>
 
 class QLabel;
+class QLineEdit;
+class QPushButton;
 class QResizeEvent;
 class QToolButton;
+class QWidget;
 
 namespace vloomdaw {
 
 class Fader;
-class Knob;
 class LevelMeter;
+class MixerSendRack;
 class MixerSlotRack;
+class StripPanBar;
+class StripRackHandle;
+class StripStereoButton;
+class StripTypeBadge;
 
-/// One mixer track: name, pan knob, FX rack, level meter, fader, dB readout,
-/// mute and solo. Emits user interactions; MixerPanel manages strip ordering
-/// and selection state.
+/// Visual representation of one active Send row on a `MixerStrip`.
+struct MixerSendDisplay {
+    int target = 0;
+    QString targetName{};
+    double level = 0.8;
+    bool muted = false;
+    bool preFader = false;
+};
+
+/// One Studio One-style console strip:
+/// - Top colour bar, `Inserts` header + FX slot rack, `Sends` header + send bars
+/// - Instrument / Audio source button (clicking an Instrument's name opens its plugin editor)
+/// - Output routing button (`Main`, `→ Bus 1`, `→ Aux 1`, etc.)
+/// - Bipolar horizontal pan bar (`<C>`), `[M]`/`[S]`, `0.0 dB` readout above the fader
+/// - Stereo `LevelMeter` + sculpted `Fader`
+/// - Channel number + type icon (`Instrument` keys, `Audio` wave, `FX`, `BUS`, `AUX`)
+/// - Full-colour bottom name plate
 class MixerStrip : public QFrame {
     Q_OBJECT
 
@@ -34,34 +57,44 @@ public:
     MixerStrip(Kind kind, const QString& name, const QString& number, QWidget* parent = nullptr);
 
     [[nodiscard]] LevelMeter* meter() const { return meter_; }
-    /// New name and number, e.g. after an insert before it was deleted.
     void setLabel(const QString& name, const QString& number);
-    /// The user's colour (0xRRGGBB), drawn as a bar along the top; nullopt: none.
     void setColor(std::optional<std::uint32_t> color);
-    /// Marks this strip as the currently selected mixer channel (Fender Studio style).
     void setSelected(bool selected);
     [[nodiscard]] bool isSelected() const { return selected_; }
-    /// Shows how many effects the track has (kept for compatibility).
+
+    void setRole(MixerRole role);
+    [[nodiscard]] MixerRole role() const { return role_; }
+
     void setEffectCount(std::size_t count);
-    /// Shows the track's effects in the FX rack.
     void setEffects(const std::vector<PluginSlot>& effects);
     [[nodiscard]] bool hasEffects() const { return effectCount_ > 0; }
-    /// Toggles wider strip & FX slot layout (68 px vs 88 px).
-    void setWideMode(bool wide);
-    /// Shows or hides the FX slot rack so faders can use the full strip height.
-    void setFxRackVisible(bool visible);
-    /// Marks what kind of channel routes into this insert strip for footer filtering.
+
+    void setSends(const std::vector<MixerSendDisplay>& sends);
+
+    /// Updates channel source metadata & output target shown on the routing pills:
+    /// - Instrument strip: shows `instrumentName` in gold (click opens instrument editor).
+    /// - Audio strip: shows `sourceLabel` (e.g. "Audio · Stereo") and `outputLabel` ("Main", "Bus 1", ...).
+    void setChannelRoutingInfo(bool hasAudio, bool hasInstrument, const QString& instrumentName,
+        const QString& sourceLabel, int outputTarget, const QString& outputLabel);
+
     void setSourceFlags(bool hasAudio, bool hasInstrument);
     [[nodiscard]] bool hasAudioSource() const { return hasAudioSource_; }
     [[nodiscard]] bool hasInstrumentSource() const { return hasInstrumentSource_; }
-    /// Shows saved settings (a project was opened) without signalling them back.
+    [[nodiscard]] bool isBusOrFxRole() const { return role_ != MixerRole::Standard; }
+
+    void setWideMode(bool wide);
+    void setFxRackVisible(bool visible);
+    void setUserFxSlotRows(int rows);
+    [[nodiscard]] int userFxSlotRows() const { return userFxSlotRows_; }
     void setValues(double fader, double pan, bool muted, bool soloed);
+    void setMono(bool mono);
+    [[nodiscard]] bool isMono() const { return mono_; }
+    void startInlineRename();
     [[nodiscard]] std::optional<std::uint32_t> color() const { return color_; }
     [[nodiscard]] QSize minimumSizeHint() const override;
     [[nodiscard]] QSize sizeHint() const override;
 
 public slots:
-    /// Greys the strip out while another insert's solo silences it.
     void setSilenced(bool silenced);
 
 signals:
@@ -70,22 +103,28 @@ signals:
     void panChanged(double pan); ///< -1 left .. +1 right
     void muteToggled(bool muted);
     void soloToggled(bool soloed);
-    /// The name was double-clicked (inserts only): the user wants to rename.
+    void monoToggled(bool mono);
+    void userFxSlotRowsChanged(int rows);
     void renameRequested();
-    /// The top colour bar was clicked: open the colour picker at `globalPos`.
+    void nameEdited(const QString& name);
     void colorPickRequested(const QPoint& globalPos);
-    /// The FX button was clicked: show the track's effects at `globalPos`.
     void effectsMenuRequested(const QPoint& globalPos);
-    /// An effect slot's bypass switch was clicked.
     void effectBypassToggled(std::size_t slot, bool bypassed);
-    /// An effect slot body was clicked: open editor (if loaded) or insert menu (if empty).
     void effectClicked(std::size_t slot);
-    /// Context menu requested for slot `slot` at `globalPos`.
     void effectMenuRequested(std::size_t slot, const QPoint& globalPos);
-    /// Plugin `plugin` was dropped specifically onto slot `slot`.
     void pluginDroppedOnSlot(std::size_t slot, std::size_t plugin);
-    /// Plugin `plugin` (an index into the plugin store) was dropped on the strip.
     void pluginDropped(std::size_t plugin);
+
+    /// Studio One source / instrument / output / send interactions:
+    void instrumentClicked();
+    void instrumentMenuRequested(const QPoint& globalPos);
+    void sourceClicked(const QPoint& globalPos);
+    void outputRoutingRequested(const QPoint& globalPos);
+    void addSendMenuRequested(const QPoint& globalPos);
+    void sendLevelChanged(std::size_t sendSlot, double level);
+    void sendMuteToggled(std::size_t sendSlot, bool muted);
+    void sendPreFaderToggled(std::size_t sendSlot, bool preFader);
+    void sendMenuRequested(std::size_t sendSlot, const QPoint& globalPos);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -97,26 +136,55 @@ protected:
 
 private:
     void showDb(double position);
-    /// Shows fullName_ in name_, cut with "…" to the room it has.
     void elideName();
-    void syncFxSlotCount();
+    void commitInlineRename();
+    void cancelInlineRename();
+    void refreshRoutingPills();
+    void updateCapAndNamePlateStyle();
+    void syncRackHeights();
+
+    QWidget* insertsHdr_ = nullptr;
+    MixerSlotRack* fxRack_ = nullptr;
+    StripRackHandle* fxResizeHandle_ = nullptr;
+    QWidget* sendsHdr_ = nullptr;
+    MixerSendRack* sendRack_ = nullptr;
+
+    QPushButton* sourceBtn_ = nullptr;
+    QPushButton* outputBtn_ = nullptr;
+    StripPanBar* panBar_ = nullptr;
+
+    QToolButton* mute_ = nullptr;
+    QToolButton* solo_ = nullptr;
+    StripStereoButton* monoBtn_ = nullptr;
+    QLabel* db_ = nullptr;
 
     LevelMeter* meter_ = nullptr;
     Fader* fader_ = nullptr;
-    Knob* pan_ = nullptr;
-    QLabel* db_ = nullptr;
-    QLabel* name_ = nullptr;
-    QString fullName_;
+
     QLabel* number_ = nullptr;
-    QLabel* route_ = nullptr;
-    QToolButton* mute_ = nullptr;
-    QToolButton* solo_ = nullptr; ///< inserts only
-    MixerSlotRack* fxRack_ = nullptr; ///< scrollable FX slots
+    StripTypeBadge* badge_ = nullptr;
+    QWidget* namePlate_ = nullptr;
+    QLabel* name_ = nullptr;
+    QLineEdit* nameEditor_ = nullptr;
+    QString fullName_;
+    bool committingRename_ = false;
+    bool cancellingRename_ = false;
+
     Kind kind_ = Kind::Insert;
+    MixerRole role_ = MixerRole::Standard;
     std::size_t effectCount_ = 0;
+    std::size_t sendCount_ = 0;
+    int userFxSlotRows_ = 5;
+    int shownFxSlots_ = 5;
+    bool fxRackVisible_ = true;
     bool wideMode_ = false;
+    bool mono_ = false;
     bool hasAudioSource_ = false;
     bool hasInstrumentSource_ = false;
+    QString instrumentName_;
+    QString sourceLabel_;
+    int outputTarget_ = 0;
+    QString outputLabel_;
     std::optional<std::uint32_t> color_;
     bool selected_ = false;
 };

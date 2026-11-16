@@ -119,8 +119,14 @@ qt_add_library(vloomdaw_ui STATIC
     ui/browser/SearchResultsModel.hpp
     ui/channelrack/ChannelRackView.cpp
     ui/channelrack/ChannelRackView.hpp
+    ui/dialogs/AboutDialog/AboutDialog.cpp
+    ui/dialogs/AboutDialog/AboutDialog.hpp
+    ui/dialogs/AddTracksDialog/AddTracksDialog.cpp
+    ui/dialogs/AddTracksDialog/AddTracksDialog.hpp
     ui/dialogs/ExportDialog.cpp
     ui/dialogs/ExportDialog.hpp
+    ui/dialogs/ProjectLoadDialog/ProjectLoadDialog.cpp
+    ui/dialogs/ProjectLoadDialog/ProjectLoadDialog.hpp
     ui/dialogs/SettingsDialog/AudioSettingsPage.cpp
     ui/dialogs/SettingsDialog/AudioSettingsPage.hpp
     ui/dialogs/SettingsDialog/GeneralSettingsPage.cpp
@@ -276,6 +282,8 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-select.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-slice.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-zoom.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/track-audio.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/track-instrument.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/track-mute.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/track-solo.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/volume-down.svg

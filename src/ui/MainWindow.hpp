@@ -71,8 +71,10 @@ class PanelFrame;
 class PerformanceOverlay;
 class PianoRollView;
 class PlaylistView;
+struct AddTracksSpec;
 struct ClipAudio;
 class PluginManagerDialog;
+class ProjectLoadDialog;
 class StemSeparator;
 struct StemFile;
 class PluginEditorWindow;
@@ -155,14 +157,30 @@ private:
     /// Adds (+1) or removes (-1) a bar of step pads in the current pattern.
     void changeBars(int bars);
     void addMixerInsert();
+    void addMixerRoleChannel(MixerRole role);
+    void addBusForMixerTrack(std::size_t track);
+    void addFxSendForMixerTrack(std::size_t track);
+    void openMixerInstrumentEditor(std::size_t track);
+    void showMixerInstrumentMenu(std::size_t track, const QPoint& globalPos);
+    void showMixerSourceMenu(std::size_t track, const QPoint& globalPos);
+    void showMixerOutputMenu(std::size_t track, const QPoint& globalPos);
+    void showMixerAddSendMenu(std::size_t track, const QPoint& globalPos);
+    void showMixerSendMenu(std::size_t track, std::size_t sendSlot, const QPoint& globalPos);
+    void copyMixerChannelSettings(std::size_t track);
+    void pasteMixerChannelSettings(std::size_t track);
     void removeMixerInsert(std::size_t track);
     void renameMixerInsert(std::size_t track);
     void addPlaylistTrack();
+    void showAddTracksDialog(int afterTrack = -1);
+    void applyAddTracksSpec(const AddTracksSpec& spec, int afterTrack);
+    void addQuickAudioTrack(int afterTrack, bool mono);
+    void addQuickInstrumentTrack(int afterTrack);
     void removePlaylistTrack(std::size_t track);
     void renamePlaylistTrack(std::size_t track);
     void showTrackChannelMenu(std::size_t track, const QPoint& globalPos);
     void showTrackRoutingMenu(std::size_t track, const QPoint& globalPos);
     void dropAudioFiles(const QStringList& paths, int track, int start);
+    void handlePluginDroppedOnPlaylist(std::size_t pluginIndex, int track, int startTick);
     /// Loads (decoding if needed) the sample at `path` on a background thread,
     /// then calls `then` on this thread; the UI stays responsive meanwhile.
     /// Calls `onFailed` (if set) and reports in the status bar when loading fails.
@@ -375,8 +393,9 @@ private:
     void updateWindowTitle();
     /// Replaces the project, mixer and song settings with `incoming`, loading the
     /// plugins it names (only ones found by the plugin scan) with their
-    /// saved settings. What could not be restored is added to `problems`.
-    void applyProject(ProjectData incoming, QStringList& problems);
+    /// saved settings and reporting progress to `progress` (if non-null).
+    /// Returns `false` if cancelled via `progress`, leaving the current project intact.
+    bool applyProject(ProjectData incoming, QStringList& problems, ProjectLoadDialog* progress = nullptr);
     /// Matches the mixer panel's strips to mixer_ (count, names, values).
     void syncMixerPanel();
     /// Whether `slot` is a plugin the user's scan found (a project file may
@@ -400,7 +419,7 @@ private:
 
     AudioController& audio_;
     MixerModel mixer_;
-    Project project_;
+    Project project_{0};
     PluginHost pluginHost_; ///< the plugins the project uses, loaded
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
     /// By plugin handle: a PluginEditorWindow, or for a plugin without an
@@ -520,6 +539,15 @@ private:
     bool scrubStopSent_ = false; ///< the engine took that stop
 
     // Undo / redo history and shared window actions
+    struct CopiedChannelSettings {
+        double fader = 0.8;
+        double pan = 0.0;
+        bool mono = false;
+        std::vector<PluginSlot> effects{};
+        std::vector<std::vector<std::uint8_t>> effectStates{};
+        std::vector<MixerSend> sends{};
+    };
+    std::optional<CopiedChannelSettings> copiedChannelSettings_;
     UndoHistory undoHistory_;
     bool applyingUndoRedo_ = false;
     QAction* undoAction_ = nullptr;

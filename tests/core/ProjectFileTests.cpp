@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "core/ProjectFile.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -439,4 +440,54 @@ TEST_CASE("Network share UNC paths in plugin slots and project paths are refused
     CHECK(uncLoad.error.find("network") != std::string::npos);
     CHECK_FALSE(
         ProjectFile::summarize(std::filesystem::path("//127.0.0.1/share/song.vloom"), 4096).has_value());
+}
+
+TEST_CASE("Mixer Bus, FX, Aux roles, submix outputs and sends round-trip cleanly", "[project-file]")
+{
+    ProjectData saved;
+    const auto gtr = saved.mixer.addInsert();
+    const auto bus = saved.mixer.addChannel(MixerRole::Bus, "Drum Bus");
+    const auto fx = saved.mixer.addChannel(MixerRole::Fx, "Hall Reverb");
+    REQUIRE(gtr == 1);
+    REQUIRE(bus == 2);
+    REQUIRE(fx == 3);
+    REQUIRE(saved.mixer.setOutput(*gtr, static_cast<int>(*bus)));
+    REQUIRE(saved.mixer.addSend(*gtr, static_cast<int>(*fx), 0.65, true));
+    saved.mixer.setSendMuted(*gtr, 0, true);
+
+    const std::string json = ProjectFile::write(saved, {});
+    const auto read = ProjectFile::read(json, {});
+    REQUIRE(read.data);
+    CHECK(read.warnings.empty());
+    REQUIRE(read.data->mixer.size() == 4);
+    CHECK(read.data->mixer.track(2).role == MixerRole::Bus);
+    CHECK(read.data->mixer.track(2).name == "Drum Bus");
+    CHECK(read.data->mixer.track(3).role == MixerRole::Fx);
+    CHECK(read.data->mixer.track(3).name == "Hall Reverb");
+    CHECK(read.data->mixer.track(1).output == 2);
+    REQUIRE(read.data->mixer.track(1).sends.size() == 1);
+    CHECK(read.data->mixer.track(1).sends[0].target == 3);
+    CHECK(read.data->mixer.track(1).sends[0].level == Catch::Approx(0.65));
+    CHECK(read.data->mixer.track(1).sends[0].preFader);
+    CHECK(read.data->mixer.track(1).sends[0].muted);
+}
+
+TEST_CASE("Empty zero-track projects and mixer Mono mode round-trip cleanly", "[project-file]")
+{
+    ProjectData saved;
+    saved.project = Project(0);
+    REQUIRE(saved.project.tracks().empty());
+    const auto ins = saved.mixer.addInsert();
+    REQUIRE(ins == 1);
+    saved.mixer.setMono(MixerModel::kMaster, true);
+    saved.mixer.setMono(*ins, true);
+
+    const std::string json = ProjectFile::write(saved, {});
+    const auto read = ProjectFile::read(json, {});
+    REQUIRE(read.data);
+    CHECK(read.warnings.empty());
+    CHECK(read.data->project.tracks().empty());
+    CHECK(read.data->mixer.track(MixerModel::kMaster).mono);
+    REQUIRE(read.data->mixer.size() == 2);
+    CHECK(read.data->mixer.track(1).mono);
 }

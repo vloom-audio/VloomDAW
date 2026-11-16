@@ -139,6 +139,8 @@ signals:
     void sourcePicked(vloomdaw::PlaylistView::ClipSource source);
     /// Audio files were dropped: one audio clip per file starting at `track` and `start` ticks.
     void audioDropped(const QStringList& paths, int track, int start);
+    /// A plugin from PluginsPanel was dropped onto `track` (`>= trackCount()`: new track) at `startTick`.
+    void pluginDroppedOnPlaylist(std::size_t pluginIndex, int track, int startTick);
     void audioClipChanged(std::size_t index, vloomdaw::AudioClip clip);
     void audioClipRemoved(std::size_t index);
     /// The user right-clicked an audio clip's title strip: show its menu at `globalPos`.
@@ -173,6 +175,10 @@ signals:
     void trackChannelMenuRequested(std::size_t track, QPoint globalPos);
     void trackRoutingMenuRequested(std::size_t track, QPoint globalPos);
     void trackSelected(std::size_t track);
+    /// Track creation actions (`afterTrack < 0` appends at the end; `>= 0` inserts right below `afterTrack`).
+    void addTracksDialogRequested(int afterTrack);
+    void addAudioTrackRequested(int afterTrack, bool mono);
+    void addInstrumentTrackRequested(int afterTrack);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -253,6 +259,7 @@ private:
     [[nodiscard]] QRect trackMeterRect(int track) const;
     void selectTrackByUser(int track);
     void repaintTrackRow(int track);
+    void populateAddTrackActions(QMenu& menu, int afterTrack);
     /// Toggles mute, solo, collapse or opens an inspector menu when `pos` hits one.
     bool handleTrackHeaderClick(int track, const QPoint& pos, const QPoint& globalPos);
     void paintTrackHeader(QPainter& p, int track) const;

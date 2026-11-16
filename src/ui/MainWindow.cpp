@@ -7,6 +7,7 @@
 #include "audio/TempoDetector.hpp"
 #include "audio/TimeStretch.hpp"
 #include "core/BrowserFilter.hpp"
+#include "core/Decibels.hpp"
 #include "core/DeviceRef.hpp"
 #include "core/NoteNames.hpp"
 #include "core/PluginMetadata.hpp"
@@ -24,7 +25,10 @@
 #include "ui/browser/SamplePreviewer.hpp"
 #include "ui/browser/SampleWaveform.hpp"
 #include "ui/channelrack/ChannelRackView.hpp"
+#include "ui/dialogs/AboutDialog/AboutDialog.hpp"
+#include "ui/dialogs/AddTracksDialog/AddTracksDialog.hpp"
 #include "ui/dialogs/ExportDialog.hpp"
+#include "ui/dialogs/ProjectLoadDialog/ProjectLoadDialog.hpp"
 #include "ui/dialogs/SettingsDialog/AudioSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/GeneralSettingsPage.hpp"
 #include "ui/dialogs/SettingsDialog/SettingsDialog.hpp"
@@ -187,7 +191,7 @@ constexpr QLatin1StringView kPlaylistHeaderWidthKey{"playlist/headerWidth"};
 
 constexpr int kDefaultSidebarWidth = 260;
 constexpr int kThemeApplyMs = 200; ///< full restyle once theme edits pause this long
-constexpr int kDefaultMixerHeight = 380;
+constexpr int kDefaultMixerHeight = 408;
 constexpr std::size_t kMixerInserts = 0;
 constexpr double kDefaultTempo = 120.0; ///< BPM of a new project
 
@@ -393,6 +397,9 @@ void MainWindow::createMenus()
     selectAllAction_ = addEditAction(
         tr("Select &All"), {QKeySequence(Qt::CTRL | Qt::Key_A)}, [this] { performSelectAll(); });
     addEditAction(tr("&Quantize"), {QKeySequence(Qt::CTRL | Qt::Key_Q)}, [this] { performQuantize(); });
+    editMenu->addSeparator();
+    addEditAction(
+        tr("Add &Tracks…"), {QKeySequence(Qt::CTRL | Qt::Key_T)}, [this] { showAddTracksDialog(-1); });
     connect(editMenu, &QMenu::aboutToShow, this, &MainWindow::updateUndoActions);
     updateUndoActions();
 
@@ -684,22 +691,492 @@ void MainWindow::addMixerInsert()
     updateMixer();
 }
 
-void MainWindow::renameMixerInsert(std::size_t track)
+void MainWindow::addMixerRoleChannel(MixerRole role)
+{
+    if (mixer_.insertCount() >= MixerModel::kMaxInserts) {
+        statusBar()->showMessage(tr("The mixer has up to %1 channels.").arg(MixerModel::kMaxInserts), 4000);
+        return;
+    }
+    const QString undoLabel = role == MixerRole::Bus ? tr("Add Bus Channel")
+        : role == MixerRole::Fx                      ? tr("Add FX Channel")
+        : role == MixerRole::Aux                     ? tr("Add Aux Channel")
+                                                     : tr("Add Insert");
+    recordUndo(undoLabel);
+    const auto added = mixer_.addChannel(role);
+    if (!added)
+        return;
+
+    syncMixerPanel();
+    syncInsertNames();
+    mixerPanel_->setSelectedTrack(*added);
+    updateMixer();
+    setMixerVisible(true);
+
+    const QString chTitle = QString::fromStdString(mixer_.track(*added).name);
+    if (role == MixerRole::Fx) {
+        statusBar()->showMessage(
+            tr("Created %1 — add a Reverb / Delay in Inserts and feed it via Sends.").arg(chTitle), 5000);
+    } else if (role == MixerRole::Bus) {
+        statusBar()->showMessage(
+            tr("Created %1 — route channels' Output to %1 to submix them.").arg(chTitle), 5000);
+    } else {
+        statusBar()->showMessage(tr("Created %1.").arg(chTitle), 3500);
+    }
+}
+
+void MainWindow::addBusForMixerTrack(std::size_t track)
 {
     if (track == MixerModel::kMaster || track >= mixer_.size())
         return;
-    const MixerTrack& t = mixer_.track(track);
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("Rename Insert %1").arg(track),
-        tr("Name (leave empty for \u201CInsert %1\u201D):").arg(track), QLineEdit::Normal,
-        t.named ? QString::fromStdString(t.name) : QString(), &ok);
-    if (!ok)
+    if (mixer_.insertCount() >= MixerModel::kMaxInserts) {
+        statusBar()->showMessage(tr("The mixer has up to %1 channels.").arg(MixerModel::kMaxInserts), 4000);
         return;
-    recordUndo(tr("Rename Track"));
-    syncInsertName(project_, mixer_, track, name.toStdString());
-    mixerPanel_->setTrackName(track, QString::fromStdString(mixer_.track(track).name));
+    }
+    recordUndo(tr("Add Bus for Channel"));
+    const auto busIdx = mixer_.addChannel(MixerRole::Bus);
+    if (!busIdx)
+        return;
+    (void)mixer_.setOutput(track, static_cast<int>(*busIdx));
+
+    syncMixerPanel();
     syncInsertNames();
-    playlist_->refresh();
+    if (playlist_ != nullptr)
+        playlist_->updateHeaders();
+    mixerPanel_->setSelectedTrack(*busIdx);
+    updateMixer();
+    statusBar()->showMessage(tr("Routed %1 → %2")
+                                 .arg(QString::fromStdString(mixer_.track(track).name),
+                                     QString::fromStdString(mixer_.track(*busIdx).name)),
+        4000);
+}
+
+void MainWindow::addFxSendForMixerTrack(std::size_t track)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+    if (mixer_.insertCount() >= MixerModel::kMaxInserts) {
+        statusBar()->showMessage(tr("The mixer has up to %1 channels.").arg(MixerModel::kMaxInserts), 4000);
+        return;
+    }
+    recordUndo(tr("Add FX Send"));
+    const auto fxIdx = mixer_.addChannel(MixerRole::Fx);
+    if (!fxIdx)
+        return;
+    (void)mixer_.addSend(track, static_cast<int>(*fxIdx), 0.8, false);
+
+    syncMixerPanel();
+    syncInsertNames();
+    mixerPanel_->setSelectedTrack(*fxIdx);
+    updateMixer();
+    statusBar()->showMessage(tr("Added Send from %1 → %2")
+                                 .arg(QString::fromStdString(mixer_.track(track).name),
+                                     QString::fromStdString(mixer_.track(*fxIdx).name)),
+        4000);
+    // Offer effect picker immediately on the new FX channel's Slot 1!
+    showEffectChooserMenu(*fxIdx, 0, QCursor::pos());
+}
+
+void MainWindow::openMixerInstrumentEditor(std::size_t track)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+    const auto targetIns = static_cast<int>(track);
+    std::optional<std::size_t> instCh;
+    std::optional<std::size_t> fallbackCh;
+    for (std::size_t c = 0; c < project_.channels().size(); ++c) {
+        if (project_.channels()[c].insert != targetIns)
+            continue;
+        if (!fallbackCh)
+            fallbackCh = c;
+        if (project_.channels()[c].instrument.has_value()) {
+            instCh = c;
+            break;
+        }
+    }
+    if (instCh) {
+        selectChannel(*instCh);
+        const Channel& ch = project_.channels()[*instCh];
+        if (ch.instrument && ch.instrument->instance != 0) {
+            openPluginEditor(ch.instrument->instance, QString::fromStdString(ch.instrument->name));
+            return;
+        }
+    }
+    if (fallbackCh) {
+        selectChannel(*fallbackCh);
+        showInstrumentChooserMenu(*fallbackCh, QCursor::pos());
+    }
+}
+
+void MainWindow::showMixerInstrumentMenu(std::size_t track, const QPoint& globalPos)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+    const auto targetIns = static_cast<int>(track);
+    std::optional<std::size_t> instCh;
+    for (std::size_t c = 0; c < project_.channels().size(); ++c) {
+        if (project_.channels()[c].insert == targetIns && project_.channels()[c].instrument.has_value()) {
+            instCh = c;
+            break;
+        }
+    }
+    if (!instCh)
+        instCh = insertPrimaryChannel(project_, track);
+    if (!instCh)
+        return;
+
+    const Channel& ch = project_.channels()[*instCh];
+    QMenu menu(this);
+    if (ch.instrument && ch.instrument->instance != 0) {
+        menu.addAction(Theme::icon(QStringLiteral("track-instrument")),
+            tr("Open “%1” Editor…").arg(QString::fromStdString(ch.instrument->name)), this,
+            [this, handle = ch.instrument->instance, title = QString::fromStdString(ch.instrument->name)] {
+                openPluginEditor(handle, title);
+            });
+    }
+    menu.addAction(tr("Replace Instrument…"), this,
+        [this, chIdx = *instCh, globalPos] { showInstrumentChooserMenu(chIdx, globalPos); });
+    menu.addSeparator();
+    menu.addAction(tr("Open in Piano Roll"), this, [this, chIdx = *instCh] {
+        selectChannel(chIdx);
+        showWorkspace(WorkspacePage::PianoRoll);
+    });
+    menu.addAction(tr("Select in Channel Rack"), this, [this, chIdx = *instCh] {
+        selectChannel(chIdx);
+        showWorkspace(WorkspacePage::ChannelRack);
+    });
+    menu.exec(globalPos);
+}
+
+void MainWindow::showMixerSourceMenu(std::size_t track, const QPoint& globalPos)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+    QMenu menu(this);
+    const auto ch = insertPrimaryChannel(project_, track);
+    if (ch) {
+        const QString chName = QString::fromStdString(project_.channels()[*ch].name);
+        menu.addAction(tr("Select “%1” in Channel Rack").arg(chName), this, [this, chIdx = *ch] {
+            selectChannel(chIdx);
+            showWorkspace(WorkspacePage::ChannelRack);
+        });
+        if (!project_.channels()[*ch].samplePath.empty()) {
+            const QString file
+                = QFileInfo(QString::fromStdString(project_.channels()[*ch].samplePath)).fileName();
+            menu.addAction(tr("Audio File: %1").arg(file))->setEnabled(false);
+        }
+        menu.addSeparator();
+    }
+
+    // Show upstream mixer channels feeding this strip (when used as a Bus / FX / Aux)
+    const int thisIns = static_cast<int>(track);
+    QStringList feeders;
+    for (std::size_t i = 1; i < mixer_.size(); ++i) {
+        if (i == track)
+            continue;
+        if (mixer_.track(i).output == thisIns) {
+            feeders << tr("%1 (Output)").arg(QString::fromStdString(mixer_.track(i).name));
+        } else {
+            for (const MixerSend& s : mixer_.track(i).sends) {
+                if (s.target == thisIns)
+                    feeders << tr("%1 (Send)").arg(QString::fromStdString(mixer_.track(i).name));
+            }
+        }
+    }
+    if (!feeders.isEmpty()) {
+        menu.addAction(tr("Fed by: %1").arg(feeders.join(QStringLiteral(", "))))->setEnabled(false);
+        menu.addSeparator();
+    }
+
+    QMenu* roleMenu = menu.addMenu(tr("Channel Mode"));
+    const MixerRole curRole = mixer_.track(track).role;
+    const auto addRoleOpt = [&](const QString& label, MixerRole r) {
+        QAction* act = roleMenu->addAction(label, this, [this, track, r] {
+            recordUndo(tr("Change Channel Mode"));
+            mixer_.setRole(track, r);
+            syncMixerPanel();
+            syncInsertNames();
+        });
+        act->setCheckable(true);
+        act->setChecked(curRole == r);
+    };
+    addRoleOpt(tr("Standard Track Insert"), MixerRole::Standard);
+    addRoleOpt(tr("Bus Channel"), MixerRole::Bus);
+    addRoleOpt(tr("FX Return Channel"), MixerRole::Fx);
+    addRoleOpt(tr("Aux Channel"), MixerRole::Aux);
+
+    menu.exec(globalPos);
+}
+
+void MainWindow::showMixerOutputMenu(std::size_t track, const QPoint& globalPos)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+
+    const int curOut = mixer_.track(track).output;
+    QMenu menu(this);
+
+    const auto applyOut = [this, track](int dst) {
+        if (!mixer_.canRouteOutput(track, dst)) {
+            statusBar()->showMessage(tr("Cannot route there: that would create a feedback loop."), 4000);
+            return;
+        }
+        recordUndo(tr("Route Channel Output"));
+        mixer_.setOutput(track, dst);
+        syncMixerPanel();
+        if (playlist_ != nullptr)
+            playlist_->updateHeaders();
+        updateMixer();
+    };
+
+    QAction* mainAct = menu.addAction(tr("Main (Master Out)"), this, [applyOut] { applyOut(0); });
+    mainAct->setCheckable(true);
+    mainAct->setChecked(curOut == 0);
+
+    bool addedBusHeader = false;
+    QMenu* otherInsertsMenu = nullptr;
+    for (std::size_t i = 1; i < mixer_.size(); ++i) {
+        if (i == track)
+            continue;
+        const MixerTrack& mt = mixer_.track(i);
+        const bool can = mixer_.canRouteOutput(track, static_cast<int>(i));
+        const QString roleTag = mt.role == MixerRole::Bus ? tr(" [Bus]")
+            : mt.role == MixerRole::Aux                   ? tr(" [Aux]")
+            : mt.role == MixerRole::Fx                    ? tr(" [FX]")
+                                                          : QString();
+        const QString title = QStringLiteral("%1%2").arg(QString::fromStdString(mt.name), roleTag);
+
+        if (mt.role != MixerRole::Standard) {
+            if (!addedBusHeader) {
+                menu.addSeparator();
+                addedBusHeader = true;
+            }
+            QAction* act = menu.addAction(title, this, [applyOut, i] { applyOut(static_cast<int>(i)); });
+            act->setCheckable(true);
+            act->setChecked(curOut == static_cast<int>(i));
+            act->setEnabled(can);
+        } else {
+            if (otherInsertsMenu == nullptr)
+                otherInsertsMenu = new QMenu(tr("Other Channels"), &menu);
+            QAction* act
+                = otherInsertsMenu->addAction(title, this, [applyOut, i] { applyOut(static_cast<int>(i)); });
+            act->setCheckable(true);
+            act->setChecked(curOut == static_cast<int>(i));
+            act->setEnabled(can);
+        }
+    }
+    if (otherInsertsMenu != nullptr) {
+        menu.addSeparator();
+        menu.addMenu(otherInsertsMenu);
+    }
+
+    if (mixer_.insertCount() < MixerModel::kMaxInserts) {
+        menu.addSeparator();
+        menu.addAction(Theme::icon(QStringLiteral("plus")), tr("Route to New Bus Channel"), this,
+            [this, track] { addBusForMixerTrack(track); });
+    }
+
+    menu.exec(globalPos);
+}
+
+void MainWindow::showMixerAddSendMenu(std::size_t track, const QPoint& globalPos)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size())
+        return;
+
+    QMenu menu(this);
+    if (mixer_.track(track).sends.size() >= MixerModel::kMaxSends) {
+        menu.addAction(tr("Maximum %1 sends reached").arg(MixerModel::kMaxSends))->setEnabled(false);
+        menu.exec(globalPos);
+        return;
+    }
+
+    const auto addTargetSend = [this, track](int dst) {
+        if (!mixer_.canAddSend(track, dst))
+            return;
+        recordUndo(tr("Add Send"));
+        mixer_.addSend(track, dst, 0.8, false);
+        syncMixerPanel();
+        updateMixer();
+    };
+
+    bool anyPreferred = false;
+    QMenu* otherMenu = nullptr;
+    for (std::size_t i = 1; i < mixer_.size(); ++i) {
+        if (i == track || !mixer_.canAddSend(track, static_cast<int>(i)))
+            continue;
+        const MixerTrack& mt = mixer_.track(i);
+        if (mt.role != MixerRole::Standard) {
+            anyPreferred = true;
+            menu.addAction(QString::fromStdString(mt.name), this,
+                [addTargetSend, i] { addTargetSend(static_cast<int>(i)); });
+        } else {
+            if (otherMenu == nullptr)
+                otherMenu = new QMenu(tr("Send to Other Channel"), &menu);
+            otherMenu->addAction(QString::fromStdString(mt.name), this,
+                [addTargetSend, i] { addTargetSend(static_cast<int>(i)); });
+        }
+    }
+    if (anyPreferred && otherMenu != nullptr)
+        menu.addSeparator();
+    if (otherMenu != nullptr)
+        menu.addMenu(otherMenu);
+
+    if (mixer_.insertCount() < MixerModel::kMaxInserts) {
+        if (!menu.isEmpty())
+            menu.addSeparator();
+        menu.addAction(Theme::icon(QStringLiteral("plus")), tr("Add FX Channel && Send…"), this,
+            [this, track] { addFxSendForMixerTrack(track); });
+        menu.addAction(
+            Theme::icon(QStringLiteral("plus")), tr("Add Bus Channel && Send"), this, [this, track] {
+                recordUndo(tr("Add Bus Send"));
+                if (const auto busIdx = mixer_.addChannel(MixerRole::Bus)) {
+                    mixer_.addSend(track, static_cast<int>(*busIdx), 0.8, false);
+                    syncMixerPanel();
+                    mixerPanel_->setSelectedTrack(*busIdx);
+                    updateMixer();
+                }
+            });
+    }
+
+    menu.exec(globalPos);
+}
+
+void MainWindow::showMixerSendMenu(std::size_t track, std::size_t sendSlot, const QPoint& globalPos)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size()
+        || sendSlot >= mixer_.track(track).sends.size()) {
+        return;
+    }
+    const MixerSend send = mixer_.track(track).sends[sendSlot];
+    const QString dstName = (send.target > 0 && static_cast<std::size_t>(send.target) < mixer_.size())
+        ? QString::fromStdString(mixer_.track(static_cast<std::size_t>(send.target)).name)
+        : tr("Channel %1").arg(send.target);
+
+    QMenu menu(this);
+    menu.addAction(
+            tr("Send → %1 (%2)").arg(dstName, QString::fromStdString(formatDb(faderToGain(send.level)))))
+        ->setEnabled(false);
+    menu.addSeparator();
+
+    QAction* preAct = menu.addAction(tr("Pre-Fader"), this, [this, track, sendSlot](bool pre) {
+        recordUndo(tr("Toggle Send Pre-Fader"));
+        mixer_.setSendPreFader(track, sendSlot, pre);
+        syncMixerPanel();
+        updateMixer();
+    });
+    preAct->setCheckable(true);
+    preAct->setChecked(send.preFader);
+
+    QAction* muteAct = menu.addAction(tr("Mute Send"), this, [this, track, sendSlot](bool muted) {
+        recordUndo(tr("Mute Send"));
+        mixer_.setSendMuted(track, sendSlot, muted);
+        syncMixerPanel();
+        updateMixer();
+    });
+    muteAct->setCheckable(true);
+    muteAct->setChecked(send.muted);
+
+    menu.addAction(tr("Reset Level (0.0 dB)"), this, [this, track, sendSlot] {
+        recordUndo(tr("Reset Send Level"));
+        mixer_.setSendLevel(track, sendSlot, kUnityFaderPosition);
+        syncMixerPanel();
+        updateMixer();
+    });
+
+    if (send.target > 0 && static_cast<std::size_t>(send.target) < mixerPanel_->trackCount()) {
+        menu.addAction(tr("Select “%1” in Mixer").arg(dstName), this,
+            [this, dst = static_cast<std::size_t>(send.target)] { mixerPanel_->setSelectedTrack(dst); });
+    }
+
+    menu.addSeparator();
+    menu.addAction(tr("Remove Send"), this, [this, track, sendSlot] {
+        recordUndo(tr("Remove Send"));
+        mixer_.removeSend(track, sendSlot);
+        syncMixerPanel();
+        updateMixer();
+    });
+    menu.exec(globalPos);
+}
+
+void MainWindow::copyMixerChannelSettings(std::size_t track)
+{
+    if (track >= mixer_.size())
+        return;
+    const MixerTrack& mt = mixer_.track(track);
+    CopiedChannelSettings copied;
+    copied.fader = mt.fader;
+    copied.pan = mt.pan;
+    copied.mono = mt.mono;
+    copied.effects = mt.effects;
+    copied.sends = mt.sends;
+    for (const PluginSlot& slot : mt.effects) {
+        const auto inst = pluginHost_.instance(slot.instance);
+        copied.effectStates.push_back(inst != nullptr ? inst->processor().saveState() : slot.savedState);
+    }
+    copiedChannelSettings_ = std::move(copied);
+    if (mixerPanel_ != nullptr)
+        mixerPanel_->setCanPasteChannelSettings(true);
+    statusBar()->showMessage(tr("Copied settings from %1.").arg(QString::fromStdString(mt.name)), 3000);
+}
+
+void MainWindow::pasteMixerChannelSettings(std::size_t track)
+{
+    if (!copiedChannelSettings_.has_value() || track >= mixer_.size())
+        return;
+    recordUndo(tr("Paste Channel Settings"));
+    const CopiedChannelSettings& src = *copiedChannelSettings_;
+    mixer_.setFader(track, src.fader);
+    mixer_.setPan(track, src.pan);
+    mixer_.setMono(track, src.mono);
+    if (track != MixerModel::kMaster) {
+        if (const auto trk = insertPrimaryTrack(project_, mixer_, track)) {
+            project_.setTrackVolume(*trk, src.fader);
+            project_.setTrackPan(*trk, src.pan);
+        }
+    }
+
+    while (mixer_.removeEffect(track, 0)) { }
+    const double rate = audio_.sampleRate() > 0
+        ? audio_.sampleRate()
+        : (audio_.requestedSampleRate() > 0 ? static_cast<double>(audio_.requestedSampleRate()) : 48000.0);
+    for (std::size_t e = 0; e < src.effects.size(); ++e) {
+        PluginSlot clone = src.effects[e];
+        clone.instance = 0;
+        const std::span<const std::uint8_t> st = e < src.effectStates.size()
+            ? std::span<const std::uint8_t>(src.effectStates[e])
+            : std::span<const std::uint8_t>();
+        if (isScannedPlugin(clone)) {
+            const PluginHost::Loaded loaded = pluginHost_.loadWithState(
+                clone.format, pathFromUtf8(clone.path), clone.id, clone.name, rate, st);
+            if (loaded.handle != 0)
+                clone.instance = loaded.handle;
+        }
+        mixer_.addEffect(track, std::move(clone));
+    }
+
+    if (track != MixerModel::kMaster) {
+        while (mixer_.removeSend(track, 0)) { }
+        for (const MixerSend& s : src.sends) {
+            if (mixer_.addSend(track, s.target, s.level, s.preFader))
+                mixer_.setSendMuted(track, mixer_.track(track).sends.size() - 1, s.muted);
+        }
+    }
+
+    syncMixerPanel();
+    syncEffectCounts();
+    updateMixer();
+    releaseUnusedPlugins();
+    if (playlist_ != nullptr)
+        playlist_->updateHeaders();
+    statusBar()->showMessage(
+        tr("Pasted channel settings to %1.").arg(QString::fromStdString(mixer_.track(track).name)), 3000);
+}
+
+void MainWindow::renameMixerInsert(std::size_t track)
+{
+    if (track == MixerModel::kMaster || track >= mixer_.size() || mixerPanel_ == nullptr)
+        return;
+    mixerPanel_->startTrackRename(track);
 }
 
 void MainWindow::addPlaylistTrack()
@@ -740,14 +1217,291 @@ void MainWindow::addPlaylistTrack()
     updateMixer();
 }
 
+void MainWindow::showAddTracksDialog(int afterTrack)
+{
+    if (project_.tracks().size() >= static_cast<std::size_t>(Project::kMaxPlaylistTracks)) {
+        statusBar()->showMessage(
+            tr("The playlist has up to %1 tracks.").arg(Project::kMaxPlaylistTracks), 4000);
+        return;
+    }
+    AddTracksDialog dlg(project_, mixer_, pluginStore_, AddTracksSpec::Kind::Audio, this);
+    if (dlg.exec() == QDialog::Accepted)
+        applyAddTracksSpec(dlg.spec(), afterTrack);
+}
+
+void MainWindow::addQuickAudioTrack(int afterTrack, bool mono)
+{
+    AddTracksSpec spec;
+    spec.kind = AddTracksSpec::Kind::Audio;
+    spec.mono = mono;
+    spec.count = 1;
+    spec.autoColor = true;
+    spec.audioOutputInsert = -1;
+    const std::size_t num = project_.tracks().size() + 1;
+    spec.baseName = mono ? tr("Audio %1 (M)").arg(num) : tr("Audio %1").arg(num);
+    applyAddTracksSpec(spec, afterTrack);
+}
+
+void MainWindow::addQuickInstrumentTrack(int afterTrack)
+{
+    AddTracksSpec spec;
+    spec.kind = AddTracksSpec::Kind::Instrument;
+    spec.count = 1;
+    spec.autoColor = true;
+    spec.openInstrumentEditor = true;
+    for (std::size_t i = 0; i < pluginStore_.plugins.size(); ++i) {
+        const PluginInfo& info = pluginStore_.plugins[i];
+        if (info.enabled && info.format == PluginFormat::Builtin && pluginMainGroup(info) == "Instrument") {
+            spec.newInstrumentPlugin = i;
+            break;
+        }
+    }
+    const std::size_t num = project_.tracks().size() + 1;
+    spec.baseName = spec.newInstrumentPlugin.has_value()
+        ? tr("%1 %2")
+              .arg(QString::fromStdString(pluginStore_.plugins[*spec.newInstrumentPlugin].name))
+              .arg(num)
+        : tr("Instrument %1").arg(num);
+    applyAddTracksSpec(spec, afterTrack);
+}
+
+void MainWindow::applyAddTracksSpec(const AddTracksSpec& spec, int afterTrack)
+{
+    const std::size_t room = project_.tracks().size() < static_cast<std::size_t>(Project::kMaxPlaylistTracks)
+        ? static_cast<std::size_t>(Project::kMaxPlaylistTracks) - project_.tracks().size()
+        : 0;
+    if (room == 0) {
+        statusBar()->showMessage(
+            tr("The playlist has up to %1 tracks.").arg(Project::kMaxPlaylistTracks), 4000);
+        return;
+    }
+
+    const bool createFolder = spec.packFolder && room >= 2;
+    const std::size_t trackBudget = createFolder ? (room - 1) : room;
+    const std::size_t actualCount
+        = std::clamp<std::size_t>(static_cast<std::size_t>(std::max(1, spec.count)), 1, trackBudget);
+
+    recordUndo(
+        spec.kind == AddTracksSpec::Kind::Instrument ? tr("Add Instrument Track") : tr("Add Audio Track"));
+
+    // Ensure any earlier unlinked tracks get their 1:1 Mixer Insert first so
+    // Insert numbers stay aligned with existing tracks.
+    for (std::size_t t = 0; t < project_.tracks().size(); ++t) {
+        if (trackMixerInsert(project_, mixer_, t) < 0 && mixer_.insertCount() < MixerModel::kMaxInserts) {
+            if (const auto ins = mixer_.addInsert())
+                pairTrackWithInsert(project_, mixer_, t, *ins);
+        }
+    }
+
+    std::size_t insertPos = project_.tracks().size();
+    if (afterTrack >= 0 && static_cast<std::size_t>(afterTrack) < project_.tracks().size())
+        insertPos = project_.subTreeEnd(static_cast<std::size_t>(afterTrack));
+
+    const QString fallbackBase = spec.kind == AddTracksSpec::Kind::Instrument
+        ? tr("Instrument")
+        : (spec.mono ? tr("Audio (M)") : tr("Audio"));
+    const QString cleanBase = spec.baseName.trimmed().isEmpty() ? fallbackBase : spec.baseName.trimmed();
+
+    if (createFolder) {
+        if (const auto folderAdded = project_.addTrack()) {
+            const std::size_t folderIdx = project_.moveTrack(*folderAdded, insertPos);
+            const std::uint32_t folderCol = spec.autoColor ? trackPaletteColor(folderIdx) : spec.customColor;
+            project_.setTrackName(folderIdx, cleanBase.toStdString());
+            project_.setTrackColor(folderIdx, folderCol);
+            insertPos = folderIdx + 1;
+        }
+    }
+
+    const auto findBuiltinIndex = [this](std::string_view builtinId) -> std::optional<std::size_t> {
+        for (std::size_t i = 0; i < pluginStore_.plugins.size(); ++i) {
+            const PluginInfo& info = pluginStore_.plugins[i];
+            if (info.format == PluginFormat::Builtin && pathToUtf8(info.path) == builtinId)
+                return i;
+        }
+        return std::nullopt;
+    };
+
+    const auto attachFxPreset = [&](std::size_t insertIdx) {
+        if (insertIdx == 0 || insertIdx >= mixer_.size() || spec.fxPreset == AddTracksSpec::FxPreset::None)
+            return;
+        const auto addOneBuiltin = [&](std::string_view id) {
+            if (mixer_.track(insertIdx).effects.size() >= MixerModel::kMaxEffects)
+                return;
+            const auto plugIdx = findBuiltinIndex(id);
+            if (!plugIdx)
+                return;
+            if (const auto slot = loadPlugin(*plugIdx, vloom::PluginInfo::Kind::Effect))
+                mixer_.addEffect(insertIdx, *slot);
+        };
+        switch (spec.fxPreset) {
+        case AddTracksSpec::FxPreset::None:
+            break;
+        case AddTracksSpec::FxPreset::BuiltinEq:
+            addOneBuiltin("vloom.eq");
+            break;
+        case AddTracksSpec::FxPreset::BuiltinGain:
+            addOneBuiltin("vloom.gain");
+            break;
+        case AddTracksSpec::FxPreset::BuiltinEqAndGain:
+            addOneBuiltin("vloom.eq");
+            addOneBuiltin("vloom.gain");
+            break;
+        }
+    };
+
+    // Collect existing non-sample channels for "Existing Instrument" + Ascending mode.
+    std::vector<std::size_t> existingInstChannels;
+    if (spec.kind == AddTracksSpec::Kind::Instrument && spec.useExistingInstrument) {
+        for (std::size_t c = 0; c < project_.channels().size(); ++c) {
+            const Channel& ch = project_.channels()[c];
+            if (ch.samplePath.empty() || ch.instrument.has_value())
+                existingInstChannels.push_back(c);
+        }
+    }
+
+    int firstCreatedTrack = -1;
+    std::optional<std::size_t> firstChannelToSelect;
+    std::uint64_t editorHandleToOpen = 0;
+    QString editorTitleToOpen;
+
+    for (std::size_t i = 0; i < actualCount; ++i) {
+        const auto added = project_.addTrack();
+        if (!added)
+            break;
+        const std::size_t trackIdx = project_.moveTrack(*added, insertPos);
+        insertPos = trackIdx + 1;
+        if (firstCreatedTrack < 0)
+            firstCreatedTrack = static_cast<int>(trackIdx);
+
+        if (createFolder)
+            (void)project_.indentTrack(trackIdx);
+
+        const QString itemName = (actualCount == 1 && !createFolder)
+            ? cleanBase
+            : QStringLiteral("%1 %2").arg(cleanBase).arg(i + 1);
+        const std::uint32_t col = spec.autoColor ? trackPaletteColor(trackIdx + i) : spec.customColor;
+
+        project_.setTrackName(trackIdx, itemName.toStdString());
+        project_.setTrackColor(trackIdx, col);
+
+        if (spec.kind == AddTracksSpec::Kind::Audio) {
+            const std::size_t ch = project_.addChannel(itemName.toStdString());
+            project_.setChannelColor(ch, col);
+            if (!firstChannelToSelect)
+                firstChannelToSelect = ch;
+
+            int targetInsert = 0;
+            if (spec.audioOutputInsert == 0) {
+                targetInsert = 0;
+            } else if (spec.audioOutputInsert > 0) {
+                const int desired
+                    = spec.audioOutputInsert + (spec.audioOutputAscending ? static_cast<int>(i) : 0);
+                while (static_cast<int>(mixer_.insertCount()) < desired
+                    && mixer_.insertCount() < MixerModel::kMaxInserts) {
+                    (void)mixer_.addInsert();
+                }
+                targetInsert = std::min(desired, static_cast<int>(mixer_.insertCount()));
+            } else if (mixer_.insertCount() < MixerModel::kMaxInserts) {
+                if (const auto newIns = mixer_.addInsert())
+                    targetInsert = static_cast<int>(*newIns);
+            }
+
+            project_.setChannelInsert(ch, targetInsert);
+            project_.setTrackInsert(trackIdx, targetInsert);
+            if (targetInsert > 0 && spec.audioOutputInsert < 0) {
+                pairTrackWithInsert(project_, mixer_, trackIdx, static_cast<std::size_t>(targetInsert));
+            }
+            if (targetInsert > 0) {
+                if (spec.mono)
+                    mixer_.setMono(static_cast<std::size_t>(targetInsert), true);
+                attachFxPreset(static_cast<std::size_t>(targetInsert));
+            }
+        } else {
+            // Instrument track
+            std::size_t ch = 0;
+            if (spec.useExistingInstrument && spec.existingChannel.has_value()
+                && *spec.existingChannel < project_.channels().size()) {
+                ch = *spec.existingChannel;
+                if (spec.instrumentAscending && !existingInstChannels.empty()) {
+                    const auto it = std::find(
+                        existingInstChannels.begin(), existingInstChannels.end(), *spec.existingChannel);
+                    const std::size_t startOffset = it != existingInstChannels.end()
+                        ? static_cast<std::size_t>(it - existingInstChannels.begin())
+                        : 0;
+                    ch = existingInstChannels[(startOffset + i) % existingInstChannels.size()];
+                }
+                int ins = project_.channels()[ch].insert;
+                if (ins == 0 && mixer_.insertCount() < MixerModel::kMaxInserts)
+                    ins = static_cast<int>(linkChannelToInsert(project_, mixer_, ch));
+                project_.setTrackInsert(trackIdx, ins);
+            } else {
+                ch = project_.addChannel(itemName.toStdString());
+                project_.setChannelColor(ch, col);
+
+                int targetInsert = 0;
+                if (mixer_.insertCount() < MixerModel::kMaxInserts) {
+                    if (const auto newIns = mixer_.addInsert())
+                        targetInsert = static_cast<int>(*newIns);
+                }
+                project_.setChannelInsert(ch, targetInsert);
+                project_.setTrackInsert(trackIdx, targetInsert);
+                if (targetInsert > 0)
+                    pairTrackWithInsert(project_, mixer_, trackIdx, static_cast<std::size_t>(targetInsert));
+
+                if (spec.newInstrumentPlugin.has_value()) {
+                    if (const auto slot
+                        = loadPlugin(*spec.newInstrumentPlugin, vloom::PluginInfo::Kind::Instrument)) {
+                        project_.setChannelInstrument(ch, *slot);
+                        if (audio_.sampleRate() <= 0)
+                            unpublishedInstruments_.push_back(slot->instance);
+                        if (spec.openInstrumentEditor && editorHandleToOpen == 0) {
+                            editorHandleToOpen = slot->instance;
+                            editorTitleToOpen = itemName;
+                        }
+                    }
+                }
+            }
+
+            if (!firstChannelToSelect)
+                firstChannelToSelect = ch;
+        }
+    }
+
+    syncMixerPanel();
+    syncInsertNames();
+    channelRack_->refresh();
+    playlist_->refresh();
+    rebuildClipSources();
+    if (firstChannelToSelect)
+        selectChannel(*firstChannelToSelect);
+    if (firstCreatedTrack >= 0) {
+        playlist_->setSelectedTrack(firstCreatedTrack);
+        const int linkedIns = trackMixerInsert(project_, mixer_, static_cast<std::size_t>(firstCreatedTrack));
+        if (linkedIns >= 0 && static_cast<std::size_t>(linkedIns) < mixerPanel_->trackCount())
+            mixerPanel_->setSelectedTrack(static_cast<std::size_t>(linkedIns));
+    }
+    updateMixer();
+    syncChannelRack();
+    syncEffectCounts();
+
+    if (!isPageDetached(WorkspacePage::Playlist)
+        && workspace_->currentIndex() != static_cast<int>(WorkspacePage::Playlist)) {
+        showWorkspace(WorkspacePage::Playlist);
+    }
+
+    if (editorHandleToOpen != 0)
+        openPluginEditor(editorHandleToOpen, editorTitleToOpen);
+
+    statusBar()->showMessage(actualCount == 1
+            ? tr("Added track “%1”.").arg(cleanBase)
+            : tr("Added %n tracks.", nullptr, static_cast<int>(actualCount)),
+        3000);
+}
+
 void MainWindow::removePlaylistTrack(std::size_t track)
 {
     if (track >= project_.tracks().size())
         return;
-    if (project_.tracks().size() <= 1) {
-        statusBar()->showMessage(tr("The playlist has at least one track."), 4000);
-        return;
-    }
     const QString name = QString::fromStdString(project_.tracks()[track].name);
     const std::size_t clips = project_.clipsOnTrack(track);
     if (clips > 0
@@ -759,45 +1513,59 @@ void MainWindow::removePlaylistTrack(std::size_t track)
 
     recordUndo(tr("Delete Track"));
     const int ownedIns = trackMixerInsert(project_, mixer_, track);
+    const auto primaryCh = trackPrimaryChannel(project_, track);
     project_.removeTrack(track);
 
-    // If `ownedIns` was dedicated exclusively to the deleted track, remove that mixer strip too.
+    const auto isChannelStillUsed = [this](std::size_t chIdx) {
+        for (const AudioClip& ac : project_.audioClips()) {
+            if (ac.channel == chIdx)
+                return true;
+        }
+        for (const Clip& pc : project_.clips()) {
+            if (pc.pattern < project_.patterns().size()
+                && chIdx < project_.patterns()[pc.pattern].channels.size()) {
+                const ChannelPattern& cp = project_.patterns()[pc.pattern].channels[chIdx];
+                if (!cp.notes.empty()
+                    || std::any_of(cp.steps.begin(), cp.steps.end(), [](bool on) { return on; }))
+                    return true;
+            }
+        }
+        return false;
+    };
+
+    // If `ownedIns` was dedicated exclusively to the deleted track, remove that mixer strip
+    // and release any dedicated instrument/sample on its exclusive channel.
     if (ownedIns > 0 && static_cast<std::size_t>(ownedIns) < mixer_.size()
         && !insertPrimaryTrack(project_, mixer_, static_cast<std::size_t>(ownedIns)).has_value()) {
         bool sharedByLiveClip = false;
-        for (const AudioClip& ac : project_.audioClips()) {
-            if (ac.channel < project_.channels().size()
-                && project_.channels()[ac.channel].insert == ownedIns) {
+        for (std::size_t c = 0; c < project_.channels().size(); ++c) {
+            if (project_.channels()[c].insert == ownedIns && isChannelStillUsed(c)) {
                 sharedByLiveClip = true;
                 break;
             }
         }
-        for (const Clip& pc : project_.clips()) {
-            if (pc.pattern < project_.patterns().size()) {
-                const Pattern& pat = project_.patterns()[pc.pattern];
-                for (std::size_t c = 0; c < pat.channels.size() && c < project_.channels().size(); ++c) {
-                    if (project_.channels()[c].insert == ownedIns
-                        && (!pat.channels[c].notes.empty()
-                            || std::any_of(pat.channels[c].steps.begin(), pat.channels[c].steps.end(),
-                                [](bool on) { return on; }))) {
-                        sharedByLiveClip = true;
-                        break;
-                    }
+        if (!sharedByLiveClip) {
+            for (std::size_t c = 0; c < project_.channels().size(); ++c) {
+                if (project_.channels()[c].insert == ownedIns) {
+                    project_.setChannelInstrument(c, std::nullopt);
+                    project_.setChannelSample(c, {});
                 }
             }
-        }
-        if (!sharedByLiveClip) {
             project_.removeInsert(ownedIns);
             mixer_.removeInsert(static_cast<std::size_t>(ownedIns));
         }
+    } else if (primaryCh && *primaryCh >= 4 && !isChannelStillUsed(*primaryCh)) {
+        project_.setChannelInstrument(*primaryCh, std::nullopt);
+        project_.setChannelSample(*primaryCh, {});
     }
 
     syncMixerPanel();
     syncInsertNames();
+    channelRack_->refresh();
+    rebuildClipSources();
     playlist_->refresh();
     updateMixer();
-    if (songMode_)
-        syncChannelRack();
+    syncChannelRack();
     releaseUnusedPlugins();
     syncEffectCounts();
     statusBar()->showMessage(tr("“%1” deleted.").arg(name), 3000);
@@ -1302,10 +2070,10 @@ void MainWindow::placeStems(const AudioClip& clip, const QList<StemFile>& stems,
         QString title = stem.stem;
         if (!title.isEmpty())
             title[0] = title[0].toUpper();
-        int track = static_cast<int>(project_.tracks().size()) - 1;
+        int track = std::max(0, static_cast<int>(project_.tracks().size()) - 1);
         if (const auto added = project_.addTrack()) {
-            track = static_cast<int>(
-                project_.moveTrack(*added, static_cast<std::size_t>(clip.track + 1 + placed)));
+            const int desired = std::max(0, clip.track + 1 + placed);
+            track = static_cast<int>(project_.moveTrack(*added, static_cast<std::size_t>(desired)));
             const auto trkIdx = static_cast<std::size_t>(track);
             project_.setTrackName(trkIdx, title.toStdString());
             project_.setTrackColor(trkIdx, project_.channels()[channel].color);
@@ -1491,6 +2259,187 @@ void MainWindow::dropAudioFiles(const QStringList& paths, int track, int start)
     }
 }
 
+void MainWindow::handlePluginDroppedOnPlaylist(std::size_t pluginIndex, int track, int startTick)
+{
+    if (pluginIndex >= pluginStore_.plugins.size())
+        return;
+    const PluginInfo& info = pluginStore_.plugins[pluginIndex];
+    const bool isInstrument = pluginMainGroup(info) == "Instrument";
+
+    if (!isInstrument) {
+        // Effect dropped onto the Playlist: attach it to the target track's Mixer Insert
+        // (creating a 1:1 insert or FX channel if needed).
+        if (track >= 0 && static_cast<std::size_t>(track) < project_.tracks().size()) {
+            const auto trackIdx = static_cast<std::size_t>(track);
+            int ins = trackMixerInsert(project_, mixer_, trackIdx);
+            if (ins <= 0) {
+                if (mixer_.insertCount() >= MixerModel::kMaxInserts) {
+                    statusBar()->showMessage(
+                        tr("The mixer has up to %1 channels.").arg(MixerModel::kMaxInserts), 4000);
+                    return;
+                }
+                recordUndo(tr("Add Effect to Track"));
+                ins = routeTrackToInsert(
+                    project_, mixer_, trackIdx, static_cast<int>(mixer_.insertCount() + 1), true);
+                syncMixerPanel();
+                syncInsertNames();
+            }
+            if (ins > 0)
+                addPluginToInsert(pluginIndex, static_cast<std::size_t>(ins));
+        } else if (mixer_.insertCount() < MixerModel::kMaxInserts) {
+            addMixerRoleChannel(MixerRole::Fx);
+            if (mixerPanel_ != nullptr && mixerPanel_->selectedTrack() > 0)
+                addPluginToInsert(pluginIndex, mixerPanel_->selectedTrack());
+        }
+        return;
+    }
+
+    if ((track < 0 || static_cast<std::size_t>(track) >= project_.tracks().size())
+        && project_.tracks().size() >= static_cast<std::size_t>(Project::kMaxPlaylistTracks)) {
+        statusBar()->showMessage(
+            tr("The playlist has up to %1 tracks.").arg(Project::kMaxPlaylistTracks), 4000);
+        return;
+    }
+
+    const auto slot = loadPlugin(pluginIndex, vloom::PluginInfo::Kind::Instrument);
+    if (!slot)
+        return;
+
+    recordUndo(tr("Drop Instrument"));
+    if (audio_.sampleRate() <= 0)
+        unpublishedInstruments_.push_back(slot->instance);
+
+    // Keep earlier unlinked tracks aligned 1:1 with Mixer Inserts first.
+    for (std::size_t t = 0; t < project_.tracks().size(); ++t) {
+        if (trackMixerInsert(project_, mixer_, t) < 0 && mixer_.insertCount() < MixerModel::kMaxInserts) {
+            if (const auto ins = mixer_.addInsert())
+                pairTrackWithInsert(project_, mixer_, t, *ins);
+        }
+    }
+
+    std::size_t trackIdx = 0;
+    std::size_t ch = 0;
+    int targetIns = 0;
+
+    if (track < 0 || static_cast<std::size_t>(track) >= project_.tracks().size()) {
+        const auto addedTrk = project_.addTrack();
+        if (!addedTrk)
+            return;
+        trackIdx = *addedTrk;
+        const std::uint32_t col = trackPaletteColor(trackIdx);
+        project_.setTrackName(trackIdx, slot->name);
+        project_.setTrackColor(trackIdx, col);
+
+        ch = project_.addChannel(slot->name);
+        project_.setChannelColor(ch, col);
+        project_.setChannelInstrument(ch, *slot);
+
+        if (mixer_.insertCount() < MixerModel::kMaxInserts) {
+            if (const auto newIns = mixer_.addInsert())
+                targetIns = static_cast<int>(*newIns);
+        }
+        project_.setChannelInsert(ch, targetIns);
+        project_.setTrackInsert(trackIdx, targetIns);
+        if (targetIns > 0)
+            pairTrackWithInsert(project_, mixer_, trackIdx, static_cast<std::size_t>(targetIns));
+    } else {
+        trackIdx = static_cast<std::size_t>(track);
+        const PlaylistTrack& pt = project_.tracks()[trackIdx];
+        targetIns = trackMixerInsert(project_, mixer_, trackIdx);
+        if (targetIns <= 0 && mixer_.insertCount() < MixerModel::kMaxInserts) {
+            if (const auto newIns = mixer_.addInsert()) {
+                targetIns = static_cast<int>(*newIns);
+                pairTrackWithInsert(project_, mixer_, trackIdx, *newIns);
+            }
+        }
+
+        // Reuse an existing dedicated non-sample channel on this track/insert if present.
+        std::optional<std::size_t> reusableCh;
+        if (const auto prim = trackPrimaryChannel(project_, trackIdx);
+            prim && project_.channels()[*prim].samplePath.empty()) {
+            reusableCh = *prim;
+        } else if (targetIns > 0) {
+            for (std::size_t c = 4; c < project_.channels().size(); ++c) {
+                if (project_.channels()[c].insert == targetIns && project_.channels()[c].samplePath.empty()) {
+                    reusableCh = c;
+                    break;
+                }
+            }
+        }
+
+        std::string prevInstName;
+        if (reusableCh) {
+            ch = *reusableCh;
+            if (project_.channels()[ch].instrument.has_value())
+                prevInstName = project_.channels()[ch].instrument->name;
+            project_.setChannelName(ch, slot->name);
+            project_.setChannelInstrument(ch, *slot);
+        } else {
+            ch = project_.addChannel(slot->name);
+            const std::uint32_t col = pt.color ? *pt.color : trackPaletteColor(trackIdx);
+            project_.setChannelColor(ch, col);
+            project_.setChannelInstrument(ch, *slot);
+        }
+
+        if (targetIns > 0) {
+            project_.setChannelInsert(ch, targetIns);
+            project_.setTrackInsert(trackIdx, targetIns);
+        }
+        if (!pt.color)
+            syncTrackColor(project_, mixer_, trackIdx, trackPaletteColor(trackIdx));
+        if (!pt.named || (!prevInstName.empty() && pt.name == prevInstName))
+            syncTrackName(project_, mixer_, trackIdx, slot->name);
+        else if (targetIns > 0)
+            pairTrackWithInsert(project_, mixer_, trackIdx, static_cast<std::size_t>(targetIns));
+    }
+
+    // Ensure a dedicated clean pattern clip is placed on the track so MIDI notes play immediately.
+    const int clipStart = std::max(0, startTick);
+    bool hasClipOnTrack = false;
+    for (const Clip& existing : project_.clips()) {
+        if (existing.track == static_cast<int>(trackIdx)) {
+            hasClipOnTrack = true;
+            break;
+        }
+    }
+    std::size_t targetPattern = currentPattern_;
+    if (!hasClipOnTrack) {
+        const bool curUsedElsewhere = !project_.isPatternEmpty(currentPattern_)
+            || std::any_of(project_.clips().begin(), project_.clips().end(), [&](const Clip& c) {
+                   return c.pattern == currentPattern_ && c.track != static_cast<int>(trackIdx);
+               });
+        if (curUsedElsewhere) {
+            if (const auto emptyPat = project_.findEmptyPattern(0))
+                targetPattern = *emptyPat;
+            else if (project_.patterns().size() < Project::kMaxPatterns)
+                targetPattern = project_.addPattern();
+        }
+        project_.addClip(Clip{targetPattern, static_cast<int>(trackIdx), clipStart});
+    }
+
+    currentPattern_ = std::min(targetPattern, project_.patterns().size() - 1);
+    syncMixerPanel();
+    syncInsertNames();
+    syncPatternSelector();
+    channelRack_->refresh();
+    pianoRoll_->refresh();
+    playlist_->refresh();
+    selectPattern(currentPattern_);
+    selectChannel(ch);
+    playlist_->setSelectedTrack(static_cast<int>(trackIdx));
+    if (targetIns > 0 && static_cast<std::size_t>(targetIns) < mixerPanel_->trackCount())
+        mixerPanel_->setSelectedTrack(static_cast<std::size_t>(targetIns));
+    updateMixer();
+
+    if (!songMode_)
+        transport_->songModeAction()->setChecked(true);
+    else
+        syncChannelRack();
+
+    releaseUnusedPlugins();
+    openPluginEditor(slot->instance, QString::fromStdString(slot->name));
+}
+
 void MainWindow::renamePlaylistTrack(std::size_t track)
 {
     if (track >= project_.tracks().size())
@@ -1638,31 +2587,85 @@ void MainWindow::removeMixerInsert(std::size_t track)
     if (track == MixerModel::kMaster || track >= mixer_.size())
         return;
     const auto insert = static_cast<int>(track);
-    const auto routed = static_cast<std::size_t>(std::count_if(project_.channels().begin(),
-        project_.channels().end(), [insert](const Channel& c) { return c.insert == insert; }));
-    if (routed > 0
-        && QMessageBox::question(this, tr("Delete Insert"),
-               (routed == 1 ? tr("1 channel plays into Insert %1.").arg(track)
-                            : tr("%1 channels play into Insert %2.").arg(routed).arg(track))
-                   + QLatin1Char(' ') + tr("Delete it? They will play into the master."))
-            != QMessageBox::Yes)
-        return;
-    recordUndo(tr("Delete Insert"));
-    const auto pairedTrk = insertPrimaryTrack(project_, mixer_, track);
+    const QString stripName = QString::fromStdString(mixer_.track(track).name);
+
+    std::vector<std::size_t> pairedTracks;
+    std::size_t totalClips = 0;
+    for (std::size_t t = 0; t < project_.tracks().size(); ++t) {
+        if (trackMixerInsert(project_, mixer_, t) == insert) {
+            pairedTracks.push_back(t);
+            totalClips += project_.clipsOnTrack(t);
+        }
+    }
+
+    std::size_t upstreamFeeders = 0;
+    for (std::size_t i = 1; i < mixer_.size(); ++i) {
+        if (i != track && mixer_.track(i).output == insert)
+            ++upstreamFeeders;
+    }
+
+    if (totalClips > 0 || upstreamFeeders > 0) {
+        QString prompt;
+        if (!pairedTracks.empty() && totalClips > 0) {
+            prompt = tr("Delete “%1” and its %n playlist track(s) (%2 clip(s))?", "",
+                static_cast<int>(pairedTracks.size()))
+                         .arg(stripName)
+                         .arg(totalClips);
+        } else {
+            prompt = tr("%n channel(s) route into “%1”. Delete it? They will return to Main.", "",
+                static_cast<int>(upstreamFeeders))
+                         .arg(stripName);
+        }
+        if (QMessageBox::question(this, tr("Delete Channel"), prompt) != QMessageBox::Yes)
+            return;
+    }
+
+    recordUndo(tr("Delete Channel"));
+
+    // Remove all paired Playlist tracks (highest index down to lowest so indices stay valid).
+    for (auto it = pairedTracks.rbegin(); it != pairedTracks.rend(); ++it) {
+        if (*it < project_.tracks().size())
+            project_.removeTrack(*it);
+    }
+
+    // Release any instrument/sample on channels that belonged exclusively to this deleted channel/track.
+    const auto isChannelStillUsed = [this](std::size_t chIdx) {
+        for (const AudioClip& ac : project_.audioClips()) {
+            if (ac.channel == chIdx)
+                return true;
+        }
+        for (const Clip& pc : project_.clips()) {
+            if (pc.pattern < project_.patterns().size()
+                && chIdx < project_.patterns()[pc.pattern].channels.size()) {
+                const ChannelPattern& cp = project_.patterns()[pc.pattern].channels[chIdx];
+                if (!cp.notes.empty()
+                    || std::any_of(cp.steps.begin(), cp.steps.end(), [](bool on) { return on; })) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    for (std::size_t c = 0; c < project_.channels().size(); ++c) {
+        if (project_.channels()[c].insert == insert && !isChannelStillUsed(c)) {
+            project_.setChannelInstrument(c, std::nullopt);
+            project_.setChannelSample(c, {});
+        }
+    }
+
     project_.removeInsert(insert);
     mixer_.removeInsert(track);
-    if (pairedTrk && *pairedTrk < project_.tracks().size() && project_.tracks().size() > 1
-        && project_.clipsOnTrack(*pairedTrk) == 0 && trackMixerInsert(project_, mixer_, *pairedTrk) <= 0) {
-        project_.removeTrack(*pairedTrk);
-    }
+
     syncMixerPanel();
-    playlist_->refresh();
     syncInsertNames();
+    channelRack_->refresh();
+    rebuildClipSources();
+    playlist_->refresh();
     updateMixer();
     syncChannelRack();
-    releaseUnusedPlugins(); // its effects
+    releaseUnusedPlugins();
     syncEffectCounts();
-    statusBar()->showMessage(tr("Insert %1 deleted.").arg(track), 3000);
+    statusBar()->showMessage(tr("“%1” deleted.").arg(stripName), 3000);
 }
 
 void MainWindow::selectChannel(std::size_t channel)
@@ -2076,7 +3079,7 @@ void MainWindow::setMixerVisible(bool visible)
 QWidget* MainWindow::createMixer()
 {
     mixerPanel_ = new MixerPanel(mixer_.size() - 1, this);
-    mixerPanel_->setMinimumHeight(350);
+    mixerPanel_->setMinimumHeight(396);
     connect(mixerPanel_, &MixerPanel::closeRequested, this, [this] { setMixerVisible(false); });
     connect(
         mixerPanel_, &MixerPanel::detachRequested, this, [this] { setMixerDetached(!isMixerDetached()); });
@@ -2116,8 +3119,66 @@ QWidget* MainWindow::createMixer()
             syncChannelRack();
     });
     connect(mixerPanel_, &MixerPanel::addInsertRequested, this, &MainWindow::addMixerInsert);
+    connect(mixerPanel_, &MixerPanel::addChannelRoleRequested, this, &MainWindow::addMixerRoleChannel);
+    connect(mixerPanel_, &MixerPanel::addBusForTrackRequested, this, &MainWindow::addBusForMixerTrack);
+    connect(mixerPanel_, &MixerPanel::addFxSendForTrackRequested, this, &MainWindow::addFxSendForMixerTrack);
+    connect(mixerPanel_, &MixerPanel::addTracksDialogRequested, this, [this] { showAddTracksDialog(-1); });
+    connect(
+        mixerPanel_, &MixerPanel::addAudioTrackRequested, this, [this] { addQuickAudioTrack(-1, false); });
+    connect(
+        mixerPanel_, &MixerPanel::addInstrumentTrackRequested, this, [this] { addQuickInstrumentTrack(-1); });
+    connect(
+        mixerPanel_, &MixerPanel::copyChannelSettingsRequested, this, &MainWindow::copyMixerChannelSettings);
+    connect(mixerPanel_, &MixerPanel::pasteChannelSettingsRequested, this,
+        &MainWindow::pasteMixerChannelSettings);
+    connect(mixerPanel_, &MixerPanel::instrumentClicked, this, &MainWindow::openMixerInstrumentEditor);
+    connect(mixerPanel_, &MixerPanel::instrumentMenuRequested, this, &MainWindow::showMixerInstrumentMenu);
+    connect(mixerPanel_, &MixerPanel::sourceClicked, this, &MainWindow::showMixerSourceMenu);
+    connect(mixerPanel_, &MixerPanel::outputRoutingRequested, this, &MainWindow::showMixerOutputMenu);
+    connect(mixerPanel_, &MixerPanel::addSendMenuRequested, this, &MainWindow::showMixerAddSendMenu);
+    connect(mixerPanel_, &MixerPanel::sendLevelChanged, this,
+        [this](std::size_t track, std::size_t slot, double level) {
+            recordUndo(tr("Send Level"), "mixer.send." + std::to_string(track) + "." + std::to_string(slot));
+            mixer_.setSendLevel(track, slot, level);
+            updateMixer();
+        });
+    connect(mixerPanel_, &MixerPanel::sendMuteToggled, this,
+        [this](std::size_t track, std::size_t slot, bool muted) {
+            recordUndo(tr("Mute Send"));
+            mixer_.setSendMuted(track, slot, muted);
+            syncMixerPanel();
+            updateMixer();
+        });
+    connect(mixerPanel_, &MixerPanel::sendPreFaderToggled, this,
+        [this](std::size_t track, std::size_t slot, bool preFader) {
+            recordUndo(tr("Send Pre-Fader"));
+            mixer_.setSendPreFader(track, slot, preFader);
+            syncMixerPanel();
+            updateMixer();
+        });
+    connect(mixerPanel_, &MixerPanel::sendMenuRequested, this, &MainWindow::showMixerSendMenu);
     connect(mixerPanel_, &MixerPanel::removeInsertRequested, this, &MainWindow::removeMixerInsert);
     connect(mixerPanel_, &MixerPanel::renameRequested, this, &MainWindow::renameMixerInsert);
+    connect(mixerPanel_, &MixerPanel::trackNameEdited, this, [this](std::size_t track, const QString& name) {
+        if (track == MixerModel::kMaster || track >= mixer_.size())
+            return;
+        recordUndo(tr("Rename Track"));
+        syncInsertName(project_, mixer_, track, name.toStdString());
+        syncMixerPanel();
+        syncInsertNames();
+        if (playlist_ != nullptr)
+            playlist_->refresh();
+    });
+    connect(mixerPanel_, &MixerPanel::monoToggled, this, [this](std::size_t track, bool mono) {
+        if (track >= mixer_.size())
+            return;
+        recordUndo(tr("Toggle Mono"));
+        mixer_.setMono(track, mono);
+        syncMixerPanel();
+        updateMixer();
+        if (playlist_ != nullptr)
+            playlist_->updateHeaders();
+    });
     connect(mixerPanel_, &MixerPanel::colorChanged, this,
         [this](std::size_t track, std::optional<std::uint32_t> color) {
             if (track >= mixer_.size())
@@ -2176,8 +3237,19 @@ QWidget* MainWindow::createMixer()
     });
     connect(mixerPanel_, &MixerPanel::effectMenuRequested, this, &MainWindow::showEffectSlotContextMenu);
     connect(mixerPanel_, &MixerPanel::pluginDroppedOnSlot, this, &MainWindow::handlePluginDroppedOnSlot);
-    connect(mixerPanel_, &MixerPanel::pluginDropped, this,
-        [this](std::size_t track, std::size_t plugin) { addPluginToInsert(plugin, track); });
+    connect(mixerPanel_, &MixerPanel::pluginDropped, this, [this](std::size_t track, std::size_t plugin) {
+        if (plugin < pluginStore_.plugins.size()
+            && pluginMainGroup(pluginStore_.plugins[plugin]) == "Instrument" && track > 0
+            && track < mixer_.size()) {
+            if (const auto paired = insertPrimaryTrack(project_, mixer_, track)) {
+                handlePluginDroppedOnPlaylist(plugin, static_cast<int>(*paired), 0);
+                return;
+            }
+            handlePluginDroppedOnPlaylist(plugin, static_cast<int>(project_.tracks().size()), 0);
+            return;
+        }
+        addPluginToInsert(plugin, track);
+    });
     connect(mixerPanel_, &MixerPanel::soloToggled, this, [this](std::size_t track, bool soloed) {
         recordUndo(tr("Solo Track"));
         syncInsertSolo(project_, mixer_, track, soloed);
@@ -2279,10 +3351,10 @@ float MainWindow::effectiveMasterGain() const
 
 void MainWindow::updateMixer()
 {
-    // Grey out inserts that another insert's solo silences.
+    // Grey out channels silenced by solo (respecting Bus & FX solo-safe propagation).
     const bool solo = mixer_.anySoloed();
     for (std::size_t i = 1; i < mixer_.size(); ++i)
-        mixerPanel_->setSilenced(i, solo && !mixer_.track(i).soloed);
+        mixerPanel_->setSilenced(i, solo && !mixer_.isTrackAudible(i));
     updateMasterOutput();
     const MixerModel effective = effectiveMixerModel();
     audio_.engine().setMixerState(engineMixerState(effective, pluginHost_.resolver()));
@@ -2760,10 +3832,27 @@ QWidget* MainWindow::createWorkspace()
     playlistFrame_->setContext(tr("Click to place the chosen clip"));
     workspace_->addWidget(playlistFrame_);
     auto* removeTrack = headerButton(QStringLiteral("minus"), QString(), tr("Delete the last track"));
-    auto* addTrack = headerButton(QStringLiteral("plus"), tr("Track"), tr("Add a track"));
-    connect(removeTrack, &QToolButton::clicked, this,
-        [this] { removePlaylistTrack(project_.tracks().size() - 1); });
+    auto* addTrack = headerButton(
+        QStringLiteral("plus"), tr("Track"), tr("Add a track (right-click for Audio / Instrument options)"));
+    addTrack->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(removeTrack, &QToolButton::clicked, this, [this] {
+        if (!project_.tracks().empty())
+            removePlaylistTrack(project_.tracks().size() - 1);
+    });
     connect(addTrack, &QToolButton::clicked, this, &MainWindow::addPlaylistTrack);
+    connect(addTrack, &QWidget::customContextMenuRequested, this, [this, addTrack](const QPoint& pos) {
+        QMenu menu(this);
+        QAction* dlgAct = menu.addAction(Theme::icon(QStringLiteral("plus")), tr("Add Tracks…"), this,
+            [this] { showAddTracksDialog(-1); });
+        dlgAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_T));
+        menu.addAction(Theme::icon(QStringLiteral("track-audio")), tr("Add Audio Track (mono)"), this,
+            [this] { addQuickAudioTrack(-1, true); });
+        menu.addAction(Theme::icon(QStringLiteral("track-audio")), tr("Add Audio Track (stereo)"), this,
+            [this] { addQuickAudioTrack(-1, false); });
+        menu.addAction(Theme::icon(QStringLiteral("track-instrument")), tr("Add Instrument Track"), this,
+            [this] { addQuickInstrumentTrack(-1); });
+        menu.exec(addTrack->mapToGlobal(pos));
+    });
     // Tools: what the left button does in the grid. Their keys work while the
     // playlist has the focus (T is tap tempo, so Mute is M).
     {
@@ -2960,6 +4049,10 @@ QWidget* MainWindow::createWorkspace()
     });
     connect(playlist_, &PlaylistView::trackChannelMenuRequested, this, &MainWindow::showTrackChannelMenu);
     connect(playlist_, &PlaylistView::trackRoutingMenuRequested, this, &MainWindow::showTrackRoutingMenu);
+    connect(playlist_, &PlaylistView::addTracksDialogRequested, this, &MainWindow::showAddTracksDialog);
+    connect(playlist_, &PlaylistView::addAudioTrackRequested, this, &MainWindow::addQuickAudioTrack);
+    connect(
+        playlist_, &PlaylistView::addInstrumentTrackRequested, this, &MainWindow::addQuickInstrumentTrack);
     connect(playlist_, &PlaylistView::trackSelected, this, [this](std::size_t track) {
         if (const auto ch = trackPrimaryChannel(project_, track))
             selectChannel(*ch);
@@ -3167,6 +4260,8 @@ QWidget* MainWindow::createWorkspace()
             selectPattern(source.index); // its pattern becomes current, as in FL Studio
     });
     connect(playlist_, &PlaylistView::audioDropped, this, &MainWindow::dropAudioFiles);
+    connect(
+        playlist_, &PlaylistView::pluginDroppedOnPlaylist, this, &MainWindow::handlePluginDroppedOnPlaylist);
     connect(playlist_, &PlaylistView::audioClipChanged, this, [this](std::size_t index, AudioClip clip) {
         if (index < project_.audioClips().size() && project_.audioClips()[index] == clip)
             return;
@@ -4513,7 +5608,7 @@ void MainWindow::resetProject()
     pianoRoll_->setKey(0, Scale::Major);
     noteHistory_.clear(); // another project: nothing of the old one to undo
     noteEditBefore_.reset();
-    project_ = Project{};
+    project_ = Project{0};
     rackAudio_.reset();
     clipAudio_.clear();
     playlist_->clearWaveCache();
@@ -5000,10 +6095,20 @@ void MainWindow::openProjectFile(const QString& path)
                 .arg(QDir::toNativeSeparators(path)));
         return;
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
+
+    const QFileInfo fileInfo(path);
+    const QString projectTitle
+        = fileInfo.completeBaseName().isEmpty() ? fileInfo.fileName() : fileInfo.completeBaseName();
+    ProjectLoadDialog progress(projectTitle, this);
+    if (!progress.advance(0, 100, tr("Reading project file…"), fileInfo.fileName())) {
+        progress.finishAndClose();
+        statusBar()->showMessage(tr("Opening project cancelled."), 3000);
+        return;
+    }
+
     ProjectFile::ReadResult read = ProjectFile::load(toPath(path));
     if (!read.data) {
-        QApplication::restoreOverrideCursor();
+        progress.finishAndClose();
         if (!QFileInfo::exists(path))
             recent::remove(path);
         QMessageBox::warning(this, tr("Could not open"),
@@ -5011,22 +6116,33 @@ void MainWindow::openProjectFile(const QString& path)
                 .arg(QDir::toNativeSeparators(path), QString::fromStdString(read.error)));
         return;
     }
+    if (progress.wasCanceled()) {
+        progress.finishAndClose();
+        statusBar()->showMessage(tr("Opening project cancelled."), 3000);
+        return;
+    }
+
     QStringList problems;
     for (const std::string& warning : read.warnings)
         problems << QString::fromStdString(warning);
-    applyProject(std::move(*read.data), problems);
+    if (!applyProject(std::move(*read.data), problems, &progress)) {
+        progress.finishAndClose();
+        statusBar()->showMessage(tr("Opening project cancelled."), 3000);
+        return;
+    }
+
+    progress.finishAndClose();
     undoHistory_.clear();
     updateUndoActions();
-    QApplication::restoreOverrideCursor();
     projectPath_ = toPath(path);
     markProjectSaved();
     recent::add(path);
     rememberFolder(path);
-    statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(path).fileName()), 3000);
+    statusBar()->showMessage(tr("Opened %1").arg(fileInfo.fileName()), 3000);
     if (!problems.isEmpty()) {
         QMessageBox box(QMessageBox::Information, tr("Opened with changes"),
-            tr("%1 opened, but some things could not be restored.").arg(QFileInfo(path).fileName()),
-            QMessageBox::Ok, this);
+            tr("%1 opened, but some things could not be restored.").arg(fileInfo.fileName()), QMessageBox::Ok,
+            this);
         box.setDetailedText(problems.join(QLatin1Char('\n')));
         box.exec();
     }
@@ -5092,13 +6208,37 @@ bool MainWindow::isScannedPlugin(const PluginSlot& slot) const
     });
 }
 
-void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
+bool MainWindow::applyProject(ProjectData incoming, QStringList& problems, ProjectLoadDialog* progress)
 {
     stopAndRewind();
-    ++projectGeneration_;
-    undoHistory_.clear();
-    unpublishedInstruments_.clear(); // the old project's
-    const double rate = audio_.sampleRate() > 0 ? audio_.sampleRate() : audio_.requestedSampleRate();
+
+    int totalInstruments = 0;
+    std::vector<std::string> uniqueSamplePaths;
+    for (const Channel& channel : incoming.project.channels()) {
+        if (channel.instrument.has_value())
+            ++totalInstruments;
+        if (!channel.samplePath.empty()
+            && std::find(uniqueSamplePaths.begin(), uniqueSamplePaths.end(), channel.samplePath)
+                == uniqueSamplePaths.end()) {
+            uniqueSamplePaths.push_back(channel.samplePath);
+        }
+    }
+    int totalEffects = 0;
+    for (std::size_t i = 0; i < incoming.mixer.size(); ++i)
+        totalEffects += static_cast<int>(incoming.mixer.track(i).effects.size());
+
+    const int totalSamples = static_cast<int>(uniqueSamplePaths.size());
+    const int totalSteps = 2 + totalInstruments + totalEffects + totalSamples + 2;
+    int step = 1;
+
+    if (progress != nullptr && !progress->advance(step++, totalSteps, tr("Preparing audio engine…")))
+        return false;
+
+    const double rate = audio_.sampleRate() > 0
+        ? audio_.sampleRate()
+        : (audio_.requestedSampleRate() > 0 ? static_cast<double>(audio_.requestedSampleRate()) : 48000.0);
+    std::vector<std::uint64_t> newlyUnpublished;
+
     // Only plugins the user's scan found are loaded: a project file may name
     // any library, and loading one runs its code.
     const auto load = [&](PluginSlot& slot, std::span<const std::uint8_t> state) {
@@ -5123,29 +6263,103 @@ void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
     const auto stateAt = [](const auto& list, std::size_t i) -> std::span<const std::uint8_t> {
         return i < list.size() ? std::span<const std::uint8_t>(list[i]) : std::span<const std::uint8_t>();
     };
-    for (std::size_t c = 0; c < incoming.project.channels().size(); ++c)
+
+    int loadedInstIdx = 0;
+    for (std::size_t c = 0; c < incoming.project.channels().size(); ++c) {
         if (auto slot = incoming.project.channels()[c].instrument) {
+            ++loadedInstIdx;
+            if (progress != nullptr
+                && !progress->advance(step++, totalSteps,
+                    tr("Loading Device: %1").arg(QString::fromStdString(slot->name)),
+                    tr("Instrument %1 of %2").arg(loadedInstIdx).arg(totalInstruments))) {
+                releaseUnusedPlugins();
+                return false;
+            }
             load(*slot, stateAt(incoming.states.instruments, c));
+            if (progress != nullptr && progress->wasCanceled()) {
+                releaseUnusedPlugins();
+                return false;
+            }
             // No device yet: startDevice() activates it at the device's rate.
             if (slot->instance != 0 && audio_.sampleRate() <= 0)
-                unpublishedInstruments_.push_back(slot->instance);
+                newlyUnpublished.push_back(slot->instance);
             incoming.project.setChannelInstrument(c, std::move(slot));
         }
+    }
+
+    int loadedFxIdx = 0;
     for (std::size_t i = 0; i < incoming.mixer.size(); ++i) {
         std::vector<PluginSlot> effects = incoming.mixer.track(i).effects;
         while (incoming.mixer.removeEffect(i, 0)) { }
         const std::vector<std::vector<std::uint8_t>> none;
         const auto& states = i < incoming.states.effects.size() ? incoming.states.effects[i] : none;
+        const QString trackTitle = QString::fromStdString(incoming.mixer.track(i).name);
         for (std::size_t e = 0; e < effects.size(); ++e) {
+            ++loadedFxIdx;
+            if (progress != nullptr
+                && !progress->advance(step++, totalSteps,
+                    tr("Loading Device: %1").arg(QString::fromStdString(effects[e].name)),
+                    tr("FX %1 of %2 · %3").arg(loadedFxIdx).arg(totalEffects).arg(trackTitle))) {
+                releaseUnusedPlugins();
+                return false;
+            }
             load(effects[e], stateAt(states, e));
+            if (progress != nullptr && progress->wasCanceled()) {
+                releaseUnusedPlugins();
+                return false;
+            }
             incoming.mixer.addEffect(i, std::move(effects[e]));
         }
     }
 
-    for (const Channel& channel : incoming.project.channels())
-        if (!channel.samplePath.empty() && !QFileInfo::exists(QString::fromStdString(channel.samplePath)))
-            problems << tr("Sample not found: %1")
-                            .arg(QDir::toNativeSeparators(QString::fromStdString(channel.samplePath)));
+    // Decode and build waveform peaks for audio samples while reporting live progress,
+    // so syncChannelRack() below never blocks the UI thread silently.
+    std::map<std::string, std::shared_ptr<const vloom::SampleBuffer>> decodedSamples;
+    std::map<std::string, std::shared_ptr<const ClipAudio>> decodedWaveforms;
+    for (int s = 0; s < totalSamples; ++s) {
+        const std::string& samplePath = uniqueSamplePaths[static_cast<std::size_t>(s)];
+        const QString qPath = QString::fromStdString(samplePath);
+        const QFileInfo sInfo(qPath);
+        if (progress != nullptr
+            && !progress->advance(step++, totalSteps, tr("Loading Audio: %1").arg(sInfo.fileName()),
+                tr("Audio %1 of %2").arg(s + 1).arg(totalSamples))) {
+            releaseUnusedPlugins();
+            return false;
+        }
+        if (!sInfo.exists()) {
+            problems << tr("Sample not found: %1").arg(QDir::toNativeSeparators(qPath));
+            continue;
+        }
+        try {
+            QString why;
+            const QString wav = playableWav(qPath, rate, &why);
+            std::string loadErr;
+            if (!wav.isEmpty()) {
+                if (auto buf = vloom::loadSample(wav.toStdString(), rate, &loadErr); buf != nullptr) {
+                    decodedWaveforms[samplePath] = makeClipAudio(*buf);
+                    decodedSamples[samplePath] = std::move(buf);
+                } else if (!loadErr.empty()) {
+                    problems
+                        << tr("Could not load %1: %2").arg(sInfo.fileName(), QString::fromStdString(loadErr));
+                }
+            } else if (!why.isEmpty()) {
+                problems << tr("Could not decode %1: %2").arg(sInfo.fileName(), why);
+            }
+        } catch (const std::exception&) {
+            problems << tr("Not enough memory to load %1").arg(sInfo.fileName());
+        }
+        if (progress != nullptr && progress->wasCanceled()) {
+            releaseUnusedPlugins();
+            return false;
+        }
+    }
+
+    if (progress != nullptr)
+        (void)progress->advance(step++, totalSteps, tr("Building mixer & arrangement…"));
+
+    ++projectGeneration_;
+    undoHistory_.clear();
+    unpublishedInstruments_ = std::move(newlyUnpublished);
 
     project_ = std::move(incoming.project);
     mixer_ = std::move(incoming.mixer);
@@ -5158,7 +6372,11 @@ void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
     noteHistory_.clear(); // another project: nothing of the old one to undo
     noteEditBefore_.reset();
     rackAudio_.reset();
-    clipAudio_.clear();
+    if (audio_.sampleRate() > 0.0 && audio_.sampleRate() == rate) {
+        for (auto& [pathKey, sampleBuf] : decodedSamples)
+            rackAudio_.store(pathKey, std::move(sampleBuf), rate);
+    }
+    clipAudio_ = std::move(decodedWaveforms);
     playlist_->clearWaveCache();
     currentPattern_ = 0;
     currentChannel_ = 0;
@@ -5175,6 +6393,10 @@ void MainWindow::applyProject(ProjectData incoming, QStringList& problems)
     syncEffectCounts();
     releaseUnusedPlugins(); // the old project's plugins
     updatePluginIdle();
+
+    if (progress != nullptr)
+        (void)progress->advance(totalSteps, totalSteps, tr("Ready"));
+    return true;
 }
 
 void MainWindow::syncMixerPanel()
@@ -5186,19 +6408,59 @@ void MainWindow::syncMixerPanel()
     for (std::size_t i = 0; i < mixer_.size(); ++i) {
         const MixerTrack& t = mixer_.track(i);
         if (i != MixerModel::kMaster) {
+            mixerPanel_->setTrackRole(i, t.role);
             mixerPanel_->setTrackName(i, QString::fromStdString(t.name));
+
             bool hasAudio = false;
             bool hasInstrument = false;
+            QString instrumentName;
+            QString sourceLabel;
             const auto insNum = static_cast<int>(i);
             for (const Channel& ch : project_.channels()) {
-                if (ch.insert == insNum) {
-                    hasAudio = hasAudio || !ch.samplePath.empty();
-                    hasInstrument = hasInstrument || ch.instrument.has_value();
+                if (ch.insert != insNum)
+                    continue;
+                if (ch.instrument.has_value()) {
+                    hasInstrument = true;
+                    if (instrumentName.isEmpty())
+                        instrumentName = QString::fromStdString(ch.instrument->name);
+                } else if (!ch.samplePath.empty()) {
+                    hasAudio = true;
+                    if (sourceLabel.isEmpty())
+                        sourceLabel = t.mono ? tr("Audio · Mono") : tr("Audio · Stereo");
+                } else {
+                    // Empty pre-created Audio or MIDI channel
+                    hasAudio = true;
+                    if (sourceLabel.isEmpty()) {
+                        const QString chTitle = QString::fromStdString(ch.name);
+                        sourceLabel = (t.mono || chTitle.contains(QStringLiteral("(M)"), Qt::CaseInsensitive))
+                            ? tr("Audio · Mono")
+                            : tr("IN L+R");
+                    }
                 }
             }
-            mixerPanel_->setTrackSourceFlags(i, hasAudio, hasInstrument);
+
+            const int outTarget
+                = (t.output > 0 && static_cast<std::size_t>(t.output) < mixer_.size()) ? t.output : 0;
+            const QString outputLabel = outTarget == 0
+                ? tr("Main")
+                : QStringLiteral("→ %1").arg(
+                      QString::fromStdString(mixer_.track(static_cast<std::size_t>(outTarget)).name));
+
+            mixerPanel_->setTrackChannelRouting(
+                i, hasAudio, hasInstrument, instrumentName, sourceLabel, outTarget, outputLabel);
+
+            std::vector<MixerSendDisplay> sendViews;
+            sendViews.reserve(t.sends.size());
+            for (const MixerSend& s : t.sends) {
+                const QString dstName = (s.target > 0 && static_cast<std::size_t>(s.target) < mixer_.size())
+                    ? QString::fromStdString(mixer_.track(static_cast<std::size_t>(s.target)).name)
+                    : tr("Ch %1").arg(s.target);
+                sendViews.push_back(MixerSendDisplay{s.target, dstName, s.level, s.muted, s.preFader});
+            }
+            mixerPanel_->setTrackSends(i, sendViews);
         }
         mixerPanel_->setTrackColor(i, t.color);
+        mixerPanel_->setTrackMono(i, t.mono);
         mixerPanel_->setTrackValues(i, t.fader, t.pan, t.muted, t.soloed);
         mixerPanel_->setEffectCount(i, t.effects.size());
     }
@@ -5597,14 +6859,19 @@ void MainWindow::updateRefreshRate()
 
 void MainWindow::showAbout()
 {
-    QMessageBox::about(this, tr("About VloomDAW"),
-        tr("<h3>VloomDAW %1</h3>"
-           "<p>An open-source digital audio workstation by Vloom Audio.</p>"
-           "<p>Engine %2 · Qt %3</p>"
-           "<p>Licensed under the GNU GPL v3 or later.<br>"
-           "<a href='https://github.com/vloom-audio'>github.com/vloom-audio</a></p>")
-            .arg(QStringLiteral(VLOOMDAW_VERSION), QString::fromLatin1(vloom::engineVersion()),
-                QString::fromLatin1(qVersion())));
+    AboutRuntimeInfo info;
+    if (audio_.isRunning()) {
+        info.audioStatus = tr("%1  ·  %2 Hz (%3 smp)")
+                               .arg(QString::fromStdString(audio_.deviceName()))
+                               .arg(audio_.sampleRate())
+                               .arg(audio_.bufferFrames());
+    } else {
+        info.audioStatus = tr("No active output device");
+    }
+    info.scannedPluginCount = static_cast<int>(pluginStore_.plugins.size());
+
+    AboutDialog dlg(info, this);
+    dlg.exec();
 }
 
 } // namespace vloomdaw

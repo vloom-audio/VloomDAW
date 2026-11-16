@@ -153,6 +153,8 @@ public:
 
     /// A new song: four channels (Kick, Clap, Hat, Snare) and one pattern.
     Project();
+    /// A new song with `playlistTracks` initial playlist tracks (`0` for an empty arrangement).
+    explicit Project(int playlistTracks);
 
     /// A project rebuilt from saved parts (core/ProjectFile). Every value
     /// goes through the same checks as the setters, so a damaged or hostile
@@ -262,9 +264,9 @@ public:
     // ---- playlist
     /// Appends a track named "Track N"; its index, or nullopt at kMaxPlaylistTracks.
     std::optional<std::size_t> addTrack();
-    /// Removes a track (never the last one) with its clips (pattern and
-    /// audio); clips on later tracks move up one, and unnamed tracks after it
-    /// take their new number.
+    /// Removes a track (including the last one, leaving zero tracks) with its
+    /// clips (pattern and audio); clips on later tracks move up one, and
+    /// unnamed tracks after it take their new number.
     void removeTrack(std::size_t track);
     /// Names a track (trimmed, at most kMaxTrackNameLength bytes); a blank
     /// name gives back "Track N".

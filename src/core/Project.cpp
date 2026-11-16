@@ -11,11 +11,17 @@
 namespace vloomdaw {
 
 Project::Project()
+    : Project(kDefaultPlaylistTracks)
+{
+}
+
+Project::Project(int playlistTracks)
 {
     for (const char* name : {"Kick", "Clap", "Hat", "Snare"})
         channels_.push_back(Channel{name, false, {}});
     addPattern();
-    for (int t = 0; t < kDefaultPlaylistTracks; ++t)
+    const int initialTracks = std::clamp(playlistTracks, 0, kMaxPlaylistTracks);
+    for (int t = 0; t < initialTracks; ++t)
         addTrack();
 }
 
@@ -80,14 +86,12 @@ Project Project::restored(const std::vector<Channel>& channels, const std::vecto
         const std::size_t t = p.tracks_.size() - 1;
         p.setTrackName(t, in.named ? in.name : std::string());
     }
-    if (p.tracks_.empty())
-        p.addTrack();
     p.normalizeTrackDepths();
 
     for (const Clip& clip : clips)
-        p.addClip(clip); // a missing pattern: dropped
+        p.addClip(clip); // a missing pattern: dropped; creates Track 1 if tracks_ was empty
     for (const AudioClip& clip : audioClips)
-        p.addAudioClip(clip); // a missing channel: dropped
+        p.addAudioClip(clip); // a missing channel: dropped; creates Track 1 if tracks_ was empty
     return p;
 }
 
@@ -474,7 +478,8 @@ void Project::removeNote(std::size_t pattern, std::size_t channel, std::size_t i
 
 Clip Project::clamped(Clip clip) const
 {
-    clip.track = std::clamp(clip.track, 0, static_cast<int>(tracks_.size()) - 1);
+    const int maxTrack = tracks_.empty() ? 0 : static_cast<int>(tracks_.size()) - 1;
+    clip.track = std::clamp(clip.track, 0, maxTrack);
     clip.start = std::max(0, clip.start);
     clip.offset = std::max(0, clip.offset);
     clip.length = std::max(0, clip.length);
@@ -493,7 +498,7 @@ std::optional<std::size_t> Project::addTrack()
 
 void Project::removeTrack(std::size_t track)
 {
-    if (track >= tracks_.size() || tracks_.size() <= 1)
+    if (track >= tracks_.size())
         return;
     tracks_.erase(tracks_.begin() + static_cast<std::ptrdiff_t>(track));
     for (std::size_t t = track; t < tracks_.size(); ++t)
@@ -792,7 +797,8 @@ std::vector<int> Project::ensureDropTracks(int startTrack, std::size_t count)
 
 AudioClip Project::clamped(AudioClip clip) const
 {
-    clip.track = std::clamp(clip.track, 0, static_cast<int>(tracks_.size()) - 1);
+    const int maxTrack = tracks_.empty() ? 0 : static_cast<int>(tracks_.size()) - 1;
+    clip.track = std::clamp(clip.track, 0, maxTrack);
     clip.start = std::max(0, clip.start);
     clip.offset = std::max(0, clip.offset);
     clip.length = std::max(0, clip.length);
@@ -806,6 +812,8 @@ std::optional<std::size_t> Project::addAudioClip(AudioClip clip)
 {
     if (clip.channel >= channels_.size())
         return std::nullopt;
+    if (tracks_.empty())
+        addTrack();
     audioClips_.push_back(clamped(std::move(clip)));
     return audioClips_.size() - 1;
 }
@@ -826,6 +834,8 @@ std::optional<std::size_t> Project::addClip(Clip clip)
 {
     if (clip.pattern >= patterns_.size())
         return std::nullopt;
+    if (tracks_.empty())
+        addTrack();
     clips_.push_back(clamped(clip));
     return clips_.size() - 1;
 }

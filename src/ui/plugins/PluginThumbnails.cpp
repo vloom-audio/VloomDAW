@@ -16,6 +16,7 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScreen>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QToolButton>
@@ -41,12 +42,36 @@ QHash<QString, ThumbnailCacheEntry>& thumbnailCache()
     return cache;
 }
 
-QString thumbnailsDirectory()
+const QString& thumbnailsDirectory()
 {
-    QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if (base.isEmpty())
-        base = QDir::homePath() + QStringLiteral("/.vloomdaw");
-    return QDir(base).filePath(QStringLiteral("thumbnails"));
+    static const QString dir = [] {
+        QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        if (base.isEmpty())
+            base = QDir::homePath() + QStringLiteral("/.vloomdaw");
+        return QDir(base).filePath(QStringLiteral("thumbnails"));
+    }();
+    return dir;
+}
+
+/// Scans `thumbnails/` once into a RAM set so checking 300+ plugins never
+/// performs per-plugin filesystem `stat()` syscalls.
+QSet<QString>& diskThumbnailIds()
+{
+    static QSet<QString> ids;
+    static bool scanned = false;
+    if (!scanned) {
+        scanned = true;
+        const QDir dir(thumbnailsDirectory());
+        if (dir.exists()) {
+            const QStringList files = dir.entryList({QStringLiteral("*.png")}, QDir::Files);
+            ids.reserve(files.size());
+            for (const QString& file : files) {
+                if (file.size() == 20 && file.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive))
+                    ids.insert(file.left(16).toLower());
+            }
+        }
+    }
+    return ids;
 }
 
 const ThumbnailCacheEntry& ensureLoaded(std::string_view thumbId)
@@ -62,11 +87,13 @@ const ThumbnailCacheEntry& ensureLoaded(std::string_view thumbId)
 
     ThumbnailCacheEntry entry;
     entry.checkedDisk = true;
-    const QString path = pluginThumbnailPath(thumbId);
-    if (QFileInfo::exists(path)) {
+    if (diskThumbnailIds().contains(key)) {
+        const QString path = pluginThumbnailPath(thumbId);
         QPixmap loaded(path, "PNG");
         if (!loaded.isNull())
             entry.raw = std::move(loaded);
+        else
+            diskThumbnailIds().remove(key);
     }
     it = cache.insert(key, std::move(entry));
     return *it;
@@ -125,7 +152,8 @@ bool savePluginThumbnail(std::string_view thumbId, const QPixmap& pixmap)
     if (!img.save(path, "PNG"))
         return false;
 
-    const QString key = QString::fromUtf8(thumbId.data(), static_cast<qsizetype>(thumbId.size()));
+    const QString key = QString::fromUtf8(thumbId.data(), static_cast<qsizetype>(thumbId.size())).toLower();
+    diskThumbnailIds().insert(key);
     ThumbnailCacheEntry entry;
     entry.checkedDisk = true;
     entry.raw = QPixmap::fromImage(std::move(img));
@@ -137,7 +165,8 @@ bool removePluginThumbnail(std::string_view thumbId)
 {
     if (!isValidPluginThumbnailId(thumbId))
         return false;
-    const QString key = QString::fromUtf8(thumbId.data(), static_cast<qsizetype>(thumbId.size()));
+    const QString key = QString::fromUtf8(thumbId.data(), static_cast<qsizetype>(thumbId.size())).toLower();
+    diskThumbnailIds().remove(key);
     thumbnailCache().remove(key);
     const QString path = pluginThumbnailPath(thumbId);
     if (!QFileInfo::exists(path))

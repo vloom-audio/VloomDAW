@@ -103,7 +103,7 @@ TransportBar::TransportBar(QWidget* parent)
     metronomeAction_ = makeAction(QStringLiteral("metronome"), tr("Metronome"), tr("Metronome on / off"),
         QKeySequence(Qt::CTRL | Qt::Key_M));
     metronomeAction_->setCheckable(true);
-    metronomeAction_->setChecked(true);
+    metronomeAction_->setChecked(false);
     connect(metronomeAction_, &QAction::toggled, this, &TransportBar::metronomeToggled);
 
     // Pattern mode plays the current pattern on a loop; song mode plays the playlist.

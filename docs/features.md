@@ -19,7 +19,7 @@ Everything VloomDAW has today, with how far each feature goes. The
 | Feature | Status | Notes |
 |---|---|---|
 | Play / pause, stop and return to start, go to start | ✅ | `Space`, `Shift+Space`, `Home` |
-| Metronome | ✅ | `Ctrl/Cmd+M`; can be on at start-up (Settings > General) |
+| Metronome | ✅ | `Ctrl/Cmd+M`; off by default at start-up (can be turned on in Settings > General) |
 | Tempo LCD | ✅ | Drag (`Shift`: fine), scroll or double-click to type the BPM |
 | Tap tempo | ✅ | `T`; averages the last four taps |
 | Time signature display | ✅ | Next to the tempo |
@@ -47,16 +47,16 @@ the transport in all three editors.
 | Channel routing | ✅ | Insert box per channel: click to pick a mixer insert, or scroll; `-` plays straight into the master |
 | Channel pan | ⏳ | M1.5: the engine supports it, no control in the rack yet |
 | Piano roll (`F7`) | ✅ | Notes play, in pattern and song mode, through the channel's sample or instrument, each as hard as its velocity. Click to add a note and drag it into place; drag to move, drag the right edge to resize (the selected notes follow; `Shift`+drag moves a copy); click selects, `Ctrl`+click adds or removes, `Ctrl`+drag selects in a box; right-click or right-drag deletes. Velocity lane along the bottom: drag over the stems. The keyboard on the left plays the channel's instrument plugin. Keys: `Delete`, `Ctrl+A / C / X / V / D`, `Ctrl+Q` quantizes to the snap, arrows move (`Shift+Up / Down`: an octave), `Ctrl+Z` / `Ctrl+Y` undo and redo note edits (200 steps). Snap menu (beat, 1/8, step, 1/32, 1/64; `Alt`: off); `Ctrl+wheel` zoom; scale shading |
-| Playlist (`F5`) | 🎨 | One track in a new project, 1-500 with + Track / − in the header; double-click a track name (or right-click, Rename…) to rename it inline (Enter confirms, Escape cancels); right-click to move up / down or delete; click or drag the time bar ruler on top to scrub playback directly (or use the Playback tool `Y`); place, move and delete pattern clips, snapped to the Snap menu (auto, bar, beat, step, 1/32; `Shift`: steps; `Alt`: free, no snapping); drop WAV files (browser or desktop) for audio clips with a waveform, below the last track for a new one; each plays through a channel of the channel rack (made for the file, or the one already playing it), so its volume, pan, mute and insert apply. Dropping one turns song mode on. Plays in song mode |
+| Playlist (`F5`) | ✅ | Empty (0 tracks) in a new project, 0-500 with `+ Track` (`Ctrl+T` opens `Add Tracks` dialog for Audio or Instrument tracks with count, pack folder, colour, FX chain and routing) or right-clicking empty header/grid space; double-click a track name (or right-click, Rename…) to rename inline; right-click to move up / down or delete (synced with its dedicated Mixer strip); click or drag the time bar ruler on top to scrub playback directly (or use the Playback tool `Y`); place, move and delete pattern clips; drop audio files or instrument plugins directly onto a track or empty space to create synced tracks, channels and mixer inserts |
 | Stem extractor | ✅ | Right-click an audio clip, Stem Extractor…: its sample is split into stems (drums, bass, other, vocals; guitar and piano with the six-stem model) on new tracks under the clip, which is muted. Options > Stem Models… is the model store: download the Demucs model you want (from huggingface.co, checked against its SHA-256) and pick the one in use; it then works offline. **Windows:** HT Demucs runs on the graphics card through ONNX Runtime and DirectML (any DirectX 12 card: NVIDIA, AMD, Intel; about a quarter of the audio's length on a GTX 1650), and falls back to the processor by itself when there is no usable card, the card fails, or its result does not add up to the song; HT Demucs 6 and FT run on the processor through ONNX Runtime. Four MDX-Net models from Ultimate Vocal Remover (from its releases on github.com) give one stem and the rest of the song: Vocals, Instrumental and Karaoke run on the graphics card, De-Reverb on the processor. **Everywhere:** the "compact" models run on the processor with demucs.cpp (AVX2 on x86-64), several times the audio's length. Windows builds ship `DirectML.dll`, which is under Microsoft's licence (free to redistribute, not open source) |
 
 ## Mixer
 
 | Feature | Status | Notes |
 |---|---|---|
-| Mixer panel (`F9`) | ✅ / 🎨 | Master and 16 insert tracks to start, 0-125 with + Insert / − in the header or Delete in a strip's right-click menu; double-click a name (or right-click, Rename…) to name an insert; right-click, Move Left / Right to reorder (channels follow their insert): pan, fader (unity at 80 %), dB readout, mute, solo |
-| Master track | ✅ | Gain, pan and mute drive the engine; the meter shows the real output |
-| Insert tracks | ✅ | Fader, pan, mute, solo and meter act on the channels routed to them |
+| Mixer panel (`F9`) | ✅ | Master (`Main`) and 0-125 console strips (`Standard`, `Bus`, `FX`, `Aux`), added via `+ Bus / + FX / + Aux / + Channel` or right-clicking empty space; draggable `Inserts` FX rack height (0–9 visible rows, remembered across sessions), `Sends` rack (up to 8 pre/post-fader sends per strip), submix output routing (`Main`, `Bus`, `Aux`), `Stereo / Mono` DSP summing toggle on inserts and Master, `<C>` bipolar pan bar, fader (unity at 80 %), dB readout, mute, solo, and double-click inline rename |
+| Master track | ✅ | Gain, pan, mute, `Stereo / Mono` summing and master FX drive the engine; the meter shows the real output |
+| Insert tracks | ✅ | Fader, pan, mute, solo, `Stereo / Mono` summing, FX slots, sends, submix output and meter act on the channels and buses routed to them |
 | Peak meters | ✅ | Stereo, with peak hold and a clip light |
 
 ## Plugins

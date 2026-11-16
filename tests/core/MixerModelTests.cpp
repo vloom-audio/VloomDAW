@@ -236,3 +236,65 @@ TEST_CASE("An insert takes at most kMaxEffects effects", "[mixer]")
     CHECK_FALSE(mixer.addEffect(1, PluginSlot{}));
     CHECK(mixer.track(1).effects.size() == MixerModel::kMaxEffects);
 }
+
+TEST_CASE("Bus, FX and Aux channels support cycle-free routing, sends and solo-safe audibility", "[mixer]")
+{
+    MixerModel mixer(2); // Insert 1 (Guitar), Insert 2 (Bass)
+    const auto bus = mixer.addChannel(MixerRole::Bus);
+    const auto fx = mixer.addChannel(MixerRole::Fx);
+    const auto aux = mixer.addChannel(MixerRole::Aux);
+    REQUIRE(bus == 3);
+    REQUIRE(fx == 4);
+    REQUIRE(aux == 5);
+    CHECK(mixer.track(*bus).name == "Bus 1");
+    CHECK(mixer.track(*fx).name == "FX 1");
+    CHECK(mixer.track(*aux).name == "Aux 1");
+
+    // Route Guitar (1) -> Bus 1 (3), and add Send from Guitar (1) -> FX 1 (4)
+    CHECK(mixer.setOutput(1, static_cast<int>(*bus)));
+    CHECK(mixer.addSend(1, static_cast<int>(*fx), 0.75, true));
+    CHECK_FALSE(mixer.addSend(1, static_cast<int>(*fx))); // duplicate send target rejected
+
+    // Routing cycles (direct or transitive via output/send) are refused
+    CHECK_FALSE(mixer.setOutput(*bus, 1));
+    CHECK_FALSE(mixer.setOutput(*fx, 1));
+    CHECK_FALSE(mixer.addSend(*bus, 1));
+
+    // Soloing Guitar (1) keeps downstream Bus 1 and FX 1 audible while silencing Bass (2)
+    mixer.setSoloed(1, true);
+    CHECK(mixer.isTrackAudible(1));
+    CHECK_FALSE(mixer.isTrackAudible(2));
+    CHECK(mixer.isTrackAudible(*bus));
+    CHECK(mixer.isTrackAudible(*fx));
+    CHECK_FALSE(mixer.isTrackAudible(*aux));
+
+    // Soloing Bus 1 keeps upstream Guitar (1) and downstream FX 1 audible!
+    mixer.setSoloed(1, false);
+    mixer.setSoloed(*bus, true);
+    CHECK(mixer.isTrackAudible(*bus));
+    CHECK(mixer.isTrackAudible(1));
+    CHECK(mixer.isTrackAudible(*fx));
+    CHECK_FALSE(mixer.isTrackAudible(2));
+    mixer.setSoloed(*bus, false);
+
+    // Moving and removing strips remaps output and send targets accurately
+    CHECK(mixer.moveInsert(*bus, 2) == 2); // Bus 1 is now at index 2; Bass is at 3; FX 1 stays at 4
+    CHECK(mixer.track(1).output == 2);
+    REQUIRE(mixer.track(1).sends.size() == 1);
+    CHECK(mixer.track(1).sends[0].target == 4);
+
+    CHECK(mixer.removeInsert(2)); // delete Bus 1 -> Guitar falls back to Master (0), FX 1 shifts to 3
+    CHECK(mixer.track(1).output == 0);
+    CHECK(mixer.track(1).sends[0].target == 3);
+
+    // Mono / Stereo mode works on both Master (0) and Inserts (1..N) and moves with the strip
+    CHECK_FALSE(mixer.track(MixerModel::kMaster).mono);
+    CHECK_FALSE(mixer.track(1).mono);
+    mixer.setMono(MixerModel::kMaster, true);
+    mixer.setMono(1, true);
+    CHECK(mixer.track(MixerModel::kMaster).mono);
+    CHECK(mixer.track(1).mono);
+    CHECK(mixer.moveInsert(1, 2) == 2);
+    CHECK(mixer.track(2).mono);
+    CHECK_FALSE(mixer.track(1).mono);
+}

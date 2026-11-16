@@ -60,6 +60,7 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
   - `muted`, `solo` and `collapsed`;
   - `height`: 24 .. 200;
   - `depth`: 0 .. 4, the sub-track outline;
+  - `volume`: 0 .. 1, `pan`: -1 .. 1, and `insert`: -1 (unassigned) .. 125;
   - `color`.
 - **Clip:**
   - `pattern`: an index;
@@ -77,7 +78,10 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
 
 `mixer` is the master first, then the inserts. Each holds:
 - `name` and `named`;
-- `fader`, `pan`, `muted`, `soloed` and `color`;
+- `role`: `standard`, `bus`, `fx` or `aux` (inserts);
+- `fader`, `pan`, `muted`, `soloed`, `mono` and `color`;
+- `output`: destination mixer strip (`0` = master, or a `bus`/`aux` index);
+- `sends`: up to 8 auxiliary sends (`target`, `level`, `muted`, `preFader`);
 - `effects`: a list of plugins, in processing order.
 
 ## Plugins

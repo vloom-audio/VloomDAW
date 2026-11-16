@@ -13,6 +13,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QStackedWidget;
 class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -24,6 +25,9 @@ struct PluginStore;
 /// Side panel listing the plugins found by the user's last scan, separated into
 /// Studio One-style `Instruments` and `FX` tabs, grouped by category, vendor,
 /// format or flat A-Z, with inline plugin thumbnails and a bottom inspector card.
+///
+/// Each tab owns its own pre-built `QTreeWidget` inside a `QStackedWidget` so
+/// switching between `Instruments` and `FX` is an instant O(1) page flip.
 class PluginsPanel : public QWidget {
     Q_OBJECT
 
@@ -45,6 +49,9 @@ public:
     /// Rebuilds inline thumbnails and inspector preview after a capture/removal.
     void refreshThumbnails();
 
+    /// Builds a rich multi-line tooltip for `plugins_[index]` on demand.
+    [[nodiscard]] QString tooltipForPlugin(std::size_t index) const;
+
 signals:
     /// The user wants the Plugin Manager (to scan or change folders).
     void managerRequested();
@@ -60,16 +67,26 @@ signals:
     void addToMixerRequested(std::size_t index);
 
 private:
-    void rebuild();
+    [[nodiscard]] QTreeWidget* makePluginTree();
+    [[nodiscard]] QTreeWidget* activeTree() const;
+    void markAllDirty();
+    void ensureCurrentTabBuilt();
+    void populateTree(QTreeWidget* tree, Tab tab);
+    void updateTabState();
     void updateTabCounts();
     void updateInspector(std::optional<std::size_t> pluginIndex);
     void onItemActivated(QTreeWidgetItem* item);
-    void showContextMenu(const QPoint& pos);
+    void showContextMenu(QTreeWidget* tree, const QPoint& pos);
+    void applySearchToTree(QTreeWidget* tree, const QString& text);
     void applySearch(const QString& text);
 
     std::vector<PluginInfo> plugins_;
     Tab tab_ = Tab::Instruments;
     bool showThumbnails_ = true;
+    bool instDirty_ = true;
+    bool fxDirty_ = true;
+    bool instEmpty_ = true;
+    bool fxEmpty_ = true;
     std::optional<std::size_t> selectedPluginIndex_;
 
     QWidget* tabBarWidget_ = nullptr;
@@ -81,7 +98,9 @@ private:
     QToolButton* thumbToggleBtn_ = nullptr;
 
     QLineEdit* search_ = nullptr;
-    QTreeWidget* tree_ = nullptr;
+    QStackedWidget* treeStack_ = nullptr;
+    QTreeWidget* instTree_ = nullptr;
+    QTreeWidget* fxTree_ = nullptr;
     QLabel* emptyHint_ = nullptr;
     QPushButton* scanButton_ = nullptr;
 

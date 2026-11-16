@@ -132,6 +132,32 @@ std::string_view pluginFormatText(PluginFormat format)
     return "vst3";
 }
 
+std::string_view mixerRoleText(MixerRole role)
+{
+    switch (role) {
+    case MixerRole::Bus:
+        return "bus";
+    case MixerRole::Fx:
+        return "fx";
+    case MixerRole::Aux:
+        return "aux";
+    case MixerRole::Standard:
+        break;
+    }
+    return "standard";
+}
+
+MixerRole mixerRoleFromText(std::string_view text)
+{
+    if (text == "bus")
+        return MixerRole::Bus;
+    if (text == "fx")
+        return MixerRole::Fx;
+    if (text == "aux")
+        return MixerRole::Aux;
+    return MixerRole::Standard;
+}
+
 std::optional<std::string> colorText(const std::optional<std::uint32_t>& color)
 {
     if (!color)
@@ -450,6 +476,20 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
             effects.push_back(pluginJson(t.effects[e], states != nullptr ? at(*states, e) : nullptr));
         Json j = {{"name", t.name}, {"named", t.named}, {"fader", t.fader}, {"pan", t.pan},
             {"muted", t.muted}, {"soloed", t.soloed}, {"effects", std::move(effects)}};
+        if (t.mono)
+            j["mono"] = true;
+        if (i != MixerModel::kMaster && t.role != MixerRole::Standard)
+            j["role"] = mixerRoleText(t.role);
+        if (i != MixerModel::kMaster && t.output != 0)
+            j["output"] = t.output;
+        if (i != MixerModel::kMaster && !t.sends.empty()) {
+            Json sends = Json::array();
+            for (const MixerSend& s : t.sends) {
+                sends.push_back(
+                    {{"target", s.target}, {"level", s.level}, {"muted", s.muted}, {"preFader", s.preFader}});
+            }
+            j["sends"] = std::move(sends);
+        }
         if (const auto color = colorText(t.color))
             j["color"] = *color;
         mixer.push_back(std::move(j));
@@ -605,6 +645,8 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
         patterns.push_back(std::move(p));
     }
 
+    const auto rawTracksIt = root.find("tracks");
+    const bool hasExplicitTracksArray = rawTracksIt != root.end() && rawTracksIt->is_array();
     std::vector<PlaylistTrack> tracks;
     for (const Json* jp : in.array(root, "tracks", static_cast<std::size_t>(Project::kMaxPlaylistTracks))) {
         const Json& j = *jp;
@@ -625,6 +667,8 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
         t.color = in.color(j, "color");
         tracks.push_back(std::move(t));
     }
+    if (!hasExplicitTracksArray && tracks.empty())
+        tracks.emplace_back();
 
     constexpr int kMaxTick = std::numeric_limits<int>::max() / 2;
     std::vector<Clip> clips;
@@ -671,12 +715,18 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
         const Json& j = *mixer[i];
         std::vector<std::vector<std::uint8_t>> states;
         if (j.is_object()) {
+            if (i != MixerModel::kMaster) {
+                const std::string roleStr = in.text(j, "role", 16);
+                if (!roleStr.empty())
+                    data.mixer.setRole(i, mixerRoleFromText(roleStr));
+            }
             if (Reader::flag(j, "named"))
                 data.mixer.setName(i, in.text(j, "name", kMaxNameBytes));
             data.mixer.setFader(i, in.number<double>(j, "fader", 0.8, 0.0, 1.0));
             data.mixer.setPan(i, in.number<double>(j, "pan", 0.0, -1.0, 1.0));
             data.mixer.setMuted(i, Reader::flag(j, "muted"));
             data.mixer.setSoloed(i, Reader::flag(j, "soloed"));
+            data.mixer.setMono(i, Reader::flag(j, "mono"));
             data.mixer.setColor(i, in.color(j, "color"));
             for (const Json* ep : in.array(j, "effects", MixerModel::kMaxEffects)) {
                 const Json& e = *ep;
@@ -686,6 +736,31 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
             }
         }
         data.states.effects.push_back(std::move(states));
+    }
+    // Second pass: apply submix outputs and sends now that all mixer tracks exist,
+    // rejecting out-of-range targets or routing loops safely.
+    for (std::size_t i = 1; i < mixer.size(); ++i) {
+        const Json& j = *mixer[i];
+        if (!j.is_object())
+            continue;
+        const int outTarget = in.number<int>(j, "output", 0, 0, static_cast<int>(MixerModel::kMaxInserts));
+        if (outTarget != 0 && !data.mixer.setOutput(i, outTarget))
+            in.warn("A mixer channel output that formed a loop or did not exist was reset to Master");
+
+        for (const Json* sp : in.array(j, "sends", MixerModel::kMaxSends)) {
+            const Json& s = *sp;
+            if (!s.is_object())
+                continue;
+            const int target = in.number<int>(s, "target", 0, 0, static_cast<int>(MixerModel::kMaxInserts));
+            const double level = in.number<double>(s, "level", 0.8, 0.0, 1.0);
+            const bool muted = Reader::flag(s, "muted");
+            const bool preFader = Reader::flag(s, "preFader");
+            if (data.mixer.addSend(i, target, level, preFader)) {
+                data.mixer.setSendMuted(i, data.mixer.track(i).sends.size() - 1, muted);
+            } else {
+                in.warn("A mixer send that formed a loop or pointed to a missing channel was left out");
+            }
+        }
     }
     if (mixer.empty())
         data.states.effects.emplace_back(); // the master

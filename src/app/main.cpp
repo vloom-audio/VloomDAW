@@ -73,6 +73,7 @@ int main(int argc, char* argv[])
             if (index < 0)
                 index = devices.defaultIndex;
             audio.openDevice(index);
+            audio.engine().setMetronomeEnabled(settings.metronomeOnStartup);
         };
         openPreferredAudio();
 
