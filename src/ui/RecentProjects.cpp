@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/RecentProjects.hpp"
 
+#include "ui/FilePaths.hpp"
+
 #include <QDir>
 #include <QSettings>
 
@@ -35,7 +37,7 @@ void store(QStringList list)
 QStringList projects()
 {
     QStringList list = QSettings().value(kKey).toStringList();
-    list.removeAll(QString());
+    list.removeIf([](const QString& p) { return !isLocalPath(p); });
     while (list.size() > kMaxProjects)
         list.removeLast();
     return list;
@@ -43,6 +45,8 @@ QStringList projects()
 
 void add(const QString& path)
 {
+    if (!isLocalPath(path))
+        return;
     QStringList list = projects();
     list.removeIf([&](const QString& p) { return same(p, path); });
     list.prepend(QDir::cleanPath(path));
@@ -66,7 +70,7 @@ constexpr int kMaxPinned = 50;
 QStringList pinned()
 {
     QStringList list = QSettings().value(kPinnedKey).toStringList();
-    list.removeAll(QString());
+    list.removeIf([](const QString& p) { return !isLocalPath(p); });
     return list.mid(0, kMaxPinned);
 }
 
@@ -78,6 +82,8 @@ bool isPinned(const QString& path)
 
 void setPinned(const QString& path, bool pin)
 {
+    if (pin && !isLocalPath(path))
+        return;
     QStringList list = pinned();
     list.removeIf([&](const QString& p) { return same(p, path); });
     if (pin)

@@ -17,4 +17,8 @@ namespace vloomdaw {
 /// The inverse of toQString().
 [[nodiscard]] std::filesystem::path toPath(const QString& path);
 
+/// True when `path` is a non-empty local path and not a UNC / network share
+/// (`\\server\share` or `//server/share`).
+[[nodiscard]] bool isLocalPath(const QString& path) noexcept;
+
 } // namespace vloomdaw

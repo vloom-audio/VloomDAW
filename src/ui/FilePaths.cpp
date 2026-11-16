@@ -25,4 +25,12 @@ std::filesystem::path toPath(const QString& path)
 #endif
 }
 
+bool isLocalPath(const QString& path) noexcept
+{
+    if (path.size() < 2)
+        return !path.isEmpty();
+    const auto isSep = [](QChar c) noexcept { return c == QLatin1Char('/') || c == QLatin1Char('\\'); };
+    return !(isSep(path[0]) && isSep(path[1]));
+}
+
 } // namespace vloomdaw

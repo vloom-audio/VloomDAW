@@ -159,12 +159,8 @@ std::string samplePathText(const std::string& path, const std::filesystem::path&
     return {generic.begin(), generic.end()};
 }
 
-/// A path from a network share (\\server\share, //server/share): opening one
-/// can leak the user's Windows credentials to that server.
-bool isNetworkPath(std::string_view path)
-{
-    return path.size() >= 2 && (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/');
-}
+[[maybe_unused]] constexpr bool isPathSep(char c) noexcept { return c == '\\' || c == '/'; }
+[[maybe_unused]] constexpr bool isPathSepW(wchar_t c) noexcept { return c == L'\\' || c == L'/'; }
 
 // ---------------------------------------------------------------- reading helpers
 
@@ -307,8 +303,12 @@ std::optional<PluginSlot> readPlugin(const Json& object, Reader& in, std::vector
     slot.id = in.text(object, "id", kMaxIdBytes);
     slot.name = in.text(object, "name", kMaxNameBytes);
     slot.bypassed = Reader::flag(object, "bypassed");
-    if (slot.format == PluginFormat::Builtin)
+    if (slot.format == PluginFormat::Builtin) {
         slot.path.clear(); // it has no file; nothing is loaded from a path
+    } else if (isNetworkPath(slot.path)) {
+        in.warn("Plugins on network shares were left out: " + slot.path);
+        return std::nullopt;
+    }
     if ((slot.path.empty() && slot.format != PluginFormat::Builtin) || slot.id.empty()) {
         in.warn("A plugin without a path or id was left out");
         return std::nullopt;
@@ -346,8 +346,27 @@ std::filesystem::path pathFromUtf8(std::string_view utf8)
 
 std::string pathToUtf8(const std::filesystem::path& path)
 {
-    const std::u8string s = path.u8string();
-    return {s.begin(), s.end()};
+    try {
+        const std::u8string s = path.u8string();
+        return {s.begin(), s.end()};
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+bool isNetworkPath(std::string_view path) noexcept
+{
+    return path.size() >= 2 && isPathSep(path[0]) && isPathSep(path[1]);
+}
+
+bool isNetworkFsPath(const std::filesystem::path& path) noexcept
+{
+#if defined(_WIN32)
+    const std::wstring& s = path.native();
+    return s.size() >= 2 && isPathSepW(s[0]) && isPathSepW(s[1]);
+#else
+    return isNetworkPath(std::string_view(path.native()));
+#endif
 }
 
 // ---------------------------------------------------------------- write
@@ -396,7 +415,10 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
     Json tracks = Json::array();
     for (const PlaylistTrack& t : project.tracks()) {
         Json j = {{"name", t.name}, {"named", t.named}, {"muted", t.muted}, {"solo", t.solo},
-            {"height", t.height}, {"depth", t.depth}, {"collapsed", t.collapsed}};
+            {"height", t.height}, {"depth", t.depth}, {"collapsed", t.collapsed}, {"volume", t.volume},
+            {"pan", t.pan}};
+        if (t.insert >= 0)
+            j["insert"] = t.insert;
         if (const auto color = colorText(t.color))
             j["color"] = *color;
         tracks.push_back(std::move(j));
@@ -513,8 +535,23 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
             sample.clear();
         } else if (!sample.empty()) {
             const std::filesystem::path p = pathFromUtf8(sample);
-            if (p.is_relative() && !folder.empty())
-                sample = pathToUtf8((folder / p).lexically_normal());
+            if (isNetworkPath(p)) {
+                in.warn("Samples on network shares were left out: " + sample);
+                sample.clear();
+            } else if (p.is_relative() && !folder.empty()) {
+                if (isNetworkPath(folder)) {
+                    in.warn("Samples on network shares were left out: " + sample);
+                    sample.clear();
+                } else {
+                    const std::filesystem::path resolved = (folder / p).lexically_normal();
+                    if (isNetworkPath(resolved)) {
+                        in.warn("Samples on network shares were left out: " + sample);
+                        sample.clear();
+                    } else {
+                        sample = pathToUtf8(resolved);
+                    }
+                }
+            }
         }
         c.samplePath = sample;
         c.volume = in.number<double>(j, "volume", 0.8, 0.0, 1.0);
@@ -578,6 +615,9 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
             j, "height", PlaylistTrack::kDefaultHeight, PlaylistTrack::kMinHeight, PlaylistTrack::kMaxHeight);
         t.depth = in.number<int>(j, "depth", 0, 0, PlaylistTrack::kMaxDepth);
         t.collapsed = Reader::flag(j, "collapsed");
+        t.volume = in.number<double>(j, "volume", 0.8, 0.0, 1.0);
+        t.pan = in.number<double>(j, "pan", 0.0, -1.0, 1.0);
+        t.insert = in.number<int>(j, "insert", -1, -1, static_cast<int>(MixerModel::kMaxInserts));
         t.color = in.color(j, "color");
         tracks.push_back(std::move(t));
     }
@@ -652,6 +692,9 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
             data.project.setChannelInsert(c, 0);
             in.warn("A channel routed to a mixer insert that does not exist now plays into the master");
         }
+    for (std::size_t t = 0; t < data.project.tracks().size(); ++t)
+        if (data.project.tracks()[t].insert > static_cast<int>(data.mixer.insertCount()))
+            data.project.setTrackInsert(t, -1);
 
     result.data = std::move(data);
     return result;
@@ -667,6 +710,8 @@ bool ProjectFile::save(const std::filesystem::path& path, const ProjectData& dat
             *error = std::move(message);
         return false;
     };
+    if (isNetworkPath(path))
+        return fail("Projects cannot be saved to network shares");
     const std::string text = write(data, path.parent_path());
     std::filesystem::path temp = path;
     temp += u8".saving";
@@ -695,6 +740,10 @@ bool ProjectFile::save(const std::filesystem::path& path, const ProjectData& dat
 ProjectFile::ReadResult ProjectFile::load(const std::filesystem::path& path)
 {
     ReadResult result;
+    if (isNetworkPath(path)) {
+        result.error = "Projects on network shares cannot be opened";
+        return result;
+    }
     std::error_code ec;
     const std::uintmax_t size = std::filesystem::file_size(path, ec);
     if (ec) {
@@ -753,6 +802,8 @@ ProjectSummary ProjectFile::summarize(const ProjectData& data)
 std::optional<ProjectSummary> ProjectFile::summarize(
     const std::filesystem::path& path, std::uintmax_t maxBytes)
 {
+    if (isNetworkPath(path))
+        return std::nullopt;
     std::error_code ec;
     const std::uintmax_t size = std::filesystem::file_size(path, ec);
     if (ec || size > maxBytes)
