@@ -124,8 +124,9 @@ void PluginProber::next()
 
         output_.clear();
         timedOut_ = false;
-        const QString format
-            = module.format == PluginFormat::Clap ? QStringLiteral("--clap") : QStringLiteral("--vst3");
+        const QString format = module.format == PluginFormat::Clap ? QStringLiteral("--clap")
+            : module.format == PluginFormat::Vst2                  ? QStringLiteral("--vst2")
+                                                                   : QStringLiteral("--vst3");
         process_->start(program, {format, toQString(module.path)});
         timeout_->start();
         return; // continues in moduleDone()

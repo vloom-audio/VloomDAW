@@ -21,7 +21,7 @@ TEST_CASE("A plugin that cannot be loaded gives no handle and says why", "[plugi
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto missing
         = std::filesystem::temp_directory_path() / ("vloomdaw_missing_" + std::to_string(stamp) + ".clap");
-    for (const PluginFormat format : {PluginFormat::Clap, PluginFormat::Vst3}) {
+    for (const PluginFormat format : {PluginFormat::Clap, PluginFormat::Vst3, PluginFormat::Vst2}) {
         const PluginHost::Loaded loaded = host.load(format, missing, {}, "Missing", 48000.0);
         CHECK(loaded.handle == 0);
         CHECK_FALSE(loaded.error.empty());
@@ -137,3 +137,21 @@ TEST_CASE("The built-in effects are listed and load without a file", "[plugins]"
     CHECK(unknown.handle == 0);
     CHECK_FALSE(unknown.error.empty());
 }
+
+#if defined(VLOOMDAW_FAKE_VST2_PATH)
+TEST_CASE("PluginHost loads a VST2 plugin and preserves state through saveState", "[plugins]")
+{
+    PluginHost host;
+    const std::filesystem::path vst2Path{VLOOMDAW_FAKE_VST2_PATH};
+    const PluginHost::Loaded loaded = host.load(PluginFormat::Vst2, vst2Path, {}, "Fake VST2 Synth", 48000.0);
+    REQUIRE(loaded.handle != 0);
+    CHECK(loaded.info.name == "Fake VST2 Synth");
+    CHECK(loaded.info.kind == vloom::PluginInfo::Kind::Instrument);
+    const auto inst = host.instance(loaded.handle);
+    REQUIRE(inst != nullptr);
+    CHECK_FALSE(inst->processor().hasFailed());
+    const std::vector<std::uint8_t> state = host.saveState(loaded.handle);
+    CHECK_FALSE(state.empty());
+    CHECK(host.idle().empty());
+}
+#endif

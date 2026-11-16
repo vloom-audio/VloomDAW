@@ -49,6 +49,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 CloseApplications=yes
+ChangesAssociations=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -63,6 +64,15 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 Name: "{group}\VloomDAW"; Filename: "{app}\VloomDAW.exe"
 Name: "{group}\{cm:UninstallProgram,VloomDAW}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\VloomDAW"; Filename: "{app}\VloomDAW.exe"; Tasks: desktopicon
+
+[Registry]
+Root: HKA; Subkey: "Software\Classes\.vloom"; ValueType: string; ValueName: ""; ValueData: "VloomDAW.Project"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.vloom\OpenWithProgids"; ValueType: string; ValueName: "VloomDAW.Project"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\VloomDAW.Project"; ValueType: string; ValueName: ""; ValueData: "VloomDAW Project"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\VloomDAW.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\VloomDAW.exe"",1"
+Root: HKA; Subkey: "Software\Classes\VloomDAW.Project\shell\open"; ValueType: string; ValueName: ""; ValueData: "Open with VloomDAW"
+Root: HKA; Subkey: "Software\Classes\VloomDAW.Project\shell\open"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\VloomDAW.exe"",0"
+Root: HKA; Subkey: "Software\Classes\VloomDAW.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\VloomDAW.exe"" ""%1"""
 
 [Run]
 Filename: "{app}\VloomDAW.exe"; Description: "{cm:LaunchProgram,VloomDAW}"; Flags: nowait postinstall skipifsilent

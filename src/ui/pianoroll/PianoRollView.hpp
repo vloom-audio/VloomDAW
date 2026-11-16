@@ -9,6 +9,7 @@
 #include <QAbstractScrollArea>
 #include <QPoint>
 #include <QRect>
+#include <QString>
 
 #include <cstddef>
 #include <optional>
@@ -23,28 +24,16 @@ namespace vloomdaw {
 /// Reads the Project; an edit is emitted as the whole new list of notes for
 /// MainWindow to apply, which then calls refresh().
 ///
-/// Mouse, on the grid:
-/// - Left-click an empty spot adds a note (snapped, as long as the last one)
-///   and keeps dragging it into place.
-/// - Drag a note to move it, its right edge to resize it. The other selected
-///   notes follow. Shift+drag moves a copy.
-/// - Click a note to select it; Ctrl+click adds it to the selection or takes
-///   it out. Ctrl+drag from an empty spot selects the notes in a box (with
-///   Shift: adds them).
-/// - Right-click, or drag with the right button, deletes notes.
-/// - Alt: no snap. Ctrl+wheel zooms horizontally.
-///
-/// In the velocity lane, drag over the stems to set how hard the notes are
-/// played (the selected ones only, when some are selected). The keyboard on
-/// the left plays the key under the mouse.
-///
-/// Keys: Delete, Ctrl+A / C / X / V / D (duplicate after the selection),
-/// Ctrl+Q (quantize to the snap), Ctrl+Z / Ctrl+Y, arrows (Up / Down: a
-/// semitone, with Shift an octave; Left / Right: one snap step), Escape.
+/// Supports Studio One-style MIDI editing tools (`Select`, `Draw`, `Paint`,
+/// `Slice`, `Delete`, `Playback`), marquee box-selection (`Select` tool or
+/// `Ctrl+drag`), pitch transposition (`transpose()`, drag, `Up/Down`, `Alt+Wheel`),
+/// Legato, Scale Snap, Velocity scaling, Audition toggle, and Ruler scrubbing.
 class PianoRollView : public QAbstractScrollArea {
     Q_OBJECT
 
 public:
+    enum class Tool { Select, Draw, Paint, Slice, Delete, Playback };
+
     explicit PianoRollView(QWidget* parent = nullptr);
 
     void setProject(const Project* project);
@@ -56,6 +45,16 @@ public:
     /// at least kMinNoteLength. The grid shows it.
     void setSnapTicks(int ticks);
     [[nodiscard]] int snapTicks() const { return snapTicks_; }
+    void setSnapEnabled(bool enabled);
+    [[nodiscard]] bool snapEnabled() const { return snapEnabled_; }
+    void setAuditionEnabled(bool enabled) { auditionEnabled_ = enabled; }
+    [[nodiscard]] bool auditionEnabled() const { return auditionEnabled_; }
+    void setFollowPlayhead(bool follow) { followPlayhead_ = follow; }
+    [[nodiscard]] bool followPlayhead() const { return followPlayhead_; }
+    void setTool(Tool tool);
+    [[nodiscard]] Tool tool() const { return tool_; }
+    void zoomBy(double factor);
+
     /// The project's notes changed: repaint. A change the view did not make
     /// itself that adds or removes notes (an undo, a new project) drops the selection.
     void refresh();
@@ -76,6 +75,14 @@ public slots:
     void deleteSelection();
     /// Moves the starts of the selected notes (all notes, when none is) to the snap grid.
     void quantize();
+    /// Transposes selected notes (or all notes when none are selected) by `semitones`.
+    void transpose(int semitones);
+    /// Extends selected notes (or all notes) legato up to the next note onset.
+    void applyLegato();
+    /// Snaps selected notes (or all notes) to the active `(root_, scale_)`.
+    void snapToScale();
+    /// Scales velocity of selected notes (or all notes) by `factor`.
+    void scaleVelocity(double factor);
 
 signals:
     /// The notes are to be these now (a drag sends this on every move).
@@ -87,6 +94,11 @@ signals:
     void keyReleased(int key);
     void undoRequested();
     void redoRequested();
+    /// Playback tool or ruler scrub: play from `tick` (in pattern ticks).
+    void playbackRequested(double tick);
+    void playbackReleased();
+    /// Emitted whenever the note selection changes (`count` selected notes + pitch range summary).
+    void selectionSummaryChanged(int count, const QString& summary);
 
 protected:
     bool event(QEvent* event) override;
@@ -96,6 +108,7 @@ protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
@@ -108,29 +121,45 @@ private:
         Move,
         Resize,
         Box, ///< selecting the notes in a rectangle
-        Erase, ///< right button held: deletes what it passes over
+        Erase, ///< right button or Delete tool held: deletes what it passes over
+        Paint, ///< Paint tool held: lays consecutive notes at each grid step
+        Slice, ///< Slice tool held: cuts notes crossed by the slice line
+        Scrub, ///< Playback tool or Ruler held: scrubs transport position
         Velocity, ///< in the lane: sets the velocity of the stems it passes over
         Keys, ///< on the keyboard: plays the key under the mouse
+    };
+
+    struct SliceLine {
+        int tick = 0;
+        int fromKey = 60;
+        int toKey = 60;
     };
 
     [[nodiscard]] const std::vector<Note>* notes() const;
     [[nodiscard]] double pixelsPerTick() const;
     [[nodiscard]] int lengthTicks() const; ///< scrollable length
+    [[nodiscard]] QRect rulerRect() const;
     [[nodiscard]] QRect gridRect() const; ///< right of the keyboard, between the ruler and the lane
     [[nodiscard]] QRect laneRect() const; ///< the velocity lane, right of the keyboard
     [[nodiscard]] double tickAt(int x) const;
     [[nodiscard]] int keyAt(int y) const;
     [[nodiscard]] int yOfKey(int key) const; ///< top of the row
     [[nodiscard]] QRectF noteRect(const Note& note) const;
+    [[nodiscard]] int effectiveGrid(Qt::KeyboardModifiers mods) const;
     /// Topmost note under `pos`, and whether `pos` is on its resize edge.
     [[nodiscard]] std::optional<std::pair<std::size_t, bool>> noteAt(const QPoint& pos) const;
     void updateScrollBars();
+    void scrollToChannelNotes();
+    void emitSelectionSummary();
+    void updateHoverCursor(const QPoint& pos);
 
     /// Sends `next` as the notes and repaints; the selection is kept as it is.
     void edit(const std::vector<Note>& next);
     /// One complete edit: the notes, then editFinished().
     void commit(const std::vector<Note>& next);
     void selectOnly(std::size_t index);
+    void insertNoteAndBeginMove(const QPoint& pos);
+    void paintNoteAt(const QPoint& pos, int grid);
     void beginDrag(Drag drag, std::size_t index, const QPoint& pos);
     void endDrag();
     /// Sounds `key` instead of the one sounding (-1: none).
@@ -144,11 +173,15 @@ private:
     std::size_t channel_ = 0;
     int root_ = 0;
     Scale scale_ = Scale::Major;
+    Tool tool_ = Tool::Select;
     double playhead_ = -1.0;
     double pixelsPerBeat_ = 64.0;
     int lastLength_ = kTicksPerStep; ///< length of the next new note
     int lastVelocity_ = kDefaultVelocity; ///< and its velocity
     int snapTicks_ = kTicksPerStep;
+    bool snapEnabled_ = true;
+    bool auditionEnabled_ = true;
+    bool followPlayhead_ = true;
     bool scrolledToMiddle_ = false;
 
     NoteSelection selection_; ///< one flag per note
@@ -160,6 +193,9 @@ private:
     Drag drag_ = Drag::None;
     std::vector<Note> dragNotes_; ///< the notes when the drag began (Erase, Velocity: as it left them)
     NoteSelection boxBase_; ///< Box: what was selected before it
+    std::optional<SliceLine> sliceLine_;
+    int paintLastSlot_ = -1;
+    double lastScrubTick_ = -1.0;
     QPoint dragStart_;
     QPoint dragLast_;
     std::size_t dragIndex_ = 0; ///< the note under the mouse when the drag began, in dragNotes_

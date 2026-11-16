@@ -113,6 +113,13 @@ jobs:
         # Hosted runners have 4 cores.
         run: cmake --build --preset dev --parallel 4
 
+      - name: Build 32-bit VST2 plugin bridge (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S vloom-engine/tools/vloom-plugin-bridge -B bridge32 -A Win32
+          cmake --build bridge32 --config Release
+          cp bridge32/Release/vloom-plugin-bridge32.exe VloomDAW/build/dev/
+
       - name: Test
         working-directory: VloomDAW
         # A test that hangs (a system message box on Windows, say) fails

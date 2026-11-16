@@ -180,7 +180,10 @@ private:
     void showTrackChannelMenu(std::size_t track, const QPoint& globalPos);
     void showTrackRoutingMenu(std::size_t track, const QPoint& globalPos);
     void dropAudioFiles(const QStringList& paths, int track, int start);
+    void dropMidiFiles(const QStringList& paths, int track, int startTick);
     void handlePluginDroppedOnPlaylist(std::size_t pluginIndex, int track, int startTick);
+    void movePlaylistTrackTo(std::size_t from, std::size_t to);
+    void moveMixerInsertTo(std::size_t from, std::size_t to);
     /// Loads (decoding if needed) the sample at `path` on a background thread,
     /// then calls `then` on this thread; the UI stays responsive meanwhile.
     /// Calls `onFailed` (if set) and reports in the status bar when loading fails.
@@ -291,6 +294,8 @@ private:
     /// Fills the playlist's clip source box (patterns, then the channels with
     /// a sample) and shows the playlist's source in it.
     void rebuildClipSources();
+    /// Fills the piano roll's channel switcher box and highlights `currentChannel_`.
+    void rebuildPianoRollChannels();
     /// Gives `channel` the WAV file at `path` (channel == count: a new channel).
     void assignSample(std::size_t channel, const QString& path);
     /// Opens the Plugin Manager, where the user scans for plugins.
@@ -346,6 +351,11 @@ private:
     void updatePluginIdle();
     /// Starts over (asking to save unsaved changes first).
     void newProject();
+    /// Closes the current project (unloading plugins and audio after asking to
+    /// save unsaved changes) and returns to the standalone Start Hub.
+    void closeProject();
+    /// Persists main window geometry, splitters, sidebar and detached window flags.
+    void saveWindowStateToSettings();
     /// Starts over without asking: an empty project, mixer and song settings.
     void resetProject();
 
@@ -373,9 +383,14 @@ private:
     bool writeProject(const QString& path);
     /// Adds audio files as new channels.
     void importAudioFiles();
-    /// Renders the song (or the current pattern, when the playlist is
-    /// empty) to a WAV file.
-    void exportSong();
+    /// Imports Standard MIDI Files (`.mid` / `.midi`), creating one track,
+    /// empty MIDI channel (no auto-loaded instrument), pattern, clip, and mixer
+    /// insert per MIDI track.
+    void importMidiFiles();
+    std::size_t importMidiFile(
+        const QString& path, int startTrack = -1, int startTick = 0, bool recordUndoStep = true);
+    /// Renders the song (or the current pattern, or the Loop Bar range) to an audio file.
+    void exportSong(bool forceLoopRange = false);
     void rebuildRecentMenu();
     /// Asks to save unsaved changes; false if the user cancelled.
     bool maybeSaveChanges();
@@ -450,7 +465,10 @@ private:
     std::map<StretchKey, bool> stretchUsed_;
     QTimer* stretchTimer_ = nullptr; ///< waits for the tempo to settle
     double fitTempo_ = 0.0; ///< the song tempo the fitted clips were last sent with
+    double songLoopStart_ = -1.0; ///< the loop start last sent to the engine (< 0: never sent)
     double songLoopEnd_ = -1.0; ///< the loop end last sent to the engine (0: off; < 0: never sent)
+    int loopStartTicks_ = 0; ///< custom Loop Bar start in ticks (`loopEndTicks_ > loopStartTicks_`: set)
+    int loopEndTicks_ = 0; ///< custom Loop Bar end in ticks (0: none)
     bool songMode_ = false; ///< the engine plays the playlist instead of looping the pattern
     bool allEffectsBypassed_ = false; ///< global console FX bypass (preserves per-slot bypass)
     std::uint64_t projectGeneration_
@@ -468,6 +486,7 @@ private:
 
     TransportBar* transport_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
+    QAction* closeProjectAction_ = nullptr;
     QAction* settingsAction_ = nullptr;
     ActivityBar* activityBar_ = nullptr;
     QSplitter* splitter_ = nullptr;
@@ -495,6 +514,9 @@ private:
     QStackedWidget* workspace_ = nullptr;
     ChannelRackView* channelRack_ = nullptr;
     PianoRollView* pianoRoll_ = nullptr;
+    QComboBox* pianoRollChannel_ = nullptr; ///< active channel switcher in the piano roll header
+    QString pianoRollToolHint_; ///< active MIDI tool hint for the piano roll header
+    QString pianoRollSelectionText_; ///< live selected-note count & pitch range summary
     NoteHistory noteHistory_; ///< undo and redo of the piano roll's edits
     /// The notes before the piano roll edit under way (a drag sends many changes: one step to undo).
     std::optional<std::vector<Note>> noteEditBefore_;

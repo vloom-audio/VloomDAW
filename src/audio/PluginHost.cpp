@@ -5,6 +5,7 @@
 #include <vloom/engine/mixer/MixerState.hpp>
 #include <vloom/engine/plugin/BuiltinProcessors.hpp>
 #include <vloom/engine/plugin/ClapHost.hpp>
+#include <vloom/engine/plugin/Vst2Host.hpp>
 #include <vloom/engine/plugin/Vst3Host.hpp>
 
 #include <algorithm>
@@ -120,10 +121,12 @@ PluginHost::Loaded PluginHost::load(PluginFormat format, const std::filesystem::
             loaded.info = processor->info();
         else
             loaded.error = "this version of VloomDAW has no built-in effect \"" + std::string(id) + "\"";
+    } else if (format == PluginFormat::Clap) {
+        loaded = create(openCached(clap_, path, error), id, name, error, processor);
+    } else if (format == PluginFormat::Vst2) {
+        loaded = create(openCached(vst2_, path, error), id, name, error, processor);
     } else {
-        loaded = format == PluginFormat::Clap
-            ? create(openCached(clap_, path, error), id, name, error, processor)
-            : create(openCached(vst3_, path, error), id, name, error, processor);
+        loaded = create(openCached(vst3_, path, error), id, name, error, processor);
     }
     if (processor == nullptr)
         return loaded;
@@ -135,6 +138,8 @@ PluginHost::Loaded PluginHost::load(PluginFormat format, const std::filesystem::
         return loaded;
     }
     loaded.handle = next_++;
+    if (!instance->processor().hasFailed())
+        lastStates_[loaded.handle] = instance->processor().saveState();
     instances_.emplace(loaded.handle, std::move(instance));
     rates_[loaded.handle] = sampleRate;
     return loaded;
@@ -146,8 +151,16 @@ PluginHost::Loaded PluginHost::loadWithState(PluginFormat format, const std::fil
     Loaded loaded = load(format, path, id, name, sampleRate);
     if (loaded.handle == 0 || state.empty())
         return loaded;
-    if (!instance(loaded.handle)->processor().loadState(state))
+    auto inst = instance(loaded.handle);
+    if (!inst->processor().loadState(state)) {
         loaded.error = "its saved settings could not be restored";
+    } else if (!inst->processor().hasFailed()) {
+        std::vector<std::uint8_t> saved = inst->processor().saveState();
+        lastStates_[loaded.handle]
+            = saved.empty() ? std::vector<std::uint8_t>(state.begin(), state.end()) : std::move(saved);
+    } else {
+        lastStates_[loaded.handle].assign(state.begin(), state.end());
+    }
     return loaded;
 }
 
@@ -190,14 +203,35 @@ void PluginHost::retainOnly(
         if (it->second->processor().isEditorOpen())
             it->second->processor().closeEditor();
         rates_.erase(it->first);
+        lastStates_.erase(it->first);
+        failed_.erase(it->first);
         it = instances_.erase(it);
     }
 }
 
-void PluginHost::idle()
+std::vector<std::uint8_t> PluginHost::saveState(
+    std::uint64_t handle, std::span<const std::uint8_t> fallback) const
 {
-    for (auto& [handle, instance] : instances_)
+    const auto it = instances_.find(handle);
+    if (it != instances_.end() && !it->second->processor().hasFailed()) {
+        std::vector<std::uint8_t> state = it->second->processor().saveState();
+        lastStates_[handle] = state;
+        return state;
+    }
+    if (const auto cached = lastStates_.find(handle); cached != lastStates_.end() && !cached->second.empty())
+        return cached->second;
+    return {fallback.begin(), fallback.end()};
+}
+
+std::vector<std::uint64_t> PluginHost::idle()
+{
+    std::vector<std::uint64_t> newlyFailed;
+    for (auto& [handle, instance] : instances_) {
         instance->processor().idle();
+        if (instance->processor().hasFailed() && failed_.insert(handle).second)
+            newlyFailed.push_back(handle);
+    }
+    return newlyFailed;
 }
 
 } // namespace vloomdaw

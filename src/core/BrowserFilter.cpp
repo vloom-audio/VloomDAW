@@ -64,6 +64,16 @@ bool isAudioFile(std::string_view fileName) noexcept
         [extension](std::string_view known) { return equalsIgnoringCase(extension, known); });
 }
 
+bool isMidiFile(std::string_view fileName) noexcept
+{
+    const auto dot = fileName.rfind('.');
+    if (dot == std::string_view::npos || dot == 0)
+        return false;
+    const std::string_view extension = fileName.substr(dot + 1);
+    return std::any_of(kMidiFileExtensions.begin(), kMidiFileExtensions.end(),
+        [extension](std::string_view known) { return equalsIgnoringCase(extension, known); });
+}
+
 bool matchesSearch(std::string_view fileName, std::string_view search) noexcept
 {
     const auto first = search.find_first_not_of(' ');

@@ -21,14 +21,17 @@ public:
     /// 0 = bars · beats · ticks, 1 = minutes · seconds. Never emits.
     void setStartPositionMode(int mode);
     void setMetronomeOnStartup(bool on);
+    void setAssociateProjectFiles(bool on);
 
 signals:
     void startPositionModeChanged(int mode);
     void metronomeOnStartupChanged(bool on);
+    void associateProjectFilesChanged(bool on);
 
 private:
     QComboBox* positionMode_ = nullptr;
     ToggleSwitch* metronome_ = nullptr;
+    ToggleSwitch* associateFiles_ = nullptr;
 };
 
 } // namespace vloomdaw

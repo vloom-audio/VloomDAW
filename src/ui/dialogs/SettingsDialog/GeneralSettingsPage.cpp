@@ -30,6 +30,15 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
         positionMode_);
     startup->addRow(tr("Metronome"),
         tr("Start with the metronome clicking on every beat (Ctrl+M toggles it)."), metronome_);
+#if defined(Q_OS_WIN)
+    associateFiles_ = new ToggleSwitch;
+    associateFiles_->setAccessibleName(tr("Open .vloom project files with VloomDAW"));
+    connect(
+        associateFiles_, &ToggleSwitch::toggled, this, &GeneralSettingsPage::associateProjectFilesChanged);
+    startup->addRow(tr("Project file association (.vloom)"),
+        tr("Double-clicking a .vloom file in Explorer opens it in VloomDAW with the Vloom project icon."),
+        associateFiles_);
+#endif
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -48,6 +57,14 @@ void GeneralSettingsPage::setMetronomeOnStartup(bool on)
 {
     const QSignalBlocker block(metronome_);
     metronome_->setChecked(on);
+}
+
+void GeneralSettingsPage::setAssociateProjectFiles(bool on)
+{
+    if (associateFiles_ == nullptr)
+        return;
+    const QSignalBlocker block(associateFiles_);
+    associateFiles_->setChecked(on);
 }
 
 } // namespace vloomdaw

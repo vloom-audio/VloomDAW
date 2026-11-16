@@ -139,4 +139,78 @@ std::vector<Note> withPasted(const std::vector<Note>& notes, const std::vector<N
     return out;
 }
 
+std::vector<Note> slicedNotes(const std::vector<Note>& notes, int splitTick, int fromKey, int toKey)
+{
+    if (splitTick <= 0)
+        return notes;
+    const int lowKey = std::min(fromKey, toKey);
+    const int highKey = std::max(fromKey, toKey);
+
+    std::vector<Note> out;
+    out.reserve(notes.size() + 8);
+    std::size_t extraSplits = 0;
+    const auto split = static_cast<std::int64_t>(splitTick);
+    for (const Note& n : notes) {
+        const auto start = static_cast<std::int64_t>(n.start);
+        const auto end = start + static_cast<std::int64_t>(n.length);
+        if (n.key >= lowKey && n.key <= highKey && split >= start + kMinNoteLength
+            && split <= end - kMinNoteLength && notes.size() + extraSplits + 1 <= kMaxPatternNotes) {
+            out.push_back(Project::clamped(Note{n.key, n.start, splitTick - n.start, n.velocity}));
+            out.push_back(
+                Project::clamped(Note{n.key, splitTick, static_cast<int>(end - split), n.velocity}));
+            ++extraSplits;
+        } else {
+            out.push_back(n);
+        }
+    }
+    return out;
+}
+
+std::vector<Note> legatoNotes(const std::vector<Note>& notes, const NoteSelection& selection)
+{
+    return changed(notes, selection, [&notes](Note note) {
+        int nextStart = std::numeric_limits<int>::max();
+        for (const Note& other : notes) {
+            if (other.start > note.start && other.start < nextStart)
+                nextStart = other.start;
+        }
+        if (nextStart != std::numeric_limits<int>::max() && nextStart - note.start >= kMinNoteLength)
+            note.length = nextStart - note.start;
+        return note;
+    });
+}
+
+std::vector<Note> scaledVelocityNotes(
+    const std::vector<Note>& notes, const NoteSelection& selection, double factor)
+{
+    if (!std::isfinite(factor) || factor <= 0.0)
+        return notes;
+    return changed(notes, selection, [factor](Note note) {
+        const double raw = std::clamp(
+            note.velocity * factor, static_cast<double>(kMinVelocity), static_cast<double>(kMaxVelocity));
+        note.velocity = static_cast<int>(std::lround(raw));
+        return note;
+    });
+}
+
+std::vector<Note> snappedToScaleNotes(
+    const std::vector<Note>& notes, const NoteSelection& selection, int root, Scale scale)
+{
+    return changed(notes, selection, [root, scale](Note note) {
+        if (scaleContains(scale, root, note.key))
+            return note;
+        for (int dist = 1; dist <= 6; ++dist) {
+            if (note.key - dist >= kLowestKey && scaleContains(scale, root, note.key - dist)) {
+                note.key -= dist;
+                return note;
+            }
+            if (note.key + dist <= kHighestKey && scaleContains(scale, root, note.key + dist)) {
+                note.key += dist;
+                return note;
+            }
+        }
+        return note;
+    });
+}
+
 } // namespace vloomdaw

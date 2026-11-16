@@ -416,8 +416,22 @@ QTreeView#browserTree { background: transparent; border: none; outline: none; }
 QTreeView#browserTree::item { padding: 3px 2px; border-radius: 4px; }
 QTreeView#browserTree::item:hover { background: @raised; }
 QTreeView#browserTree::item:selected { background: @accentTint; color: @text; }
-QSplitter#sidebarSplitter::handle { background: @border; }
-QSplitter#workspaceSplitter::handle { background: @border; }
+QSplitter#sidebarSplitter::handle {
+    background: @border;
+    margin: 0px 2px 0px 1px;
+}
+QSplitter#sidebarSplitter::handle:hover, QSplitter#sidebarSplitter::handle:pressed {
+    background: @accent;
+    margin: 0px 1px;
+}
+QSplitter#workspaceSplitter::handle {
+    background: @border;
+    margin: 1px 0px 2px 0px;
+}
+QSplitter#workspaceSplitter::handle:hover, QSplitter#workspaceSplitter::handle:pressed {
+    background: @accent;
+    margin: 1px 0px;
+}
 
 /* Workspace editors: channel rack, piano roll, playlist. */
 QWidget#panelFrame { background: @window; }
@@ -619,6 +633,27 @@ QLabel#themeWarning { background: @dangerTint; color: @text; border-radius: 6px;
 QDialog#pluginManager { background: @window; }
 QFrame#pluginManagerSidebar { background: @sidebar; border-right: 1px solid @border; }
 QFrame#pluginManagerFoldersPanel { background: @panel; border: 1px solid @border; border-radius: 8px; }
+QWidget#pluginHeaderActions QPushButton {
+    min-height: 18px;
+    padding: 6px 14px;
+}
+QWidget#pluginHeaderActions QPushButton#accentButton {
+    padding: 6px 18px;
+}
+QPushButton#pluginFoldersToggle:checked {
+    background: @accentTint;
+    border-color: @accent;
+    color: @accent;
+}
+QPushButton#pluginAddFolderBtn { padding-right: 26px; }
+QPushButton#pluginAddFolderBtn::menu-indicator {
+    image: url(:/icons/chevron-down.svg);
+    width: 10px;
+    height: 10px;
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    right: 9px;
+}
 QListWidget#pluginFilterList {
     background: @base;
     border: 1px solid @border;

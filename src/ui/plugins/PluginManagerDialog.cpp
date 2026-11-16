@@ -120,7 +120,12 @@ fs::path normalizePluginModulePath(const fs::path& chosen)
         const fs::path parent = cur.parent_path();
         if (parent == cur)
             break;
-        if (lowerAscii(toUtf8Path(parent.extension())) == ".vst3")
+        const std::string ext = lowerAscii(toUtf8Path(parent.extension()));
+        if (ext == ".vst3"
+#if defined(Q_OS_MACOS)
+            || ext == ".vst"
+#endif
+        )
             return parent;
         cur = parent;
     }
@@ -203,8 +208,8 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
 {
     setObjectName(QStringLiteral("pluginManager"));
     setWindowTitle(tr("Plugin Manager"));
-    setMinimumSize(920, 560);
-    resize(1140, 700);
+    setMinimumSize(940, 560);
+    resize(1180, 700);
 
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->setChildrenCollapsible(false);
@@ -223,7 +228,7 @@ PluginManagerDialog::PluginManagerDialog(QWidget* parent)
     splitter->addWidget(mainArea);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({265, 875});
+    splitter->setSizes({260, 920});
 
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
@@ -323,18 +328,20 @@ void PluginManagerDialog::buildSidebar(QFrame* sidebar)
               return list;
           };
 
-    formatFilter_ = makeChecklistSection(tr("FORMAT"), 52, 0);
-    categoryFilter_ = makeChecklistSection(tr("CATEGORY"), 52, 0);
+    formatFilter_ = makeChecklistSection(tr("FORMAT"), 78, 0);
+    categoryFilter_ = makeChecklistSection(tr("CATEGORY"), 54, 0);
     subTypeFilter_ = makeChecklistSection(tr("SUB-TYPE"), 0, 1);
     vendorFilter_ = makeChecklistSection(tr("VENDOR"), 0, 1);
 
     uncheckVendorsBtn_ = new QPushButton(tr("Uncheck All Vendors"), sidebar);
+    uncheckVendorsBtn_->setAutoDefault(false);
     uncheckVendorsBtn_->setFocusPolicy(Qt::NoFocus);
     connect(
         uncheckVendorsBtn_, &QPushButton::clicked, this, [this] { setChecklistAll(vendorFilter_, false); });
     layout->addWidget(uncheckVendorsBtn_);
 
     resetFiltersBtn_ = new QPushButton(tr("Reset Filters"), sidebar);
+    resetFiltersBtn_->setAutoDefault(false);
     resetFiltersBtn_->setFocusPolicy(Qt::NoFocus);
     connect(resetFiltersBtn_, &QPushButton::clicked, this, &PluginManagerDialog::resetAllFilters);
     layout->addWidget(resetFiltersBtn_);
@@ -348,52 +355,67 @@ void PluginManagerDialog::buildMainArea(QWidget* area)
 
     // --- Header + Scan / Action Toolbar ---
     auto* topBar = new QHBoxLayout;
-    topBar->setSpacing(8);
+    topBar->setSpacing(16);
 
     auto* titleCol = new QVBoxLayout;
     titleCol->setSpacing(2);
     auto* heading = new QLabel(tr("Plugin Manager"), area);
     heading->setObjectName(QStringLiteral("settingsHeading"));
-    auto* subtitle = new QLabel(tr("Manage VST3 and CLAP plugins, filter by type or vendor, mark favorites, "
-                                   "and configure scan paths."),
-        area);
+    auto* subtitle = new QLabel(tr("Manage VST3, VST2 and CLAP plugins, favorites, and scan folders."), area);
     subtitle->setObjectName(QStringLiteral("settingsSubtitle"));
+    subtitle->setWordWrap(true);
     titleCol->addWidget(heading);
     titleCol->addWidget(subtitle);
     topBar->addLayout(titleCol, 1);
 
-    foldersToggle_ = new QToolButton(area);
+    auto* actionGroup = new QWidget(area);
+    actionGroup->setObjectName(QStringLiteral("pluginHeaderActions"));
+    auto* actionRow = new QHBoxLayout(actionGroup);
+    actionRow->setContentsMargins(0, 0, 0, 0);
+    actionRow->setSpacing(8);
+
+    foldersToggle_ = new QPushButton(actionGroup);
+    foldersToggle_->setObjectName(QStringLiteral("pluginFoldersToggle"));
     foldersToggle_->setCheckable(true);
     foldersToggle_->setChecked(false);
+    foldersToggle_->setAutoDefault(false);
     foldersToggle_->setFocusPolicy(Qt::NoFocus);
-    foldersToggle_->setToolTip(tr("Show or hide the VST3 and CLAP scan folders list"));
-    topBar->addWidget(foldersToggle_);
+    foldersToggle_->setCursor(Qt::PointingHandCursor);
+    actionRow->addWidget(foldersToggle_);
 
-    addFileButton_ = new QPushButton(tr("Add Plugin File..."), area);
-    addFileButton_->setToolTip(tr("Manually add individual .vst3 or .clap plugin files"));
+    addFileButton_ = new QPushButton(tr("Add Plugin File..."), actionGroup);
+    addFileButton_->setToolTip(tr("Manually add individual .vst3, .clap or VST2 plugin files"));
+    addFileButton_->setAutoDefault(false);
     addFileButton_->setFocusPolicy(Qt::NoFocus);
+    addFileButton_->setCursor(Qt::PointingHandCursor);
     connect(addFileButton_, &QPushButton::clicked, this, &PluginManagerDialog::addManualPluginFiles);
-    topBar->addWidget(addFileButton_);
+    actionRow->addWidget(addFileButton_);
 
-    retryFailedButton_ = new QPushButton(tr("Retry Failed"), area);
+    retryFailedButton_ = new QPushButton(tr("Retry Failed"), actionGroup);
     retryFailedButton_->setToolTip(tr("Probe only the plugins that failed during an earlier scan"));
+    retryFailedButton_->setAutoDefault(false);
     retryFailedButton_->setFocusPolicy(Qt::NoFocus);
+    retryFailedButton_->setCursor(Qt::PointingHandCursor);
     connect(retryFailedButton_, &QPushButton::clicked, this, &PluginManagerDialog::retryFailedPlugins);
-    topBar->addWidget(retryFailedButton_);
+    actionRow->addWidget(retryFailedButton_);
 
-    rescanButton_ = new QPushButton(tr("Rescan All"), area);
+    rescanButton_ = new QPushButton(tr("Rescan All"), actionGroup);
     rescanButton_->setToolTip(tr("Read every plugin again from scratch. Your favorites, enabled state, "
                                  "and custom categories are preserved."));
+    rescanButton_->setAutoDefault(false);
     rescanButton_->setFocusPolicy(Qt::NoFocus);
+    rescanButton_->setCursor(Qt::PointingHandCursor);
     connect(rescanButton_, &QPushButton::clicked, this, [this] { startScan(true); });
-    topBar->addWidget(rescanButton_);
+    actionRow->addWidget(rescanButton_);
 
-    scanButton_ = new QPushButton(tr("Scan"), area);
+    scanButton_ = new QPushButton(tr("Scan"), actionGroup);
     scanButton_->setObjectName(QStringLiteral("accentButton"));
     scanButton_->setDefault(true);
+    scanButton_->setCursor(Qt::PointingHandCursor);
     connect(scanButton_, &QPushButton::clicked, this, [this] { startScan(false); });
-    topBar->addWidget(scanButton_);
+    actionRow->addWidget(scanButton_);
 
+    topBar->addWidget(actionGroup, 0, Qt::AlignVCenter);
     layout->addLayout(topBar);
 
     // --- Collapsible Scan Folders Card ---
@@ -424,13 +446,21 @@ void PluginManagerDialog::buildMainArea(QWidget* area)
     auto* folderControls = new QHBoxLayout;
     folderControls->setSpacing(8);
     addButton_ = new QPushButton(tr("Add Folder"), foldersPanel_);
+    addButton_->setObjectName(QStringLiteral("pluginAddFolderBtn"));
+    addButton_->setAutoDefault(false);
+    addButton_->setFocusPolicy(Qt::NoFocus);
+    addButton_->setCursor(Qt::PointingHandCursor);
     auto* addMenu = new QMenu(addButton_);
     addMenu->addAction(tr("VST3 Folder..."), this, [this] { addFolder(PluginFormat::Vst3); });
+    addMenu->addAction(tr("VST2 Folder..."), this, [this] { addFolder(PluginFormat::Vst2); });
     addMenu->addAction(tr("CLAP Folder..."), this, [this] { addFolder(PluginFormat::Clap); });
     addButton_->setMenu(addMenu);
 
     removeButton_ = new QPushButton(tr("Remove Folder"), foldersPanel_);
     removeButton_->setEnabled(false);
+    removeButton_->setAutoDefault(false);
+    removeButton_->setFocusPolicy(Qt::NoFocus);
+    removeButton_->setCursor(Qt::PointingHandCursor);
     removeButton_->setToolTip(tr("Remove the selected custom folder. Default system folders stay."));
     connect(removeButton_, &QPushButton::clicked, this, &PluginManagerDialog::removeFolder);
 
@@ -451,7 +481,7 @@ void PluginManagerDialog::buildMainArea(QWidget* area)
     foldersLayout->addLayout(folderControls);
 
     foldersPanel_->setVisible(false);
-    connect(foldersToggle_, &QToolButton::toggled, this, [this](bool open) {
+    connect(foldersToggle_, &QPushButton::toggled, this, [this](bool open) {
         foldersPanel_->setVisible(open);
         updateFoldersToggleText();
     });
@@ -568,8 +598,10 @@ void PluginManagerDialog::setStore(const PluginStore& store)
 void PluginManagerDialog::updateFoldersToggleText()
 {
     const std::size_t count = store_.scanFolders().size();
-    foldersToggle_->setText(foldersToggle_->isChecked() ? tr("Hide Scan Folders (%1)").arg(count)
-                                                        : tr("Scan Folders (%1)").arg(count));
+    foldersToggle_->setText(tr("Scan Folders (%1)").arg(count));
+    foldersToggle_->setToolTip(foldersToggle_->isChecked()
+            ? tr("Hide the VST3, VST2 and CLAP scan folders list")
+            : tr("Show the VST3, VST2 and CLAP scan folders list"));
 }
 
 void PluginManagerDialog::listFolders()
@@ -639,8 +671,21 @@ void PluginManagerDialog::addManualPluginFiles()
     if (scanThread_ != nullptr || prober_->isRunning())
         return;
 
-    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Add Plugin Files"), QDir::homePath(),
-        tr("Audio Plugins (*.vst3 *.clap);;VST3 Plugins (*.vst3);;CLAP Plugins (*.clap);;All Files (*)"));
+#if defined(Q_OS_WIN)
+    const QString filter = tr("Audio Plugins (*.vst3 *.clap *.dll);;VST3 Plugins (*.vst3);;VST2 Plugins "
+                              "(*.dll);;CLAP Plugins (*.clap);;All Files (*)");
+    constexpr std::string_view kVst2Ext = ".dll";
+#elif defined(Q_OS_MACOS)
+    const QString filter = tr("Audio Plugins (*.vst3 *.clap *.vst);;VST3 Plugins (*.vst3);;VST2 Plugins "
+                              "(*.vst);;CLAP Plugins (*.clap);;All Files (*)");
+    constexpr std::string_view kVst2Ext = ".vst";
+#else
+    const QString filter = tr("Audio Plugins (*.vst3 *.clap *.so);;VST3 Plugins (*.vst3);;VST2 Plugins "
+                              "(*.so);;CLAP Plugins (*.clap);;All Files (*)");
+    constexpr std::string_view kVst2Ext = ".so";
+#endif
+    const QStringList files
+        = QFileDialog::getOpenFileNames(this, tr("Add Plugin Files"), QDir::homePath(), filter);
     if (files.isEmpty())
         return;
 
@@ -653,9 +698,11 @@ void PluginManagerDialog::addManualPluginFiles()
             continue;
         const fs::path modulePath = normalizePluginModulePath(rawPath);
         const std::string ext = lowerAscii(toUtf8Path(modulePath.extension()));
-        if (ext != ".vst3" && ext != ".clap")
+        if (ext != ".vst3" && ext != ".clap" && ext != kVst2Ext)
             continue;
-        const PluginFormat fmt = ext == ".clap" ? PluginFormat::Clap : PluginFormat::Vst3;
+        const PluginFormat fmt = ext == ".clap" ? PluginFormat::Clap
+            : ext == kVst2Ext                   ? PluginFormat::Vst2
+                                                : PluginFormat::Vst3;
         const bool dup = std::any_of(modules.begin(), modules.end(),
             [&](const PluginInfo& m) { return m.format == fmt && sameFsPath(m.path, modulePath); });
         if (!dup)
@@ -836,7 +883,7 @@ void PluginManagerDialog::rebuildDynamicFilters()
     filtersInitialized_ = true;
     updatingFilters_ = true;
 
-    std::map<std::string, int> formatCounts{{"VST3", 0}, {"CLAP", 0}};
+    std::map<std::string, int> formatCounts{{"VST3", 0}, {"VST2", 0}, {"CLAP", 0}};
     std::map<std::string, int> catCounts{{"Instrument", 0}, {"Effect", 0}};
     std::map<std::string, int> subCounts;
     std::map<std::string, int> vendorCounts;
@@ -864,6 +911,7 @@ void PluginManagerDialog::rebuildDynamicFilters()
     fillChecklist(formatFilter_,
         {
             {"VST3", tr("VST3 (%1)").arg(formatCounts["VST3"])},
+            {"VST2", tr("VST2 (%1)").arg(formatCounts["VST2"])},
             {"CLAP", tr("CLAP (%1)").arg(formatCounts["CLAP"])},
         },
         uncheckedFormats_);
@@ -1154,19 +1202,27 @@ void PluginManagerDialog::updateSummaryLabels()
         return;
 
     if (!store_.lastScan.isValid() && store_.plugins.empty()) {
-        result_->setText(tr("Not scanned yet. Press Scan to discover VST3 and CLAP plugins."));
+        result_->setText(tr("Not scanned yet. Press Scan to discover VST3, VST2 and CLAP plugins."));
         return;
     }
     int vst3 = 0;
-    for (const PluginInfo& p : store_.plugins)
-        vst3 += p.format == PluginFormat::Vst3 ? 1 : 0;
-    const int clap = total - vst3;
+    int vst2 = 0;
+    int clap = 0;
+    for (const PluginInfo& p : store_.plugins) {
+        if (p.format == PluginFormat::Vst3)
+            ++vst3;
+        else if (p.format == PluginFormat::Vst2)
+            ++vst2;
+        else if (p.format == PluginFormat::Clap)
+            ++clap;
+    }
     QString text = store_.lastScan.isValid()
-        ? tr("Last scan %1: %2 VST3, %3 CLAP.")
+        ? tr("Last scan %1: %2 VST3, %3 VST2, %4 CLAP.")
               .arg(QLocale().toString(store_.lastScan.toLocalTime(), QLocale::ShortFormat))
               .arg(vst3)
+              .arg(vst2)
               .arg(clap)
-        : tr("%1 VST3, %2 CLAP.").arg(vst3).arg(clap);
+        : tr("%1 VST3, %2 VST2, %3 CLAP.").arg(vst3).arg(vst2).arg(clap);
     if (failed > 0) {
         text += QLatin1Char(' ')
             + tr("%n plugin(s) failed probing (hover Status column for details).", nullptr, failed);

@@ -19,4 +19,10 @@ namespace vloomdaw {
 /// The first local audio file in a drag, or "" if none.
 [[nodiscard]] QString droppedAudio(const QMimeData* mime);
 
+/// All local Standard MIDI Files (`.mid` / `.midi`) in a drag, refusing UNC paths.
+[[nodiscard]] QStringList droppedMidiFiles(const QMimeData* mime);
+
+/// The first local `.vloom` project file in a drag, or "" if none (refuses UNC paths).
+[[nodiscard]] QString droppedProjectFile(const QMimeData* mime);
+
 } // namespace vloomdaw

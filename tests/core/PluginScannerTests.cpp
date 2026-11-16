@@ -94,17 +94,21 @@ TEST_CASE("A folder listed twice yields each plugin once", "[plugins]")
     CHECK(plugins.size() == 1);
 }
 
-TEST_CASE("Default folders exist for both formats", "[plugins]")
+TEST_CASE("Default folders exist for all scanned formats", "[plugins]")
 {
     bool vst3 = false;
     bool clap = false;
+    bool vst2 = false;
     for (const PluginFolder& f : defaultPluginFolders()) {
         vst3 = vst3 || f.format == PluginFormat::Vst3;
         clap = clap || f.format == PluginFormat::Clap;
+        vst2 = vst2 || f.format == PluginFormat::Vst2;
     }
     CHECK(vst3);
     CHECK(clap);
+    CHECK(vst2);
     CHECK(formatName(PluginFormat::Vst3) == "VST3");
+    CHECK(formatName(PluginFormat::Vst2) == "VST2");
     CHECK(formatName(PluginFormat::Clap) == "CLAP");
 }
 

@@ -164,7 +164,10 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           NUMERIC_VERSION: ${{ steps.version.outputs.numeric }}
         run: |
+          cmake -S vloom-engine/tools/vloom-plugin-bridge -B bridge32 -A Win32
+          cmake --build bridge32 --config Release
           cmake --install VloomDAW/build/release --config Release --prefix stage
+          cp bridge32/Release/vloom-plugin-bridge32.exe stage/bin/
           windeployqt --release --no-translations --no-compiler-runtime stage/bin/VloomDAW.exe
           # The MSVC runtime goes next to the app (app-local), so it runs on a
           # PC without the VC++ Redistributable. windeployqt cannot find it

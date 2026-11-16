@@ -491,3 +491,26 @@ TEST_CASE("Empty zero-track projects and mixer Mono mode round-trip cleanly", "[
     REQUIRE(read.data->mixer.size() == 2);
     CHECK(read.data->mixer.track(1).mono);
 }
+
+TEST_CASE("Song loop markers and loopEnabled round-trip cleanly", "[project-file]")
+{
+    ProjectData saved;
+    saved.song.loopEnabled = false;
+    saved.song.loopStart = kTicksPerBar * 2;
+    saved.song.loopEnd = kTicksPerBar * 6;
+
+    const std::string json = ProjectFile::write(saved, {});
+    const auto read = ProjectFile::read(json, {});
+    REQUIRE(read.data);
+    CHECK(read.warnings.empty());
+    CHECK_FALSE(read.data->song.loopEnabled);
+    CHECK(read.data->song.loopStart == kTicksPerBar * 2);
+    CHECK(read.data->song.loopEnd == kTicksPerBar * 6);
+
+    ProjectData vst2Proj;
+    vst2Proj.project.setChannelInstrument(0, plugin(PluginFormat::Vst2, "RetroSynth"));
+    const auto readVst2 = ProjectFile::read(ProjectFile::write(vst2Proj, {}), {});
+    REQUIRE(readVst2.data);
+    REQUIRE(readVst2.data->project.channels()[0].instrument.has_value());
+    CHECK(readVst2.data->project.channels()[0].instrument->format == PluginFormat::Vst2);
+}

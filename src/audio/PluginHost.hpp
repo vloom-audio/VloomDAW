@@ -12,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -20,6 +21,7 @@
 
 namespace vloom {
 class ClapLibrary;
+class Vst2Library;
 class Vst3Library;
 } // namespace vloom
 
@@ -95,15 +97,25 @@ public:
     void retainOnly(const std::vector<std::uint64_t>& live,
         const std::function<void(std::uint64_t handle)>& beforeDrop = {});
 
+    /// Returns the live state of instance `handle`, updating its cached last-good
+    /// snapshot while `!processor().hasFailed()`. If `handle` is not loaded or its
+    /// bridge process ended (`hasFailed()`), returns the last good state (else `fallback`).
+    [[nodiscard]] std::vector<std::uint8_t> saveState(
+        std::uint64_t handle, std::span<const std::uint8_t> fallback = {}) const;
+
     /// Runs every instance's main-thread work (AudioProcessor::idle()):
-    /// timers, editor edits. Call it from a UI timer.
-    void idle();
+    /// timers, editor edits. Returns handles that newly entered `hasFailed()`.
+    std::vector<std::uint64_t> idle();
 
 private:
     std::map<std::filesystem::path, std::shared_ptr<vloom::ClapLibrary>> clap_;
+    std::map<std::filesystem::path, std::shared_ptr<vloom::Vst2Library>> vst2_;
     std::map<std::filesystem::path, std::shared_ptr<vloom::Vst3Library>> vst3_;
     std::map<std::uint64_t, std::shared_ptr<vloom::PluginInstance>> instances_;
     std::map<std::uint64_t, double> rates_; ///< what each instance was activated at
+    mutable std::map<std::uint64_t, std::vector<std::uint8_t>>
+        lastStates_; ///< kept if a bridged plugin fails
+    std::set<std::uint64_t> failed_; ///< handles whose `hasFailed()` was already reported
     std::uint64_t next_ = 1;
 };
 

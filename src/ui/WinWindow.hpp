@@ -3,6 +3,7 @@
 #pragma once
 
 #include <QPoint>
+#include <QString>
 #include <QtGlobal>
 
 #include <functional>
@@ -29,5 +30,11 @@ void removeWindowsTitleBar(QWidget* window);
 /// `message` and set `*result`.
 bool handleWindowsTitleBarMessage(
     QWidget* window, void* message, qintptr* result, const std::function<bool(QPoint)>& isCaption);
+
+/// Registers `.vloom` project files in `HKCU\Software\Classes` (per-user, no UAC)
+/// so double-clicking a `.vloom` file in Explorer launches `exePath` with that
+/// project and displays the embedded Vloom project document icon (`index 1`).
+/// Notifies Explorer (`SHChangeNotify`) only when the registration changed.
+void setWindowsProjectFileAssociation(const QString& exePath, bool enabled);
 
 } // namespace vloomdaw

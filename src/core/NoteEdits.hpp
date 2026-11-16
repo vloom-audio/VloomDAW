@@ -3,6 +3,7 @@
 #pragma once
 
 #include "core/Project.hpp"
+#include "core/Scales.hpp"
 
 #include <optional>
 #include <utility>
@@ -45,5 +46,21 @@ using NoteSelection = std::vector<bool>;
 /// tick `at`. Unchanged when that would be more than kMaxPatternNotes.
 [[nodiscard]] std::vector<Note> withPasted(
     const std::vector<Note>& notes, const std::vector<Note>& pasted, int at);
+
+/// Splits every note crossing `splitTick` whose pitch lies within `[min(fromKey, toKey), max(fromKey,
+/// toKey)]` into two consecutive notes, leaving at least `kMinNoteLength` on each half.
+[[nodiscard]] std::vector<Note> slicedNotes(
+    const std::vector<Note>& notes, int splitTick, int fromKey, int toKey);
+
+/// Extends each selected note up to the earliest subsequent note onset (`start > note.start`).
+[[nodiscard]] std::vector<Note> legatoNotes(const std::vector<Note>& notes, const NoteSelection& selection);
+
+/// Multiplies each selected note's velocity by `factor` (clamped to `kMinVelocity..kMaxVelocity`).
+[[nodiscard]] std::vector<Note> scaledVelocityNotes(
+    const std::vector<Note>& notes, const NoteSelection& selection, double factor);
+
+/// Moves each selected note's pitch (`key`) to the nearest key belonging to `(root, scale)`.
+[[nodiscard]] std::vector<Note> snappedToScaleNotes(
+    const std::vector<Note>& notes, const NoteSelection& selection, int root, Scale scale);
 
 } // namespace vloomdaw

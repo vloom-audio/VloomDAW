@@ -115,6 +115,17 @@ public:
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }
 
+    // ---- Studio One-style Loop Bar (locators on the top timeline ruler)
+    void setLoopRange(int startTicks, int endTicks);
+    [[nodiscard]] int loopStartTicks() const { return loopStart_; }
+    [[nodiscard]] int loopEndTicks() const { return loopEnd_; }
+    [[nodiscard]] bool hasLoopRange() const { return loopEnd_ > loopStart_; }
+    void setLoopActive(bool active);
+    [[nodiscard]] bool loopActive() const { return loopActive_; }
+    /// Sets the Loop Bar around the selected clips (or the whole song if none are selected).
+    void loopSelectionOrSong();
+    void clearLoopRange();
+
     // ---- selection & clipboard actions (Edit menu / keyboard shortcuts)
     [[nodiscard]] bool hasSelectedClips();
     [[nodiscard]] bool hasClipClipboard() const
@@ -135,10 +146,20 @@ signals:
     void clipsAddedBatch(
         const std::vector<vloomdaw::Clip>& clips, const std::vector<vloomdaw::AudioClip>& audioClips);
     void patternPicked(std::size_t pattern);
+    /// Double-clicked a pattern clip on `track`: select `pattern` + `track`'s channel and open Piano Roll.
+    void patternClipActivated(std::size_t pattern, int track);
     /// A clip was clicked with Draw, Paint or Select: what it is becomes the source.
     void sourcePicked(vloomdaw::PlaylistView::ClipSource source);
     /// Audio files were dropped: one audio clip per file starting at `track` and `start` ticks.
     void audioDropped(const QStringList& paths, int track, int start);
+    /// Standard MIDI Files (`.mid` / `.midi`) were dropped onto `track` at `startTick`.
+    void midiFilesDropped(const QStringList& paths, int track, int startTick);
+    /// A `.vloom` project file was dropped onto the playlist.
+    void projectFileDropped(const QString& path);
+    /// Loop Bar markers changed (`endTicks <= startTicks` clears the custom loop range).
+    void loopRangeChanged(int startTicks, int endTicks, bool activate);
+    void loopActiveToggled(bool active);
+    void exportLoopRangeRequested();
     /// A plugin from PluginsPanel was dropped onto `track` (`>= trackCount()`: new track) at `startTick`.
     void pluginDroppedOnPlaylist(std::size_t pluginIndex, int track, int startTick);
     void audioClipChanged(std::size_t index, vloomdaw::AudioClip clip);
@@ -160,6 +181,8 @@ signals:
     void trackRemoveRequested(std::size_t track);
     /// Move `track` with its sub-tracks past its neighbour in its group.
     void trackMoveRequested(std::size_t track, bool down);
+    /// Move `from` directly to index `to` (dragged header or Move to Top / Bottom).
+    void trackReordered(std::size_t from, std::size_t to);
     void trackHeightChanged(std::size_t track, int height);
     /// A colour (0xRRGGBB) was picked for `track`; nullopt: none.
     void trackColorChanged(std::size_t track, std::optional<std::uint32_t> color);
@@ -200,6 +223,7 @@ protected:
 
 private:
     enum class HeaderSlider { None, Volume, Pan };
+    enum class LoopDrag { None, Draw, Move, ResizeStart, ResizeEnd };
 
     struct TrackMeter {
         double level[2] = {0.0, 0.0};
@@ -375,6 +399,10 @@ private:
     int resizingTrack_ = -1; ///< whose height a drag changes
     int resizeStartY_ = 0;
     int resizeStartHeight_ = 0;
+    int pendingTrackDrag_ = -1; ///< track header pressed, waiting for drag threshold
+    QPoint trackDragStartPos_;
+    bool draggingTrackOrder_ = false;
+    int trackDropSlot_ = -1; ///< insertion slot `0..trackCount()` while dragging a track header
 
     Tool tool_ = Tool::Draw;
     std::vector<char> selectedClips_; ///< by index into Project::clips()
@@ -415,6 +443,16 @@ private:
     std::vector<AudioClip> clipboardAudio_;
     int clipboardMinStart_ = 0;
     int clipboardMaxEnd_ = 0;
+
+    int loopStart_ = 0;
+    int loopEnd_ = 0;
+    bool loopActive_ = true;
+    LoopDrag loopDrag_ = LoopDrag::None;
+    QPoint loopPressPos_;
+    bool loopDragMoved_ = false;
+    int loopAnchorTick_ = 0;
+    int loopOrigStart_ = 0;
+    int loopOrigEnd_ = 0;
 };
 
 } // namespace vloomdaw

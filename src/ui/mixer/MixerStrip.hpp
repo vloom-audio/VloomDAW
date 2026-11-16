@@ -107,6 +107,8 @@ signals:
     void userFxSlotRowsChanged(int rows);
     void renameRequested();
     void nameEdited(const QString& name);
+    void stripDragMoved(const QPoint& globalPos);
+    void stripDragReleased(const QPoint& globalPos);
     void colorPickRequested(const QPoint& globalPos);
     void effectsMenuRequested(const QPoint& globalPos);
     void effectBypassToggled(std::size_t slot, bool bypassed);
@@ -129,6 +131,8 @@ signals:
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -169,6 +173,9 @@ private:
     QString fullName_;
     bool committingRename_ = false;
     bool cancellingRename_ = false;
+    bool pendingStripDrag_ = false;
+    bool draggingStripOrder_ = false;
+    QPoint stripDragStartGlobal_;
 
     Kind kind_ = Kind::Insert;
     MixerRole role_ = MixerRole::Standard;

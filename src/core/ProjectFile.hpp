@@ -23,6 +23,9 @@ struct SongSettings {
     int keyRoot = 0; ///< pitch class, 0 = C
     Scale scale = Scale::Major;
     bool songMode = false; ///< plays the playlist instead of looping the pattern
+    bool loopEnabled = true; ///< transport loop switch
+    int loopStart = 0; ///< custom loop start in ticks (`loopEnd > loopStart`: active loop markers)
+    int loopEnd = 0; ///< custom loop end in ticks (`0`: no custom loop range; SONG loops whole song)
 };
 
 /// Plugin states, by where each plugin sits. Empty bytes: none saved (the

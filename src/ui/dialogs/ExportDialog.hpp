@@ -31,6 +31,7 @@ struct ExportSettings {
     bool mono = false;
     bool dither = true; ///< 16-bit and 24-bit integer formats
     bool tail = true; ///< go on after the end until the sound has died away
+    bool loopRange = false; ///< render only between the Playlist Loop Bar markers
     bool showFile = false; ///< open its folder when it is written
     AudioMetadata metadata; ///< the file's tags
 };
@@ -42,6 +43,11 @@ struct ExportSong {
     int bars = 0;
     double seconds = 0.0; ///< without the tail
     double sampleRate = 48000.0;
+    bool hasLoopRange = false; ///< a Loop Bar range is set on the Playlist
+    bool preferLoopRange = false; ///< pre-select Loop range (e.g. Loop is active or Export Loop Range…)
+    int loopBars = 0;
+    double loopSeconds = 0.0;
+    QString loopLabel; ///< e.g. "Bar 1 – 5"
 };
 
 /// File > Export…: where to write the song, in which format (WAV, FLAC, MP3,
@@ -71,10 +77,14 @@ private:
     void refresh();
     void browse();
     [[nodiscard]] AudioFileFormat format() const;
+    [[nodiscard]] bool exportingLoopRange() const;
+    [[nodiscard]] double activeSeconds() const;
     [[nodiscard]] double estimatedBytes() const;
 
     ExportSong song_;
+    QLabel* about_ = nullptr;
     std::array<QToolButton*, 5> formats_{};
+    QComboBox* range_ = nullptr;
     QLabel* qualityName_ = nullptr; ///< "Bit depth" or "Bit rate", by format
     QLabel* qualityHint_ = nullptr;
     QStackedWidget* quality_ = nullptr; ///< the one of the three below that applies

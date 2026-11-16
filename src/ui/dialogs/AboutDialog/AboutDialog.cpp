@@ -380,8 +380,8 @@ AboutDialog::AboutDialog(const AboutRuntimeInfo& runtime, QWidget* parent)
                                      .arg(QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture(),
                                          QString::fromLatin1(qVersion()));
     const QString pluginSpec = runtime_.scannedPluginCount > 0
-        ? tr("VST3 · CLAP · Built-in (%1 available)").arg(runtime_.scannedPluginCount)
-        : tr("VST3 · CLAP · Built-in DSP");
+        ? tr("VST3 · VST2 · CLAP · Built-in (%1 available)").arg(runtime_.scannedPluginCount)
+        : tr("VST3 · VST2 · CLAP · Built-in DSP");
     const QString audioSpec
         = runtime_.audioStatus.isEmpty() ? tr("No active output device") : runtime_.audioStatus;
 
@@ -403,7 +403,8 @@ AboutDialog::AboutDialog(const AboutRuntimeInfo& runtime, QWidget* parent)
     featLay->addWidget(featTitle);
     auto* featDesc = new QLabel(
         tr("Lock-free real-time mixing console with Bus / FX / Aux routing & delay compensation  ·  "
-           "Out-of-process VST3 & CLAP plug-in scanning  ·  Time-stretching & AI stem separation."),
+           "Out-of-process VST3, VST2 (32/64-bit bridge) & CLAP plug-in hosting  ·  Time-stretching & AI "
+           "stem separation."),
         featureBar);
     featDesc->setWordWrap(true);
     featDesc->setStyleSheet(

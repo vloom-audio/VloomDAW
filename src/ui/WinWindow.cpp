@@ -2,6 +2,10 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/WinWindow.hpp"
 
+#include "ui/FilePaths.hpp"
+
+#include <QDir>
+#include <QFileInfo>
 #include <QWidget>
 
 #ifndef NOMINMAX
@@ -12,6 +16,8 @@
 #endif
 #include <cmath>
 #include <dwmapi.h>
+#include <shlobj.h>
+#include <string>
 #include <windows.h>
 #include <windowsx.h>
 
@@ -134,6 +140,99 @@ bool handleWindowsTitleBarMessage(
     default:
         return false;
     }
+}
+
+namespace {
+
+bool setHkcuClassString(const wchar_t* subkey, const wchar_t* valueName, const std::wstring& data)
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, subkey, 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
+            nullptr, &key, nullptr)
+        != ERROR_SUCCESS) {
+        return false;
+    }
+
+    DWORD type = 0;
+    DWORD byteCount = 0;
+    bool matches = false;
+    if (RegQueryValueExW(key, valueName, nullptr, &type, nullptr, &byteCount) == ERROR_SUCCESS
+        && type == REG_SZ && byteCount >= sizeof(wchar_t) && byteCount <= 8192) {
+        std::wstring existing(byteCount / sizeof(wchar_t), L'\0');
+        if (RegQueryValueExW(
+                key, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(existing.data()), &byteCount)
+            == ERROR_SUCCESS) {
+            while (!existing.empty() && existing.back() == L'\0')
+                existing.pop_back();
+            matches = (existing == data);
+        }
+    }
+
+    bool changed = false;
+    if (!matches) {
+        const auto bytes = static_cast<DWORD>((data.size() + 1) * sizeof(wchar_t));
+        if (RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(data.c_str()), bytes)
+            == ERROR_SUCCESS) {
+            changed = true;
+        }
+    }
+
+    RegCloseKey(key);
+    return changed;
+}
+
+} // namespace
+
+void setWindowsProjectFileAssociation(const QString& exePath, bool enabled)
+{
+    static constexpr const wchar_t* kProgId = L"VloomDAW.Project";
+    if (!enabled) {
+        HKEY extKey = nullptr;
+        bool changed = false;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.vloom", 0, KEY_READ | KEY_WRITE, &extKey)
+            == ERROR_SUCCESS) {
+            wchar_t buf[128]{};
+            DWORD bytes = sizeof(buf);
+            DWORD type = 0;
+            if (RegQueryValueExW(extKey, nullptr, nullptr, &type, reinterpret_cast<LPBYTE>(buf), &bytes)
+                    == ERROR_SUCCESS
+                && type == REG_SZ && std::wstring_view(buf) == kProgId) {
+                if (RegDeleteValueW(extKey, nullptr) == ERROR_SUCCESS)
+                    changed = true;
+            }
+            RegCloseKey(extKey);
+        }
+        if (RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\VloomDAW.Project") == ERROR_SUCCESS)
+            changed = true;
+        if (changed)
+            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+        return;
+    }
+
+    if (!isLocalPath(exePath))
+        return;
+    const QFileInfo info(exePath);
+    if (!info.exists())
+        return;
+
+    const std::wstring nativeExe = QDir::toNativeSeparators(info.absoluteFilePath()).toStdWString();
+    const std::wstring docIcon = L"\"" + nativeExe + L"\",1";
+    const std::wstring appIcon = L"\"" + nativeExe + L"\",0";
+    const std::wstring openCmd = L"\"" + nativeExe + L"\" \"%1\"";
+
+    bool changed = false;
+    changed |= setHkcuClassString(L"Software\\Classes\\.vloom", nullptr, kProgId);
+    changed |= setHkcuClassString(L"Software\\Classes\\.vloom\\OpenWithProgids", kProgId, L"");
+    changed |= setHkcuClassString(L"Software\\Classes\\VloomDAW.Project", nullptr, L"VloomDAW Project");
+    changed |= setHkcuClassString(L"Software\\Classes\\VloomDAW.Project\\DefaultIcon", nullptr, docIcon);
+    changed |= setHkcuClassString(
+        L"Software\\Classes\\VloomDAW.Project\\shell\\open", nullptr, L"Open with VloomDAW");
+    changed |= setHkcuClassString(L"Software\\Classes\\VloomDAW.Project\\shell\\open", L"Icon", appIcon);
+    changed
+        |= setHkcuClassString(L"Software\\Classes\\VloomDAW.Project\\shell\\open\\command", nullptr, openCmd);
+
+    if (changed)
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 }
 
 } // namespace vloomdaw

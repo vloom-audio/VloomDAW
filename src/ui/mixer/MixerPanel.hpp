@@ -133,6 +133,8 @@ private:
     QToolButton* close_ = nullptr;
     QHBoxLayout* header_ = nullptr;
     QWidget* inserts_ = nullptr; ///< the scrolling row of insert / bus / fx / aux strips
+    QWidget* dragIndicator_ = nullptr;
+    int dragTargetSlot_ = -1;
     QHBoxLayout* insertRow_ = nullptr;
     QScrollArea* scroll_ = nullptr;
     QStringList names_; ///< [i] the name of track i ("" = "Insert i")

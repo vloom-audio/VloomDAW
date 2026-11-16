@@ -6,9 +6,11 @@ generated from it by `scripts/make_app_icons.py` (Pillow):
 
 | File | Used by |
 |---|---|
-| `vloomdaw.ico` | Windows: the executable icon (`src/app/VloomDAW.rc`), 16 to 256 px |
+| `vloomdaw.ico` | Windows: the executable icon (`src/app/VloomDAW.rc`, index 0), 16 to 256 px |
+| `vloom-project.ico` | Windows: the `.vloom` project document icon (`src/app/VloomDAW.rc`, index 1), 16 to 256 px |
 | `vloomdaw.icns` | macOS: the app bundle icon, on Apple's icon grid |
 | `vloomdaw.png` | Window icon through Qt (`:/app/vloomdaw.png`), all platforms |
+| `vloom-project.png` | `.vloom` project document artwork (`:/app/vloom-project.png`), 512 px |
 
 After changing the artwork, run `python scripts/make_app_icons.py` and commit
 the regenerated files.

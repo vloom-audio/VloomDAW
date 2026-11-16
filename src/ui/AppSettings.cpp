@@ -18,6 +18,7 @@ constexpr QLatin1StringView kSampleRate{"audio/sampleRate"};
 constexpr QLatin1StringView kBufferFrames{"audio/bufferFrames"};
 constexpr QLatin1StringView kStartPositionMode{"general/startPositionMode"};
 constexpr QLatin1StringView kMetronomeOnStartup{"general/startWithMetronome"};
+constexpr QLatin1StringView kAssociateProjectFiles{"general/associateProjectFiles"};
 constexpr QLatin1StringView kBrowserFolders{"browser/folders"};
 constexpr QLatin1StringView kBrowserFolder{"browser/current"};
 constexpr QLatin1StringView kBrowserAutoPreview{"browser/autoPreview"};
@@ -59,6 +60,7 @@ AppSettings AppSettings::load()
     a.startPositionMode
         = s.value(kStartPositionMode, 0).toInt() == 1 ? PositionMode::Time : PositionMode::BarsBeats;
     a.metronomeOnStartup = s.value(kMetronomeOnStartup, a.metronomeOnStartup).toBool();
+    a.associateProjectFiles = s.value(kAssociateProjectFiles, a.associateProjectFiles).toBool();
     ThemeChoice& t = a.theme;
     t.paletteId = s.value(kThemePalette, QString::fromStdString(t.paletteId)).toString().toStdString();
     t.accentId = s.value(kThemeAccent, QString::fromStdString(t.accentId)).toString().toStdString();
@@ -97,6 +99,7 @@ void AppSettings::save() const
     s.setValue(kBufferFrames, bufferFrames);
     s.setValue(kStartPositionMode, static_cast<int>(startPositionMode));
     s.setValue(kMetronomeOnStartup, metronomeOnStartup);
+    s.setValue(kAssociateProjectFiles, associateProjectFiles);
     s.setValue(kBrowserFolders, browserFolders);
     s.setValue(kBrowserFolder, browserFolder);
     s.setValue(kBrowserAutoPreview, browserAutoPreview);

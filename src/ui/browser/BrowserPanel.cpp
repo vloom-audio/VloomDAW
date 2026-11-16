@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/browser/BrowserPanel.hpp"
 
+#include "core/BrowserFilter.hpp"
 #include "ui/Theme.hpp"
 #include "ui/browser/BrowserRoles.hpp"
 #include "ui/browser/SampleTreeModel.hpp"
@@ -11,6 +12,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -194,7 +196,7 @@ void BrowserPanel::watchForPreview(QAbstractItemView* view)
     connect(view->selectionModel(), &QItemSelectionModel::currentChanged, this,
         [this](const QModelIndex& current) {
             const QString path = current.data(kSampleFileRole).toString();
-            if (path.isEmpty() || restoring_)
+            if (path.isEmpty() || restoring_ || isMidiFile(QFileInfo(path).fileName().toStdString()))
                 return;
             waveform_->setFile(path);
             if (mouseDown_ || autoPreview_->isChecked())
@@ -206,7 +208,7 @@ void BrowserPanel::watchForPreview(QAbstractItemView* view)
     // current item: toggle it instead.
     connect(view, &QAbstractItemView::clicked, this, [this](const QModelIndex& index) {
         const QString path = index.data(kSampleFileRole).toString();
-        if (pressedOnCurrent_ && !path.isEmpty())
+        if (pressedOnCurrent_ && !path.isEmpty() && !isMidiFile(QFileInfo(path).fileName().toStdString()))
             emit previewToggled(path);
     });
     view->viewport()->installEventFilter(this);
