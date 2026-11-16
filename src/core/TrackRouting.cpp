@@ -34,8 +34,8 @@ constexpr std::array<std::uint32_t, 20> kTrackPalette{{
 
 bool isInsertUntouched(const MixerTrack& t)
 {
-    return !t.named && t.effects.empty() && !t.color.has_value() && !t.muted && !t.soloed && t.fader == 0.8
-        && t.pan == 0.0;
+    return t.role == MixerRole::Standard && t.output == 0 && t.sends.empty() && !t.named && t.effects.empty()
+        && !t.color.has_value() && !t.muted && !t.soloed && t.fader == 0.8 && t.pan == 0.0;
 }
 
 bool isInsertUsed(const Project& project, int insert)
@@ -357,11 +357,7 @@ bool trackEffectiveAudible(const Project& project, const MixerModel& mixer, std:
         return false;
     const int ins = trackMixerInsert(project, mixer, track);
     if (ins > 0 && static_cast<std::size_t>(ins) < mixer.size()) {
-        const auto idx = static_cast<std::size_t>(ins);
-        const MixerTrack& mt = mixer.track(idx);
-        if (mt.muted)
-            return false;
-        if (mixer.anySoloed() && !mt.soloed)
+        if (!mixer.isTrackAudible(static_cast<std::size_t>(ins)))
             return false;
     }
     return true;
@@ -491,9 +487,10 @@ std::size_t bindAudioToTrack(Project& project, MixerModel& mixer, std::size_t tr
     }
     if (chosen == 0) {
         const std::size_t positional = track + 1;
-        if (positional < mixer.size()
+        if (positional < mixer.size() && mixer.track(positional).role == MixerRole::Standard
             && !isInsertUsedExcluding(project, static_cast<int>(positional), track, *channel)
-            && mixer.track(positional).effects.empty()) {
+            && mixer.track(positional).effects.empty() && mixer.track(positional).sends.empty()
+            && mixer.track(positional).output == 0) {
             chosen = positional;
         }
     }

@@ -12,8 +12,11 @@
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QDir>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QHelpEvent>
+#include <QIcon>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -23,7 +26,10 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QStackedWidget>
+#include <QTimer>
 #include <QToolButton>
+#include <QToolTip>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -38,26 +44,55 @@ constexpr QLatin1StringView kGroupByKey{"plugins/groupBy"};
 constexpr QLatin1StringView kTabKey{"plugins/tab"};
 constexpr QLatin1StringView kShowThumbsKey{"plugins/showThumbnails"};
 constexpr int kIndexRole = Qt::UserRole + 1; ///< index into plugins_, on plugin & thumbnail rows
+constexpr int kFormatColWidth = 54; ///< fixed width for "VST3" / "CLAP" / "Built-in" tag column
 
 QString utf8(const std::string& text) { return QString::fromStdString(text); }
 
 /// The plugin list: plugin rows (and their inline thumbnails) drag out as
 /// plugins (PluginDrag), to drop on a mixer insert or the channel rack.
+/// Tooltips are built lazily on hover so populating 300+ rows stays O(N) fast.
 class PluginTree : public QTreeWidget {
 public:
-    using QTreeWidget::QTreeWidget;
+    explicit PluginTree(const PluginsPanel* panel, QWidget* parent = nullptr)
+        : QTreeWidget(parent)
+        , panel_(panel)
+    {
+    }
 
 protected:
     [[nodiscard]] QStringList mimeTypes() const override
     {
         return {QStringLiteral("application/x-vloomdaw-plugin")};
     }
+
     [[nodiscard]] QMimeData* mimeData(const QList<QTreeWidgetItem*>& items) const override
     {
         if (items.empty() || !items.front()->data(0, kIndexRole).isValid())
             return nullptr; // a group row
         return pluginMimeData(static_cast<std::size_t>(items.front()->data(0, kIndexRole).toULongLong()));
     }
+
+    bool viewportEvent(QEvent* event) override
+    {
+        if (event->type() == QEvent::ToolTip && panel_ != nullptr) {
+            auto* help = static_cast<QHelpEvent*>(event);
+            if (QTreeWidgetItem* item = itemAt(help->pos());
+                item != nullptr && item->data(0, kIndexRole).isValid()) {
+                const auto idx = static_cast<std::size_t>(item->data(0, kIndexRole).toULongLong());
+                const QString tip = panel_->tooltipForPlugin(idx);
+                if (!tip.isEmpty()) {
+                    QToolTip::showText(help->globalPos(), tip, viewport(), visualItemRect(item));
+                    return true;
+                }
+            }
+            QToolTip::hideText();
+            return true;
+        }
+        return QTreeWidget::viewportEvent(event);
+    }
+
+private:
+    const PluginsPanel* panel_ = nullptr;
 };
 
 /// Category groups in the browser's order, vendors A-Z with "Unknown" last.
@@ -149,7 +184,8 @@ PluginsPanel::PluginsPanel(QWidget* parent)
     groupBy_->setCurrentIndex(savedGroup >= 0 ? savedGroup : 0);
     connect(groupBy_, &QComboBox::currentIndexChanged, this, [this] {
         QSettings().setValue(kGroupByKey, groupBy_->currentData());
-        rebuild();
+        markAllDirty();
+        ensureCurrentTabBuilt();
     });
 
     thumbToggleBtn_ = new QToolButton(controlsRow_);
@@ -164,7 +200,8 @@ PluginsPanel::PluginsPanel(QWidget* parent)
     connect(thumbToggleBtn_, &QToolButton::toggled, this, [this](bool on) {
         showThumbnails_ = on;
         QSettings().setValue(kShowThumbsKey, on);
-        rebuild();
+        markAllDirty();
+        ensureCurrentTabBuilt();
     });
 
     ctrlLayout->addWidget(groupBy_, 1);
@@ -180,29 +217,12 @@ PluginsPanel::PluginsPanel(QWidget* parent)
         = new QShortcut(QKeySequence(Qt::Key_Escape), search_, nullptr, nullptr, Qt::WidgetShortcut);
     connect(leaveSearch, &QShortcut::activated, search_, [this] { search_->clearFocus(); });
 
-    tree_ = new PluginTree(this);
-    tree_->setDragEnabled(true);
-    tree_->setDragDropMode(QAbstractItemView::DragOnly);
-    tree_->setObjectName(QStringLiteral("browserTree"));
-    tree_->setHeaderHidden(true);
-    tree_->setColumnCount(2); // name, format tag
-    tree_->header()->setStretchLastSection(false);
-    tree_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    tree_->setFrameShape(QFrame::NoFrame);
-    tree_->setIndentation(14);
-    tree_->setUniformRowHeights(false); // required so inline thumbnail preview rows fit cleanly
-    tree_->setFocusPolicy(Qt::ClickFocus);
-    tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(tree_, &QTreeWidget::customContextMenuRequested, this, &PluginsPanel::showContextMenu);
-    connect(tree_, &QTreeWidget::currentItemChanged, this,
-        [this](QTreeWidgetItem* current, QTreeWidgetItem* /*previous*/) {
-            if (current != nullptr && current->data(0, kIndexRole).isValid()) {
-                updateInspector(static_cast<std::size_t>(current->data(0, kIndexRole).toULongLong()));
-            }
-        });
-    connect(tree_, &QTreeWidget::itemDoubleClicked, this,
-        [this](QTreeWidgetItem* item, int /*column*/) { onItemActivated(item); });
+    treeStack_ = new QStackedWidget(this);
+    instTree_ = makePluginTree();
+    fxTree_ = makePluginTree();
+    treeStack_->addWidget(instTree_);
+    treeStack_->addWidget(fxTree_);
+    treeStack_->setCurrentIndex(static_cast<int>(tab_));
 
     emptyHint_ = new QLabel(
         tr("No plugins yet. Plugins can be used after a scan of your plugin folders; nothing is scanned "
@@ -275,12 +295,53 @@ PluginsPanel::PluginsPanel(QWidget* parent)
     layout->addWidget(tabBarWidget_);
     layout->addWidget(controlsRow_);
     layout->addWidget(search_);
-    layout->addWidget(tree_, 1);
+    layout->addWidget(treeStack_, 1);
     layout->addWidget(emptyHint_);
     layout->addWidget(scanButton_);
     layout->addStretch(0);
     layout->addWidget(inspectorCard_);
     layout->addWidget(footer_);
+}
+
+QTreeWidget* PluginsPanel::makePluginTree()
+{
+    auto* tree = new PluginTree(this, treeStack_);
+    tree->setDragEnabled(true);
+    tree->setDragDropMode(QAbstractItemView::DragOnly);
+    tree->setObjectName(QStringLiteral("browserTree"));
+    tree->setHeaderHidden(true);
+    tree->setColumnCount(2); // name, format tag
+    tree->header()->setStretchLastSection(false);
+    tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    // Fixed column width avoids O(N^2) ResizeToContents font-metric sweeps on 300+ FX rows.
+    tree->header()->setSectionResizeMode(1, QHeaderView::Fixed);
+    tree->setColumnWidth(1, kFormatColWidth);
+    tree->setIconSize(QSize(168, 72));
+    tree->setFrameShape(QFrame::NoFrame);
+    tree->setIndentation(14);
+    tree->setUniformRowHeights(false);
+    tree->setFocusPolicy(Qt::ClickFocus);
+    tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tree, &QTreeWidget::customContextMenuRequested, this,
+        [this, tree](const QPoint& pos) { showContextMenu(tree, pos); });
+    connect(tree, &QTreeWidget::currentItemChanged, this,
+        [this, tree](QTreeWidgetItem* current, QTreeWidgetItem* /*previous*/) {
+            if (tree != activeTree())
+                return;
+            if (current != nullptr && current->data(0, kIndexRole).isValid())
+                updateInspector(static_cast<std::size_t>(current->data(0, kIndexRole).toULongLong()));
+        });
+    connect(tree, &QTreeWidget::itemDoubleClicked, this,
+        [this](QTreeWidgetItem* item, int /*column*/) { onItemActivated(item); });
+    return tree;
+}
+
+QTreeWidget* PluginsPanel::activeTree() const { return tab_ == Tab::Instruments ? instTree_ : fxTree_; }
+
+void PluginsPanel::markAllDirty()
+{
+    instDirty_ = true;
+    fxDirty_ = true;
 }
 
 void PluginsPanel::setCurrentTab(Tab tab)
@@ -295,13 +356,40 @@ void PluginsPanel::setCurrentTab(Tab tab)
         fxTabBtn_->setChecked(tab_ == Tab::Effects);
     }
     QSettings().setValue(kTabKey, static_cast<int>(tab_));
-    selectedPluginIndex_.reset();
-    rebuild();
+    treeStack_->setCurrentIndex(static_cast<int>(tab_));
+    ensureCurrentTabBuilt();
 }
 
 PluginsPanel::GroupBy PluginsPanel::groupBy() const
 {
     return static_cast<GroupBy>(groupBy_->currentData().toInt());
+}
+
+QString PluginsPanel::tooltipForPlugin(std::size_t index) const
+{
+    if (index >= plugins_.size())
+        return {};
+    const PluginInfo& info = plugins_[index];
+    QStringList tip;
+    if (!info.vendor.empty())
+        tip << tr("Vendor: %1").arg(utf8(info.vendor));
+    if (!info.version.empty())
+        tip << tr("Version: %1").arg(utf8(info.version));
+    const std::string category = effectiveCategory(info);
+    const std::string type = effectiveInstrumentType(info);
+    QString categoryText
+        = type.empty() ? utf8(category) : QStringLiteral("%1 / %2").arg(utf8(category), utf8(type));
+    if (!info.userCategory.empty())
+        categoryText += QLatin1Char(' ') + tr("(set by you)");
+    tip << tr("Category: %1").arg(categoryText);
+    tip << tr("Sub-Type: %1").arg(utf8(detectPluginSubCategory(info)));
+    if (info.probe == PluginInfo::Probe::Failed)
+        tip << tr("Could not be read: %1").arg(utf8(info.probeError));
+    else if (info.probe == PluginInfo::Probe::NotProbed)
+        tip << tr("Not read yet: vendor and category come from a scan with plugin reading on");
+    if (info.format != PluginFormat::Builtin)
+        tip << QDir::toNativeSeparators(toQString(info.path));
+    return tip.join(QLatin1Char('\n'));
 }
 
 void PluginsPanel::updateTabCounts()
@@ -334,8 +422,16 @@ void PluginsPanel::setStore(const PluginStore& store)
     search_->setVisible(anyEnabled);
     scanButton_->setVisible(!anyEnabled);
 
+    footer_->setText(scanned
+            ? tr("Last scan: %1").arg(QLocale().toString(store.lastScan.toLocalTime(), QLocale::ShortFormat))
+            : QString());
+    footer_->setVisible(scanned);
+
+    markAllDirty();
     if (!anyEnabled) {
-        tree_->setVisible(false);
+        instTree_->clear();
+        fxTree_->clear();
+        treeStack_->setVisible(false);
         inspectorCard_->setVisible(false);
         emptyHint_->setVisible(true);
         if (!plugins_.empty()) {
@@ -348,28 +444,89 @@ void PluginsPanel::setStore(const PluginStore& store)
                     : tr("No plugins yet. Plugins can be used after a scan of your plugin folders; "
                          "nothing is scanned automatically."));
         }
+        return;
     }
 
-    footer_->setText(scanned
-            ? tr("Last scan: %1").arg(QLocale().toString(store.lastScan.toLocalTime(), QLocale::ShortFormat))
-            : QString());
-    footer_->setVisible(scanned);
-    rebuild();
+    ensureCurrentTabBuilt();
+    // Pre-build the inactive tab on the next event-loop turn so even the very
+    // first click between Instruments and FX is an instant 0 ms page flip.
+    QTimer::singleShot(0, this, [this] {
+        const bool stillAny = std::any_of(
+            plugins_.begin(), plugins_.end(), [](const PluginInfo& info) { return info.enabled; });
+        if (!stillAny)
+            return;
+        if (instDirty_) {
+            populateTree(instTree_, Tab::Instruments);
+            instDirty_ = false;
+            applySearchToTree(instTree_, search_->text());
+        }
+        if (fxDirty_) {
+            populateTree(fxTree_, Tab::Effects);
+            fxDirty_ = false;
+            applySearchToTree(fxTree_, search_->text());
+        }
+    });
 }
 
-void PluginsPanel::refreshThumbnails() { rebuild(); }
-
-void PluginsPanel::rebuild()
+void PluginsPanel::refreshThumbnails()
 {
-    tree_->clear();
+    markAllDirty();
+    ensureCurrentTabBuilt();
+}
+
+void PluginsPanel::ensureCurrentTabBuilt()
+{
     const bool anyEnabled
         = std::any_of(plugins_.begin(), plugins_.end(), [](const PluginInfo& info) { return info.enabled; });
     if (!anyEnabled)
         return;
 
+    if (tab_ == Tab::Instruments) {
+        if (instDirty_) {
+            populateTree(instTree_, Tab::Instruments);
+            instDirty_ = false;
+        }
+        applySearchToTree(instTree_, search_->text());
+    } else {
+        if (fxDirty_) {
+            populateTree(fxTree_, Tab::Effects);
+            fxDirty_ = false;
+        }
+        applySearchToTree(fxTree_, search_->text());
+    }
+    updateTabState();
+}
+
+void PluginsPanel::updateTabState()
+{
+    const bool empty = (tab_ == Tab::Instruments) ? instEmpty_ : fxEmpty_;
+    if (empty) {
+        treeStack_->setVisible(false);
+        inspectorCard_->setVisible(false);
+        emptyHint_->setVisible(true);
+        emptyHint_->setText(tab_ == Tab::Instruments ? tr("No instrument plugins enabled. Switch to FX or "
+                                                          "scan instrument folders in the Plugin Manager.")
+                                                     : tr("No effect plugins enabled. Switch to Instruments "
+                                                          "or scan FX folders in the Plugin Manager."));
+        return;
+    }
+
+    emptyHint_->setVisible(false);
+    treeStack_->setVisible(true);
+
+    QTreeWidget* tree = activeTree();
+    if (QTreeWidgetItem* cur = tree->currentItem(); cur != nullptr && cur->data(0, kIndexRole).isValid()) {
+        updateInspector(static_cast<std::size_t>(cur->data(0, kIndexRole).toULongLong()));
+    } else {
+        updateInspector(std::nullopt);
+    }
+}
+
+void PluginsPanel::populateTree(QTreeWidget* tree, Tab tab)
+{
     const GroupBy by = groupBy();
     const QColor dim = Theme::colors().textDim;
-    const std::string wantedMainGroup = (tab_ == Tab::Instruments) ? "Instrument" : "Effect";
+    const std::string wantedMainGroup = (tab == Tab::Instruments) ? "Instrument" : "Effect";
 
     std::vector<const PluginInfo*> tabPlugins;
     std::vector<const PluginInfo*> favorites;
@@ -390,8 +547,8 @@ void PluginsPanel::rebuild()
         QString key;
         switch (by) {
         case GroupBy::Category:
-            key = (tab_ == Tab::Instruments) ? utf8(detectPluginSubCategory(info))
-                                             : utf8(effectiveCategory(info));
+            key = (tab == Tab::Instruments) ? utf8(detectPluginSubCategory(info))
+                                            : utf8(effectiveCategory(info));
             break;
         case GroupBy::Vendor:
             key = utf8(info.vendor);
@@ -405,22 +562,15 @@ void PluginsPanel::rebuild()
         groups[key].push_back(&info);
     }
 
-    if (tabPlugins.empty()) {
-        tree_->setVisible(false);
-        inspectorCard_->setVisible(false);
-        emptyHint_->setVisible(true);
-        emptyHint_->setText(tab_ == Tab::Instruments ? tr("No instrument plugins enabled. Switch to FX or "
-                                                          "scan instrument folders in the Plugin Manager.")
-                                                     : tr("No effect plugins enabled. Switch to Instruments "
-                                                          "or scan FX folders in the Plugin Manager."));
+    bool& emptyFlag = (tab == Tab::Instruments) ? instEmpty_ : fxEmpty_;
+    emptyFlag = tabPlugins.empty();
+    if (emptyFlag) {
+        tree->clear();
         return;
     }
 
-    emptyHint_->setVisible(false);
-    tree_->setVisible(true);
-
     std::vector<std::pair<QString, std::vector<const PluginInfo*>>> ordered(groups.begin(), groups.end());
-    std::stable_sort(ordered.begin(), ordered.end(), [by, tab = tab_](const auto& a, const auto& b) {
+    std::stable_sort(ordered.begin(), ordered.end(), [by, tab](const auto& a, const auto& b) {
         const int ra = groupRank(by, tab, a.first);
         const int rb = groupRank(by, tab, b.first);
         if (ra != rb)
@@ -430,40 +580,19 @@ void PluginsPanel::rebuild()
 
     const qreal dpr = devicePixelRatioF();
 
-    // One row per plugin: name, format tag, tooltip, and optional inline thumbnail preview row.
-    const auto addPlugin = [&](auto* parent, const PluginInfo* info) {
+    // Build all items completely detached from `tree` so Qt never recomputes
+    // row layouts per insertion.
+    const auto makePluginItem = [&](const PluginInfo* info) -> QTreeWidgetItem* {
         const auto pluginIdx = static_cast<std::size_t>(info - plugins_.data());
-        auto* item = new QTreeWidgetItem(parent);
+        auto* item = new QTreeWidgetItem();
         item->setText(0, utf8(info->name));
         item->setText(1, QString::fromUtf8(formatName(info->format)));
         item->setForeground(1, dim);
         item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         item->setData(0, Qt::UserRole, utf8(info->vendor)); // searched too
         item->setData(0, kIndexRole, static_cast<qulonglong>(pluginIdx));
-
-        QStringList tip;
-        if (!info->vendor.empty())
-            tip << tr("Vendor: %1").arg(utf8(info->vendor));
-        if (!info->version.empty())
-            tip << tr("Version: %1").arg(utf8(info->version));
-        const std::string category = effectiveCategory(*info);
-        const std::string type = effectiveInstrumentType(*info);
-        QString categoryText
-            = type.empty() ? utf8(category) : QStringLiteral("%1 / %2").arg(utf8(category), utf8(type));
-        if (!info->userCategory.empty())
-            categoryText += QLatin1Char(' ') + tr("(set by you)");
-        tip << tr("Category: %1").arg(categoryText);
-        tip << tr("Sub-Type: %1").arg(utf8(detectPluginSubCategory(*info)));
-        if (info->probe == PluginInfo::Probe::Failed) {
-            tip << tr("Could not be read: %1").arg(utf8(info->probeError));
+        if (info->probe == PluginInfo::Probe::Failed)
             item->setForeground(0, dim);
-        } else if (info->probe == PluginInfo::Probe::NotProbed) {
-            tip << tr("Not read yet: vendor and category come from a scan with plugin reading on");
-        }
-        if (info->format != PluginFormat::Builtin)
-            tip << QDir::toNativeSeparators(toQString(info->path));
-        const QString tooltipText = tip.join(QLatin1Char('\n'));
-        item->setToolTip(0, tooltipText);
 
         if (showThumbnails_) {
             const std::string thumbId = pluginThumbnailId(*info);
@@ -474,37 +603,18 @@ void PluginsPanel::rebuild()
                 thumbItem->setData(0, Qt::UserRole, utf8(info->vendor));
                 thumbItem->setData(0, kIndexRole, static_cast<qulonglong>(pluginIdx));
                 thumbItem->setFirstColumnSpanned(true);
-                thumbItem->setToolTip(0, tooltipText);
-
+                thumbItem->setData(0, Qt::DecorationRole, QIcon(thumb));
                 const QSize logicalThumbSize = thumb.deviceIndependentSize().toSize();
                 thumbItem->setSizeHint(0, QSize(logicalThumbSize.width() + 8, logicalThumbSize.height() + 8));
-
-                auto* holder = new QWidget(tree_);
-                holder->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-                auto* holderLayout = new QHBoxLayout(holder);
-                holderLayout->setContentsMargins(2, 3, 6, 5);
-                holderLayout->setSpacing(0);
-
-                auto* imgLbl = new QLabel(holder);
-                imgLbl->setObjectName(QStringLiteral("pluginInlineThumb"));
-                imgLbl->setPixmap(thumb);
-                imgLbl->setFixedSize(logicalThumbSize);
-                imgLbl->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-                holderLayout->addWidget(imgLbl);
-                holderLayout->addStretch(1);
-
-                item->setExpanded(true);
-                tree_->setItemWidget(thumbItem, 0, holder);
             }
         }
+        return item;
     };
 
-    const auto addGroup = [](auto* parent, const QString& label, std::size_t count) {
-        auto* group = new QTreeWidgetItem(parent);
+    const auto makeGroupItem = [](const QString& label, std::size_t count) -> QTreeWidgetItem* {
+        auto* group = new QTreeWidgetItem();
         group->setFlags(Qt::ItemIsEnabled);
         group->setText(0, QStringLiteral("%1  (%2)").arg(label).arg(count));
-        group->setFirstColumnSpanned(true);
-        group->setExpanded(true);
         return group;
     };
 
@@ -513,36 +623,51 @@ void PluginsPanel::rebuild()
             < 0;
     };
 
+    QList<QTreeWidgetItem*> topItems;
     if (!favorites.empty()) {
         std::sort(favorites.begin(), favorites.end(), byName);
-        QTreeWidgetItem* favGroup = addGroup(tree_, tr("Favorites"), favorites.size());
+        QTreeWidgetItem* favGroup = makeGroupItem(tr("Favorites"), favorites.size());
         for (const PluginInfo* info : favorites)
-            addPlugin(favGroup, info);
+            favGroup->addChild(makePluginItem(info));
+        topItems.append(favGroup);
     }
 
     if (by == GroupBy::Flat) {
         std::sort(tabPlugins.begin(), tabPlugins.end(), byName);
+        topItems.reserve(topItems.size() + static_cast<qsizetype>(tabPlugins.size()));
         for (const PluginInfo* info : tabPlugins)
-            addPlugin(tree_, info);
+            topItems.append(makePluginItem(info));
     } else {
+        topItems.reserve(topItems.size() + static_cast<qsizetype>(ordered.size()));
         for (auto& [name, members] : ordered) {
             std::sort(members.begin(), members.end(), byName);
             QTreeWidgetItem* group
-                = addGroup(tree_, name.isEmpty() ? tr("Unknown vendor") : name, members.size());
+                = makeGroupItem(name.isEmpty() ? tr("Unknown vendor") : name, members.size());
             for (const PluginInfo* info : members)
-                addPlugin(group, info);
+                group->addChild(makePluginItem(info));
+            topItems.append(group);
         }
     }
 
-    applySearch(search_->text());
-
-    if (selectedPluginIndex_.has_value() && *selectedPluginIndex_ < plugins_.size()
-        && plugins_[*selectedPluginIndex_].enabled
-        && pluginMainGroup(plugins_[*selectedPluginIndex_]) == wantedMainGroup) {
-        updateInspector(selectedPluginIndex_);
-    } else {
-        updateInspector(std::nullopt);
+    tree->setUpdatesEnabled(false);
+    {
+        const QSignalBlocker block(tree);
+        tree->clear();
+        tree->addTopLevelItems(topItems);
+        for (QTreeWidgetItem* top : topItems) {
+            if (!top->data(0, kIndexRole).isValid()) {
+                top->setFirstColumnSpanned(true);
+                top->setExpanded(true);
+                for (int i = 0; i < top->childCount(); ++i) {
+                    if (top->child(i)->childCount() > 0)
+                        top->child(i)->setExpanded(true);
+                }
+            } else if (top->childCount() > 0) {
+                top->setExpanded(true);
+            }
+        }
     }
+    tree->setUpdatesEnabled(true);
 }
 
 void PluginsPanel::updateInspector(std::optional<std::size_t> pluginIndex)
@@ -588,9 +713,11 @@ void PluginsPanel::onItemActivated(QTreeWidgetItem* item)
         emit addToMixerRequested(index);
 }
 
-void PluginsPanel::showContextMenu(const QPoint& pos)
+void PluginsPanel::showContextMenu(QTreeWidget* tree, const QPoint& pos)
 {
-    QTreeWidgetItem* item = tree_->itemAt(pos);
+    if (tree == nullptr)
+        return;
+    QTreeWidgetItem* item = tree->itemAt(pos);
     if (item == nullptr || !item->data(0, kIndexRole).isValid())
         return; // a group row
     const auto index = static_cast<std::size_t>(item->data(0, kIndexRole).toULongLong());
@@ -604,7 +731,7 @@ void PluginsPanel::showContextMenu(const QPoint& pos)
     menu.addAction(tr("Add to Channel Rack"), this, [this, index] { emit addToRackRequested(index); });
     menu.addAction(tr("Add to Mixer…"), this, [this, index] { emit addToMixerRequested(index); });
     if (plugin.format == PluginFormat::Builtin) {
-        menu.exec(tree_->viewport()->mapToGlobal(pos));
+        menu.exec(tree->viewport()->mapToGlobal(pos));
         return;
     }
     menu.addSeparator();
@@ -644,12 +771,15 @@ void PluginsPanel::showContextMenu(const QPoint& pos)
     QAction* reset = menu.addAction(tr("Reset to plugin's category (%1)").arg(utf8(plugin.category)), this,
         [this, index] { emit userCategoryChosen(index, QString(), QString()); });
     reset->setEnabled(!plugin.userCategory.empty());
-    menu.exec(tree_->viewport()->mapToGlobal(pos));
+    menu.exec(tree->viewport()->mapToGlobal(pos));
 }
 
-void PluginsPanel::applySearch(const QString& text)
+void PluginsPanel::applySearchToTree(QTreeWidget* tree, const QString& text)
 {
+    if (tree == nullptr)
+        return;
     const QString needle = text.trimmed();
+    tree->setUpdatesEnabled(false);
     // Plugins match on name or vendor; inline thumbnail child rows follow their
     // parent plugin item; a group shows while any plugin in it matches.
     const auto filter = [&](auto& self, QTreeWidgetItem* item) -> bool {
@@ -657,6 +787,8 @@ void PluginsPanel::applySearch(const QString& text)
             const bool match = needle.isEmpty() || item->text(0).contains(needle, Qt::CaseInsensitive)
                 || item->data(0, Qt::UserRole).toString().contains(needle, Qt::CaseInsensitive);
             item->setHidden(!match);
+            for (int c = 0; c < item->childCount(); ++c)
+                item->child(c)->setHidden(!match);
             return match;
         }
         if (item->childCount() == 0) {
@@ -669,8 +801,11 @@ void PluginsPanel::applySearch(const QString& text)
         item->setHidden(!any);
         return any;
     };
-    for (int g = 0; g < tree_->topLevelItemCount(); ++g)
-        filter(filter, tree_->topLevelItem(g));
+    for (int g = 0; g < tree->topLevelItemCount(); ++g)
+        filter(filter, tree->topLevelItem(g));
+    tree->setUpdatesEnabled(true);
 }
+
+void PluginsPanel::applySearch(const QString& text) { applySearchToTree(activeTree(), text); }
 
 } // namespace vloomdaw

@@ -80,3 +80,30 @@ TEST_CASE("An insert's loaded effects reach the engine, in order and bypassed as
 
     CHECK(engineMixerState(mixer)->inserts[1].effects.empty()); // no resolver: no effects
 }
+
+TEST_CASE("Mono mode on inserts and Master sums stereo L and R channels to true mono", "[audio]")
+{
+    MixerModel mixer(2);
+    mixer.setMono(1, true);
+    mixer.setMono(MixerModel::kMaster, true);
+
+    const auto state = engineMixerState(mixer);
+    REQUIRE(state->inserts.size() == 2);
+    REQUIRE(state->inserts[0].effects.size() == 1);
+    CHECK(state->inserts[1].effects.empty());
+    REQUIRE(state->masterEffects.size() == 1);
+
+    float left[4] = {1.0f, 0.8f, -0.6f, 0.0f};
+    float right[4] = {0.2f, -0.8f, 0.2f, 0.5f};
+    vloom::TransportInfo transport{};
+    state->inserts[0].effects[0]->process(left, right, 4, transport);
+
+    CHECK(left[0] == Approx(0.6f));
+    CHECK(right[0] == Approx(0.6f));
+    CHECK(left[1] == Approx(0.0f));
+    CHECK(right[1] == Approx(0.0f));
+    CHECK(left[2] == Approx(-0.2f));
+    CHECK(right[2] == Approx(-0.2f));
+    CHECK(left[3] == Approx(0.25f));
+    CHECK(right[3] == Approx(0.25f));
+}

@@ -337,6 +337,74 @@ QDialog#pluginManager QHeaderView::section {
 }
 QDialog#pluginManager QProgressBar { background: @raised; border: none; border-radius: 2px; }
 QDialog#pluginManager QProgressBar::chunk { background: @accent; border-radius: 2px; }
+
+/* Studio One-style Project Loading Progress Dialog. */
+QDialog#projectLoadDialog { background: @window; }
+QFrame#projectLoadCard {
+    background: @panel;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+QLabel#projectLoadStep {
+    color: @text;
+    font-size: 10pt;
+    font-weight: 600;
+}
+QLabel#projectLoadDetail {
+    color: @textDim;
+    font-size: 8.5pt;
+}
+QProgressBar#projectLoadBar {
+    background: @base;
+    border: none;
+    border-radius: 3px;
+}
+QProgressBar#projectLoadBar::chunk {
+    background: @accent;
+    border-radius: 3px;
+}
+
+/* Studio One-style Add Tracks Dialog (Audio / Instrument). */
+QDialog#addTracksDialog { background: @window; }
+QFrame#addTracksTypeStrip {
+    background: @border;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+QToolButton#addTracksTypeCard {
+    background: @panel;
+    border: none;
+    border-radius: 7px;
+    color: @textDim;
+    font-size: 9.5pt;
+    font-weight: 700;
+    padding: 10px 12px 8px 12px;
+}
+QToolButton#addTracksTypeCard:hover {
+    background: @raised;
+    color: @text;
+}
+QToolButton#addTracksTypeCard:checked {
+    background: @accent;
+    color: @window;
+}
+QFrame#addTracksCard {
+    background: @panel;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+QDialog#addTracksDialog QLineEdit,
+QDialog#addTracksDialog QSpinBox {
+    background: @base;
+    border: 1px solid @border;
+    border-radius: 5px;
+    padding: 4px 8px;
+    color: @text;
+}
+QDialog#addTracksDialog QLineEdit:focus,
+QDialog#addTracksDialog QSpinBox:focus {
+    border-color: @accent;
+}
 QLineEdit#browserSearch {
     background: @window;
     border: 1px solid @border;
@@ -386,6 +454,9 @@ QFrame#panelButtonGroup QToolButton#panelSegment:pressed { background: @border; 
 QFrame#panelButtonGroup QToolButton#panelSegment:checked { background: @accentTint; }
 QScrollArea#channelRackScroll, QWidget#channelRackView { background: @window; }
 
+)"
+                                 // Split raw literal well under MSVC's 16 KB limit.
+                                 R"(
 /* Mixer panel (F9): the master strip has an accent outline; strips silenced
    by another insert's solo are dimmed. */
 QWidget#mixerPanel { background: @rail; }
@@ -414,11 +485,58 @@ QToolButton#muteButton, QToolButton#soloButton {
 QToolButton#muteButton:hover, QToolButton#soloButton:hover { border-color: @textDim; }
 QToolButton#muteButton:checked { background: @accentTint; color: @accent; border-color: @accent; }
 QToolButton#soloButton:checked { background: @playingTint; color: @playing; border-color: @playing; }
-/* A strip's FX rack (slots with bypass switches, FL Studio style). */
+/* A strip's FX rack (slots with bypass switches, FL Studio / Studio One style). */
 QFrame#fxRack {
     background: #14171a;
     border: 1px solid @border;
     border-radius: 3px;
+}
+QToolButton#mixerMiniAddBtn {
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: @textDim;
+    font-size: 9pt;
+    font-weight: 700;
+    padding: 0;
+}
+QToolButton#mixerMiniAddBtn:hover {
+    background: @raised;
+    color: @text;
+}
+QPushButton#mixerSourcePill, QPushButton#mixerOutputPill {
+    background: @base;
+    border: 1px solid @border;
+    border-radius: 3px;
+    color: @text;
+    font-size: 7.6pt;
+    font-weight: 600;
+    padding: 1px 4px;
+}
+QPushButton#mixerSourcePill:hover, QPushButton#mixerOutputPill:hover {
+    background: @raised;
+    border-color: @textDim;
+}
+QPushButton#mixerSourcePill[pillKind="instrument"] {
+    color: #fbbf24;
+    font-weight: 700;
+}
+QPushButton#mixerSourcePill[pillKind="bus"] {
+    color: #38bdf8;
+}
+QPushButton#mixerSourcePill[pillKind="fx"] {
+    color: #a78bfa;
+}
+QPushButton#mixerSourcePill[pillKind="aux"] {
+    color: #2dd4bf;
+}
+QPushButton#mixerSourcePill[pillKind="master"] {
+    color: @textDim;
+}
+QPushButton#mixerOutputPill[submix="true"] {
+    color: #38bdf8;
+    border-color: #38bdf8;
+    font-weight: 700;
 }
 /* A strip's FX button (MixerStrip::setEffectCount): accented while the track has effects. */
 QToolButton#stripEffects {

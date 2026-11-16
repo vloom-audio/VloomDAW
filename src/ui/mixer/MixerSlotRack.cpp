@@ -24,7 +24,7 @@ namespace vloomdaw {
 
 namespace {
 
-constexpr int kSwitchWidth = 14;
+constexpr int kSwitchWidth = 15;
 constexpr int kScrollbarStripWidth = 5;
 
 /// Left switch button of an FX slot: shows a green triangle when active,
@@ -76,12 +76,14 @@ protected:
             } else {
                 p.setBrush(QColor(0x55, 0x62, 0x5b)); // Dim grey-green ▶
             }
+            const double cy = height() * 0.5;
             QPolygonF triangle;
-            triangle << QPointF(3.5, 3.0) << QPointF(3.5, 11.0) << QPointF(10.0, 7.0);
+            triangle << QPointF(4.0, cy - 4.0) << QPointF(4.0, cy + 4.0) << QPointF(10.8, cy);
             p.drawPolygon(triangle);
         } else {
             p.setBrush(QColor(0x32, 0x36, 0x3a)); // Empty slot square ■
-            p.drawRect(QRectF(5.0, 5.0, 4.0, 4.0));
+            const double cy = height() * 0.5;
+            p.drawRect(QRectF(5.5, cy - 2.0, 4.0, 4.0));
         }
     }
 
@@ -184,7 +186,7 @@ protected:
         }
 
         QFont f = font();
-        f.setPointSize(8);
+        f.setPointSizeF(8.3);
         if (hasPlugin_) {
             if (!bypassed_) {
                 f.setWeight(QFont::Weight::DemiBold);

@@ -17,7 +17,7 @@ constexpr QLatin1StringView kOutputDeviceOccurrence{"audio/outputDeviceOccurrenc
 constexpr QLatin1StringView kSampleRate{"audio/sampleRate"};
 constexpr QLatin1StringView kBufferFrames{"audio/bufferFrames"};
 constexpr QLatin1StringView kStartPositionMode{"general/startPositionMode"};
-constexpr QLatin1StringView kMetronomeOnStartup{"general/metronomeOnStartup"};
+constexpr QLatin1StringView kMetronomeOnStartup{"general/startWithMetronome"};
 constexpr QLatin1StringView kBrowserFolders{"browser/folders"};
 constexpr QLatin1StringView kBrowserFolder{"browser/current"};
 constexpr QLatin1StringView kBrowserAutoPreview{"browser/autoPreview"};

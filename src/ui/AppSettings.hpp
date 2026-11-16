@@ -35,7 +35,7 @@ struct AppSettings {
 
     // General
     PositionMode startPositionMode = PositionMode::BarsBeats;
-    bool metronomeOnStartup = true;
+    bool metronomeOnStartup = false;
 
     // Theme: preset ids, tuning knobs and per-role colours (core/ThemePresets)
     ThemeChoice theme;

@@ -413,14 +413,24 @@ TEST_CASE("Untouched default playlist track names stay unnamed and renumber", "[
     CHECK_FALSE(p.tracks()[1].named);
 }
 
-TEST_CASE("The playlist keeps between one and the most tracks", "[project]")
+TEST_CASE(
+    "The playlist supports zero initial tracks, deleting down to zero, and growing to kMaxPlaylistTracks",
+    "[project]")
 {
+    Project empty(0);
+    CHECK(empty.tracks().empty());
+    CHECK(empty.dropTracks(0, 3) == std::vector<int>{0, 1, 2});
+    CHECK(empty.ensureDropTracks(0, 2) == std::vector<int>{0, 1});
+    REQUIRE(empty.tracks().size() == 2);
+    CHECK(empty.tracks()[0].name == "Track 1");
+    CHECK(empty.tracks()[1].name == "Track 2");
+
     Project p;
-    while (p.tracks().size() > 1)
+    while (!p.tracks().empty())
         p.removeTrack(0);
-    p.removeTrack(0); // the last one stays
-    CHECK(p.tracks().size() == 1);
-    CHECK(p.tracks()[0].name == "Track 1");
+    CHECK(p.tracks().empty());
+    p.removeTrack(0); // out of range on empty: safe no-op
+    CHECK(p.tracks().empty());
     while (p.addTrack()) { }
     CHECK(p.tracks().size() == static_cast<std::size_t>(Project::kMaxPlaylistTracks));
 }

@@ -6,6 +6,7 @@
 #include "core/TrackRouting.hpp"
 #include "ui/DroppedFiles.hpp"
 #include "ui/Theme.hpp"
+#include "ui/plugins/PluginDrag.hpp"
 #include "ui/widgets/ColorMenu/ColorMenu.hpp"
 #include "ui/widgets/Timeline/Timeline.hpp"
 
@@ -14,6 +15,7 @@
 #include <QFileInfo>
 #include <QHelpEvent>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMimeData>
@@ -53,6 +55,8 @@ constexpr int kExpandedInspectorHeight = 104;
 constexpr int kWaveTileWidth = 256;
 constexpr int kMaxWaveTiles = 384;
 constexpr int kMinSongBars = 32;
+constexpr int kBottomAddTrackSpace
+    = 116; ///< guaranteed empty space below the last track for right-clicking Add Track
 constexpr double kMinPixelsPerBar = 16.0;
 constexpr double kMaxPixelsPerBar = 400.0;
 
@@ -611,52 +615,66 @@ void PlaylistView::paintAudioClip(
 
 std::optional<std::pair<int, int>> PlaylistView::dropTarget(const QPoint& pos) const
 {
-    if (project_ == nullptr || !gridRect().contains(pos))
+    if (project_ == nullptr || pos.y() < timeline::kRulerHeight || pos.y() >= viewport()->height()
+        || pos.x() < 0 || pos.x() >= viewport()->width()) {
         return std::nullopt;
-    const int track = std::min(trackAt(pos.y()), trackCount());
-    return std::pair{track, std::max(0, snapDown(tickAt(pos.x()), snapTicks(Qt::NoModifier)))};
+    }
+    const int rawTrack = trackAt(pos.y());
+    const int track = rawTrack < 0 ? 0 : std::min(rawTrack, trackCount());
+    const int startTick
+        = pos.x() >= headerWidth_ ? std::max(0, snapDown(tickAt(pos.x()), snapTicks(Qt::NoModifier))) : 0;
+    return std::pair{track, startTick};
 }
 
 void PlaylistView::dragEnterEvent(QDragEnterEvent* event)
 {
-    if (project_ != nullptr && !droppedAudio(event->mimeData()).isEmpty())
+    if (project_ != nullptr
+        && (droppedPlugin(event->mimeData()).has_value() || !droppedAudio(event->mimeData()).isEmpty())) {
         event->acceptProposedAction();
-    else
+    } else {
         event->ignore();
+    }
 }
 
 void PlaylistView::dragMoveEvent(QDragMoveEvent* event)
 {
     syncLayout();
-    const QStringList files = droppedAudioFiles(event->mimeData());
-    const auto target = files.isEmpty() ? std::nullopt : dropTarget(event->position().toPoint());
+    const auto plug = droppedPlugin(event->mimeData());
+    const QStringList files = plug.has_value() ? QStringList{} : droppedAudioFiles(event->mimeData());
+    const qsizetype itemCount = plug.has_value() ? 1 : files.size();
+    const auto target = itemCount > 0 ? dropTarget(event->position().toPoint()) : std::nullopt;
     if (!target) {
         event->ignore();
         if (!dropHints_.empty()) {
             dropHints_.clear();
             lastDropTarget_.reset();
             lastDropCount_ = 0;
-            updateGrid();
+            viewport()->update();
         }
         return;
     }
     event->acceptProposedAction();
-    if (lastDropTarget_ == target && lastDropCount_ == files.size() && !dropHints_.empty())
+    if (lastDropTarget_ == target && lastDropCount_ == itemCount && !dropHints_.empty())
         return;
     lastDropTarget_ = target;
-    lastDropCount_ = files.size();
+    lastDropCount_ = itemCount;
 
     const double x = headerWidth_ + target->second * pixelsPerTick() - horizontalScrollBar()->value();
-    const std::vector<int> tracks
-        = project_->dropTracks(target->first, static_cast<std::size_t>(files.size()));
     dropHints_.clear();
-    dropHints_.reserve(tracks.size());
-    int lastTrack = -1;
-    for (const int t : tracks) {
-        if (t == lastTrack)
-            continue;
-        lastTrack = t;
-        dropHints_.emplace_back(x, yOfTrack(t), pixelsPerBar_, trackHeight(t));
+    if (plug.has_value()) {
+        const int t = std::clamp(target->first, 0, Project::kMaxPlaylistTracks - 1);
+        dropHints_.emplace_back(x, yOfTrack(t), pixelsPerBar_ * 2.0, trackHeight(t));
+    } else {
+        const std::vector<int> tracks
+            = project_->dropTracks(target->first, static_cast<std::size_t>(files.size()));
+        dropHints_.reserve(tracks.size());
+        int lastTrack = -1;
+        for (const int t : tracks) {
+            if (t == lastTrack)
+                continue;
+            lastTrack = t;
+            dropHints_.emplace_back(x, yOfTrack(t), pixelsPerBar_, trackHeight(t));
+        }
     }
     updateGrid();
 }
@@ -678,9 +696,19 @@ void PlaylistView::dropEvent(QDropEvent* event)
     lastDropTarget_.reset();
     lastDropCount_ = 0;
     updateGrid();
-    const QStringList paths = droppedAudioFiles(event->mimeData());
+
     const auto target = dropTarget(event->position().toPoint());
-    if (paths.isEmpty() || !target) {
+    if (!target) {
+        event->ignore();
+        return;
+    }
+    if (const auto plug = droppedPlugin(event->mimeData())) {
+        event->acceptProposedAction();
+        emit pluginDroppedOnPlaylist(*plug, target->first, target->second);
+        return;
+    }
+    const QStringList paths = droppedAudioFiles(event->mimeData());
+    if (paths.isEmpty()) {
         event->ignore();
         return;
     }
@@ -696,7 +724,7 @@ void PlaylistView::updateScrollBars()
     horizontalScrollBar()->setRange(
         0, std::max(0, static_cast<int>(lengthTicks() * pixelsPerTick()) - grid.width()));
     verticalScrollBar()->setPageStep(grid.height());
-    verticalScrollBar()->setRange(0, std::max(0, tops_.back() - grid.height()));
+    verticalScrollBar()->setRange(0, std::max(0, tops_.back() + kBottomAddTrackSpace - grid.height()));
 }
 
 void PlaylistView::resizeEvent(QResizeEvent* event)
@@ -917,29 +945,35 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
         }
     }
 
-    // Small waveform / pattern badge before the VU meter.
-    const auto primaryCh = trackPrimaryChannel(*project_, t);
+    // Small waveform / instrument keyboard badge before the VU meter.
+    std::optional<std::size_t> primaryCh = trackPrimaryChannel(*project_, t);
+    if (!primaryCh && pt.insert > 0)
+        primaryCh = insertPrimaryChannel(*project_, static_cast<std::size_t>(pt.insert));
     const QRect badge = trackBadgeRect(track);
     if (!badge.isEmpty() && primaryCh) {
         p.save();
         p.setRenderHint(QPainter::Antialiasing, true);
         const Channel& ch = project_->channels()[*primaryCh];
         const QColor badgeCol = pt.color ? toQColor(*pt.color).lighter(120) : c.textDim;
-        p.setPen(QPen(badgeCol, 1.2));
         const double bx = badge.left() + 1.0;
         const double bw = badge.width() - 2.0;
         const double cy = badge.center().y();
-        if (!ch.samplePath.empty()) {
+        if (ch.instrument.has_value()) {
+            // Mini Studio One piano keyboard glyph.
+            const QRectF kb(bx, cy - 4.5, bw, 9.0);
+            p.setPen(QPen(badgeCol, 1.1));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(kb, 1.2, 1.2);
+            p.fillRect(QRectF(bx + bw * 0.22, kb.top(), 1.8, 5.2), badgeCol);
+            p.fillRect(QRectF(bx + bw * 0.58, kb.top(), 1.8, 5.2), badgeCol);
+        } else {
             // Mini Studio One waveform glyph.
+            p.setPen(QPen(badgeCol, 1.2));
             QPolygonF waveGlyph;
             waveGlyph << QPointF(bx, cy) << QPointF(bx + bw * 0.2, cy - 4.0)
                       << QPointF(bx + bw * 0.38, cy + 3.5) << QPointF(bx + bw * 0.56, cy - 5.0)
                       << QPointF(bx + bw * 0.76, cy + 4.0) << QPointF(bx + bw, cy);
             p.drawPolyline(waveGlyph);
-        } else {
-            // Mini piano/MIDI step bars.
-            p.fillRect(QRectF(bx, cy - 3.0, bw * 0.45, 2.0), badgeCol);
-            p.fillRect(QRectF(bx + bw * 0.35, cy + 1.0, bw * 0.65, 2.0), badgeCol);
         }
         p.restore();
     }
@@ -1009,7 +1043,13 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
         QString chText = tr("No Channel · Assign…");
         if (primaryCh) {
             const Channel& ch = project_->channels()[*primaryCh];
-            const QString mode = ch.instrument ? tr("Instrument") : tr("Stereo");
+            bool isMono = false;
+            if (mixer_ != nullptr) {
+                const int ins = trackMixerInsert(*project_, *mixer_, t);
+                if (ins > 0 && static_cast<std::size_t>(ins) < mixer_->size())
+                    isMono = mixer_->track(static_cast<std::size_t>(ins)).mono;
+            }
+            const QString mode = ch.instrument ? tr("Instrument") : (isMono ? tr("Mono") : tr("Stereo"));
             chText = QStringLiteral("%1  ·  %2").arg(QString::fromStdString(ch.name), mode);
         }
         paintInspectorBox(p, chRow, tr("CH"), chText, primaryCh.has_value());
@@ -1026,8 +1066,13 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
                 routed = true;
             } else if (ins > 0 && static_cast<std::size_t>(ins) < mixer_->size()) {
                 const MixerTrack& mt = mixer_->track(static_cast<std::size_t>(ins));
-                outText = mt.named ? tr("Ins %1 · %2").arg(ins).arg(QString::fromStdString(mt.name))
-                                   : tr("Insert %1 → Master").arg(ins);
+                const QString dstName
+                    = (mt.output > 0 && static_cast<std::size_t>(mt.output) < mixer_->size())
+                    ? QString::fromStdString(mixer_->track(static_cast<std::size_t>(mt.output)).name)
+                    : tr("Main");
+                outText = mt.named
+                    ? tr("Ins %1 · %2 → %3").arg(ins).arg(QString::fromStdString(mt.name), dstName)
+                    : tr("Insert %1 → %2").arg(ins).arg(dstName);
                 routed = true;
             }
         }
@@ -1148,6 +1193,16 @@ void PlaylistView::paintEvent(QPaintEvent* event)
             }
         }
         p.setOpacity(1.0);
+        if (dropHints_.empty() && trackCount() == 0 && grid.width() > 220 && grid.height() > 90) {
+            QFont emptyFont = font();
+            emptyFont.setPointSizeF(emptyFont.pointSizeF() > 0 ? emptyFont.pointSizeF() * 0.92 : 9.5);
+            p.setFont(emptyFont);
+            QColor hintCol = c.textDim;
+            hintCol.setAlpha(155);
+            p.setPen(hintCol);
+            p.drawText(grid.adjusted(24, 0, -24, 0), Qt::AlignCenter | Qt::TextWordWrap,
+                tr("Right-click to Add Track (Ctrl+T), or drag Audio files & VSTi Instruments here"));
+        }
         if (!dropHints_.empty()) {
             QPen pen(c.accent, 1.5, Qt::DashLine);
             p.setPen(pen);
@@ -1235,6 +1290,30 @@ void PlaylistView::paintEvent(QPaintEvent* event)
                         const QRect h(0, yOfTrack(t), headerWidth_, trackHeight(t));
                         if (h.height() > 0 && h.intersects(dirtyHeaders))
                             paintTrackHeader(p, t);
+                    }
+                    // Subtle Studio One-style "+ Add Track" zone in the empty area below the last track.
+                    const int emptyTop = std::max(timeline::kRulerHeight, yOfTrack(trackCount()));
+                    const int emptyH = viewport()->height() - emptyTop;
+                    if (emptyH >= 28) {
+                        const QRect hintBox(10, emptyTop + 8, std::max(40, headerWidth_ - 20), 34);
+                        if (hintBox.intersects(dirtyHeaders)) {
+                            p.save();
+                            p.setRenderHint(QPainter::Antialiasing, true);
+                            QColor borderCol = c.border;
+                            borderCol.setAlpha(150);
+                            p.setPen(QPen(borderCol, 1.0, Qt::DashLine));
+                            QColor fillCol = c.window;
+                            fillCol.setAlpha(90);
+                            p.setBrush(fillCol);
+                            p.drawRoundedRect(QRectF(hintBox).adjusted(0.5, 0.5, -0.5, -0.5), 5.0, 5.0);
+                            QFont hintFont = font();
+                            hintFont.setPointSizeF(
+                                hintFont.pointSizeF() > 0 ? hintFont.pointSizeF() * 0.85 : 8.5);
+                            p.setFont(hintFont);
+                            p.setPen(c.textDim);
+                            p.drawText(hintBox, Qt::AlignCenter, tr("+ Right-click to Add Track"));
+                            p.restore();
+                        }
                     }
                 }
                 p.restore();
@@ -1628,6 +1707,31 @@ void PlaylistView::endPlayback()
     emit playbackReleased();
 }
 
+void PlaylistView::populateAddTrackActions(QMenu& menu, int afterTrack)
+{
+    const bool canAdd = project_ != nullptr
+        && project_->tracks().size() < static_cast<std::size_t>(Project::kMaxPlaylistTracks);
+    QAction* dlgAct = menu.addAction(Theme::icon(QStringLiteral("plus")), tr("Add Tracks…"), this,
+        [this, afterTrack] { emit addTracksDialogRequested(afterTrack); });
+    dlgAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_T));
+    dlgAct->setEnabled(canAdd);
+
+    QAction* monoAct
+        = menu.addAction(Theme::icon(QStringLiteral("track-audio")), tr("Add Audio Track (mono)"), this,
+            [this, afterTrack] { emit addAudioTrackRequested(afterTrack, true); });
+    monoAct->setEnabled(canAdd);
+
+    QAction* stereoAct
+        = menu.addAction(Theme::icon(QStringLiteral("track-audio")), tr("Add Audio Track (stereo)"), this,
+            [this, afterTrack] { emit addAudioTrackRequested(afterTrack, false); });
+    stereoAct->setEnabled(canAdd);
+
+    QAction* instAct
+        = menu.addAction(Theme::icon(QStringLiteral("track-instrument")), tr("Add Instrument Track"), this,
+            [this, afterTrack] { emit addInstrumentTrackRequested(afterTrack); });
+    instAct->setEnabled(canAdd);
+}
+
 void PlaylistView::mousePressEvent(QMouseEvent* event)
 {
     syncLayout();
@@ -1712,6 +1816,8 @@ void PlaylistView::mousePressEvent(QMouseEvent* event)
     if (const int track = headerTrackAt(pos); track >= 0 && event->button() == Qt::RightButton) {
         selectTrackByUser(track);
         QMenu menu(this);
+        populateAddTrackActions(menu, track);
+        menu.addSeparator();
         const auto t = static_cast<std::size_t>(track);
         menu.addAction(tr("Rename…"), this, [this, track] { startTrackNameEdit(track); });
         addColorMenu(menu, project_->tracks()[t].color,
@@ -1747,7 +1853,16 @@ void PlaylistView::mousePressEvent(QMouseEvent* event)
         QAction* remove
             = menu.addAction(tr("Delete “%1”").arg(QString::fromStdString(project_->tracks()[t].name)), this,
                 [this, t] { emit trackRemoveRequested(t); });
-        remove->setEnabled(trackCount() > 1);
+        remove->setEnabled(trackCount() > 0);
+        menu.exec(globalPos);
+        return;
+    }
+
+    // Right-click in empty track-header space below the last track (or on the top-left TRACKS header)
+    // opens the Studio One-style quick Add Track menu.
+    if (project_ != nullptr && event->button() == Qt::RightButton && pos.x() >= 0 && pos.x() < headerWidth_) {
+        QMenu menu(this);
+        populateAddTrackActions(menu, -1);
         menu.exec(globalPos);
         return;
     }
@@ -1784,6 +1899,12 @@ void PlaylistView::mousePressEvent(QMouseEvent* event)
             emit audioClipRemoved(hit->index);
         else if (hit)
             emit clipRemoved(hit->index);
+        else if (pos.y() >= yOfTrack(trackCount())) {
+            // Right-clicking in the empty timeline space below the last track also opens Add Track.
+            QMenu menu(this);
+            populateAddTrackActions(menu, -1);
+            menu.exec(globalPos);
+        }
         return;
     }
     if (event->button() != Qt::LeftButton)
@@ -1817,7 +1938,9 @@ void PlaylistView::mousePressEvent(QMouseEvent* event)
         }
     switch (tool_) {
     case Tool::Slice: {
-        const int track = std::clamp(trackAt(pos.y()), 0, std::max(0, trackCount() - 1));
+        if (trackCount() <= 0)
+            return;
+        const int track = std::clamp(trackAt(pos.y()), 0, trackCount() - 1);
         slicing_ = true;
         sliceLine_ = SliceLine{sliceTick(pos.x(), event->modifiers()), track, track};
         updateGrid();
@@ -2084,6 +2207,12 @@ void PlaylistView::mouseDoubleClickEvent(QMouseEvent* event)
     if (event->button() == Qt::LeftButton && onHeaderDivider(pos)) {
         resizingHeaderWidth_ = false;
         setHeaderWidth(kDefaultHeaderWidth);
+        return;
+    }
+    // Double-clicking empty space below the last track header opens the Add Tracks dialog.
+    if (project_ != nullptr && event->button() == Qt::LeftButton && pos.x() >= 0 && pos.x() < headerWidth_
+        && pos.y() >= std::max(timeline::kRulerHeight, yOfTrack(trackCount()))) {
+        emit addTracksDialogRequested(-1);
         return;
     }
     if (rulerRect().contains(pos) && event->button() == Qt::LeftButton) {

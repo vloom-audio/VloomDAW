@@ -28,8 +28,8 @@ class MixerSlotRack : public QFrame {
     Q_OBJECT
 
 public:
-    static constexpr int kSlotHeight = 14;
-    static constexpr int kMinVisibleSlots = 4;
+    static constexpr int kSlotHeight = 16;
+    static constexpr int kMinVisibleSlots = 1;
 
     explicit MixerSlotRack(QWidget* parent = nullptr);
 
