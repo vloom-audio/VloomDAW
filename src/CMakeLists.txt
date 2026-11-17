@@ -42,6 +42,9 @@ target_sources(vloomdaw_core PRIVATE
     core/TrackRouting.cpp
     core/TransportLayout.cpp
     core/UndoHistory.cpp
+    core/Minisign.cpp
+    core/UpdateFeed.cpp
+    core/Version.cpp
 
     # audio — owns the engine and the hardware device
     audio/AudioController.cpp
@@ -54,7 +57,7 @@ target_sources(vloomdaw_core PRIVATE
     audio/PluginHost.cpp
     audio/StemAudio.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(vloomdaw_core PUBLIC vloom::engine vloom::dsp PRIVATE vloomdaw::ffmpeg signalsmith-stretch nlohmann_json::nlohmann_json)
+target_link_libraries(vloomdaw_core PUBLIC vloom::engine vloom::dsp PRIVATE vloomdaw::ffmpeg signalsmith-stretch nlohmann_json::nlohmann_json monocypher)
 target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
 if(VLOOMDAW_STEMS_ONNX)
     # The model store offers the ONNX models only where the helper can run them.
@@ -183,6 +186,12 @@ qt_add_library(vloomdaw_ui STATIC
     ui/stems/StemModelStore.hpp
     ui/stems/StemSeparator.cpp
     ui/stems/StemSeparator.hpp
+    ui/update/UpdateDialog.cpp
+    ui/update/UpdateDialog.hpp
+    ui/update/UpdateInstaller.cpp
+    ui/update/UpdateInstaller.hpp
+    ui/update/UpdateService.cpp
+    ui/update/UpdateService.hpp
     ui/plugins/PluginsPanel.cpp
     ui/plugins/PluginsPanel.hpp
     ui/plugins/PluginStore.cpp
@@ -233,6 +242,25 @@ qt_add_library(vloomdaw_ui STATIC
     ui/widgets/ViewButtons/ViewButtons.hpp)
 # Qt6::Svg provides the SVG icon engine the icons below need at run time.
 target_link_libraries(vloomdaw_ui PUBLIC vloomdaw_core Qt6::Widgets Qt6::Svg PRIVATE Qt6::Network)
+
+# The minisign public key updates must be signed with (ui/update/UpdateService,
+# docs/releasing.md). Without the file the app still tells of new versions,
+# but only points to their page: it installs nothing it cannot check.
+set(VLOOMDAW_UPDATE_KEY_FILE "${PROJECT_SOURCE_DIR}/packaging/update/minisign.pub"
+    CACHE FILEPATH "minisign public key for signed updates")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${VLOOMDAW_UPDATE_KEY_FILE}")
+if(EXISTS "${VLOOMDAW_UPDATE_KEY_FILE}")
+    file(STRINGS "${VLOOMDAW_UPDATE_KEY_FILE}" update_key REGEX "^RW[A-Za-z0-9+/]+=*$")
+    list(LENGTH update_key update_key_count)
+    if(NOT update_key_count EQUAL 1)
+        message(FATAL_ERROR "${VLOOMDAW_UPDATE_KEY_FILE} is not a minisign public key")
+    endif()
+    message(STATUS "VloomDAW: updates are checked with the key in ${VLOOMDAW_UPDATE_KEY_FILE}")
+    set_property(SOURCE ui/update/UpdateService.cpp APPEND PROPERTY
+        COMPILE_DEFINITIONS "VLOOMDAW_UPDATE_PUBLIC_KEY=\"${update_key}\"")
+else()
+    message(STATUS "VloomDAW: no update signing key; the app will not install updates itself")
+endif()
 if(APPLE)
     target_sources(vloomdaw_ui PRIVATE ui/MacWindow.hpp ui/MacWindow.mm)
     target_link_libraries(vloomdaw_ui PRIVATE "-framework AppKit")

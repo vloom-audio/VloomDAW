@@ -49,6 +49,9 @@
 #include "ui/plugins/SynthEditorWindow.hpp"
 #include "ui/stems/StemModelStore.hpp"
 #include "ui/stems/StemSeparator.hpp"
+#include "ui/update/UpdateDialog.hpp"
+#include "ui/update/UpdateInstaller.hpp"
+#include "ui/update/UpdateService.hpp"
 #include "ui/widgets/ActivityBar/ActivityBar.hpp"
 #include "ui/widgets/DetachButton/DetachButton.hpp"
 #include "ui/widgets/FloatingPanel/FloatingPanel.hpp"
@@ -95,6 +98,7 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -125,6 +129,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <optional>
 #include <span>
@@ -287,6 +292,7 @@ MainWindow::MainWindow(AudioController& audio, QWidget* parent)
 
     createToolBars();
     createSettingsDialog();
+    createUpdates();
     createMenus();
     createCentralArea();
     createStatusBar();
@@ -510,6 +516,8 @@ void MainWindow::createMenus()
     connect(performanceAction_, &QAction::triggered, this, &MainWindow::setPerformanceOverlayVisible);
 
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
+    helpMenu->addAction(tr("Check for &Updates…"), this, [this] { checkForUpdates(true); });
+    helpMenu->addSeparator();
     helpMenu->addAction(tr("&About VloomDAW"), this, &MainWindow::showAbout);
 }
 
@@ -3431,6 +3439,17 @@ void MainWindow::createSettingsDialog()
         settings_.metronomeOnStartup = on;
         settings_.save();
     });
+    general->setCheckForUpdates(settings_.checkForUpdates);
+    general->setBetaUpdates(settings_.betaUpdates);
+    connect(general, &GeneralSettingsPage::checkForUpdatesChanged, this, [this](bool on) {
+        settings_.checkForUpdates = on;
+        settings_.save();
+    });
+    connect(general, &GeneralSettingsPage::betaUpdatesChanged, this, [this](bool on) {
+        settings_.betaUpdates = on;
+        settings_.save();
+    });
+    connect(general, &GeneralSettingsPage::checkForUpdatesNow, this, [this] { checkForUpdates(true); });
     connect(general, &GeneralSettingsPage::associateProjectFilesChanged, this, [this](bool on) {
         settings_.associateProjectFiles = on;
         settings_.save();
@@ -4922,10 +4941,13 @@ void MainWindow::saveWindowStateToSettings()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (!maybeSaveChanges()) {
+    // Installing an update: the project was saved (or discarded) already.
+    if (!quittingForUpdate_ && !maybeSaveChanges()) {
         event->ignore();
         return;
     }
+    if (updateDialog_ != nullptr)
+        updateDialog_->close();
 
     // A visible Settings window would otherwise keep the app running.
     settingsDialog_->close();
@@ -4944,6 +4966,10 @@ void MainWindow::closeEvent(QCloseEvent* event)
     if (mixerWindow_ != nullptr)
         mixerWindow_->hide();
     QMainWindow::closeEvent(event);
+    // Plugin editors and other tool windows must not keep the app (and so
+    // the files the installer replaces) alive.
+    if (quittingForUpdate_)
+        QTimer::singleShot(0, qApp, &QCoreApplication::quit);
 }
 
 // ---------------------------------------------------------------- behaviour
@@ -7740,6 +7766,105 @@ void MainWindow::showAbout()
 
     AboutDialog dlg(info, this);
     dlg.exec();
+}
+
+// ---------------------------------------------------------------- updates
+
+void MainWindow::createUpdates()
+{
+    updates_ = new UpdateService(this);
+    const auto status
+        = [this](const QString& text) { settingsDialog_->generalPage()->setUpdateStatus(text); };
+
+    connect(updates_, &UpdateService::updateAvailable, this, [this, status](const UpdateRelease& release) {
+        const bool manual = std::exchange(manualUpdateCheck_, false);
+        status(tr("VloomDAW %1 is available.").arg(QString::fromStdString(release.version.toString())));
+        if (!manual && QString::fromStdString(release.tag) == settings_.skippedUpdate)
+            return; // the user said not to offer this one again
+        showUpdate(release, manual);
+    });
+    connect(updates_, &UpdateService::upToDate, this, [this, status] {
+        const bool manual = std::exchange(manualUpdateCheck_, false);
+        status(tr("Up to date (checked %1).")
+                .arg(QLocale().toString(QDateTime::currentDateTime(), QLocale::ShortFormat)));
+        if (manual)
+            QMessageBox::information(this, tr("Software Update"),
+                tr("VloomDAW %1 is the newest version.").arg(QStringLiteral(VLOOMDAW_VERSION)));
+    });
+    connect(updates_, &UpdateService::checkFailed, this, [this, status](const QString& reason) {
+        const bool manual = std::exchange(manualUpdateCheck_, false);
+        status(tr("Could not check for updates: %1.").arg(reason));
+        if (manual)
+            QMessageBox::warning(
+                this, tr("Software Update"), tr("Could not check for updates: %1.").arg(reason));
+    });
+
+    // Automatic: soon after startup, then whenever a day has passed.
+    const auto due = [this] {
+        if (!settings_.checkForUpdates)
+            return;
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        const qint64 last = settings_.lastUpdateCheck;
+        if (last > 0 && last <= now && now - last < 24 * 60 * 60)
+            return;
+        checkForUpdates(false);
+    };
+    updateTimer_ = new QTimer(this);
+    updateTimer_->setInterval(std::chrono::hours(1));
+    connect(updateTimer_, &QTimer::timeout, this, due);
+    updateTimer_->start();
+    QTimer::singleShot(std::chrono::seconds(20), this, due);
+}
+
+void MainWindow::checkForUpdates(bool manual)
+{
+    if (updateDialog_ != nullptr) {
+        // An update is on offer already (perhaps downloading).
+        if (manual) {
+            updateDialog_->show();
+            updateDialog_->raise();
+            updateDialog_->activateWindow();
+        }
+        return;
+    }
+    if (updates_->busy()) {
+        manualUpdateCheck_ = manualUpdateCheck_ || manual;
+        return;
+    }
+    manualUpdateCheck_ = manual;
+    settings_.lastUpdateCheck = QDateTime::currentSecsSinceEpoch();
+    settings_.save();
+    settingsDialog_->generalPage()->setUpdateStatus(tr("Checking…"));
+    updates_->check(settings_.betaUpdates);
+}
+
+void MainWindow::showUpdate(const UpdateRelease& release, bool activate)
+{
+    if (updateDialog_ != nullptr)
+        return;
+    auto* dialog = new UpdateDialog(release, updates_, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &UpdateDialog::skipRequested, this, [this](const QString& tag) {
+        settings_.skippedUpdate = tag;
+        settings_.save();
+    });
+    connect(dialog, &UpdateDialog::installReady, this, &MainWindow::installUpdate);
+    updateDialog_ = dialog;
+    dialog->setAttribute(Qt::WA_ShowWithoutActivating, !activate);
+    dialog->show();
+}
+
+void MainWindow::installUpdate(const QString& installer)
+{
+    if (!maybeSaveChanges())
+        return; // the dialog stays; Install and Restart downloads it again
+    QString error;
+    if (!UpdateInstaller::start(installer, &error)) {
+        QMessageBox::warning(this, tr("Software Update"), tr("The update was not installed: %1").arg(error));
+        return;
+    }
+    quittingForUpdate_ = true;
+    close();
 }
 
 } // namespace vloomdaw

@@ -444,11 +444,11 @@ AboutDialog::AboutDialog(const AboutRuntimeInfo& runtime, QWidget* parent)
     ossTitle->setContentsMargins(0, 4, 0, 0);
     licLay->addWidget(ossTitle);
 
-    auto* ossBody = new QLabel(
-        tr("Powered by vloom-engine, vloom-dsp, Qt %1, FFmpeg, Signalsmith Stretch, and nlohmann/json.\n"
-           "VST is a registered trademark of Steinberg Media Technologies GmbH. "
-           "CLAP is developed by u-he and Bitwig.")
-            .arg(QString::fromLatin1(qVersion())),
+    auto* ossBody = new QLabel(tr("Powered by vloom-engine, vloom-dsp, Qt %1, FFmpeg, Signalsmith Stretch, "
+                                  "nlohmann/json, and Monocypher.\n"
+                                  "VST is a registered trademark of Steinberg Media Technologies GmbH. "
+                                  "CLAP is developed by u-he and Bitwig.")
+                                   .arg(QString::fromLatin1(qVersion())),
         licenseCard);
     ossBody->setWordWrap(true);
     ossBody->setStyleSheet(QStringLiteral("color: %1; font-size: 10.5px;").arg(c.textDim.name()));

@@ -6,6 +6,8 @@
 #include "ui/widgets/ToggleSwitch/ToggleSwitch.hpp"
 
 #include <QComboBox>
+#include <QLabel>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
@@ -40,10 +42,31 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
         associateFiles_);
 #endif
 
+    checkUpdates_ = new ToggleSwitch;
+    checkUpdates_->setAccessibleName(tr("Check for updates automatically"));
+    connect(checkUpdates_, &ToggleSwitch::toggled, this, &GeneralSettingsPage::checkForUpdatesChanged);
+    betaUpdates_ = new ToggleSwitch;
+    betaUpdates_->setAccessibleName(tr("Include beta versions"));
+    connect(betaUpdates_, &ToggleSwitch::toggled, this, &GeneralSettingsPage::betaUpdatesChanged);
+    checkNow_ = new QPushButton(tr("Check Now"));
+    connect(checkNow_, &QPushButton::clicked, this, &GeneralSettingsPage::checkForUpdatesNow);
+
+    auto* updates = new SettingsCard(tr("Updates"), this);
+    updates->addRow(tr("Check for updates automatically"),
+        tr("Once a day VloomDAW asks GitHub for a newer release (nothing about you is sent) and offers "
+           "to install it. Updates are installed only when you agree, and only if they carry the "
+           "VloomDAW developers' signature."),
+        checkUpdates_);
+    updates->addRow(tr("Include beta versions"),
+        tr("Also offer test versions of the next release. They may have rough edges."), betaUpdates_);
+    updateStatus_ = updates->addRow(
+        tr("VloomDAW %1").arg(QStringLiteral(VLOOMDAW_VERSION)), tr("Not checked yet."), checkNow_);
+
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(16);
     layout->addWidget(startup);
+    layout->addWidget(updates);
     layout->addStretch();
 }
 
@@ -66,5 +89,19 @@ void GeneralSettingsPage::setAssociateProjectFiles(bool on)
     const QSignalBlocker block(associateFiles_);
     associateFiles_->setChecked(on);
 }
+
+void GeneralSettingsPage::setCheckForUpdates(bool on)
+{
+    const QSignalBlocker block(checkUpdates_);
+    checkUpdates_->setChecked(on);
+}
+
+void GeneralSettingsPage::setBetaUpdates(bool on)
+{
+    const QSignalBlocker block(betaUpdates_);
+    betaUpdates_->setChecked(on);
+}
+
+void GeneralSettingsPage::setUpdateStatus(const QString& text) { updateStatus_->setText(text); }
 
 } // namespace vloomdaw
