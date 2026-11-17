@@ -52,6 +52,23 @@ CPMAddPackage(
     OPTIONS "JSON_BuildTests OFF" "JSON_Install OFF")
 set_target_properties(nlohmann_json PROPERTIES SYSTEM TRUE)
 
+# ---------------------------------------------------------------- Monocypher
+# Ed25519 and BLAKE2b to check the minisign signature of an update
+# (core/Minisign). CC0 or BSD-2-Clause, audited (Cure53, 2020). Two C files,
+# no build system of its own. Pinned to the commit of the 4.0.2 tag.
+CPMAddPackage(
+    NAME monocypher
+    GITHUB_REPOSITORY LoupVaillant/Monocypher
+    GIT_TAG 0d85f98c9d9b0227e42cf795cb527dff372b40a4 # 4.0.2
+    GIT_SHALLOW FALSE
+    DOWNLOAD_ONLY YES)
+add_library(monocypher STATIC
+    ${monocypher_SOURCE_DIR}/src/monocypher.c
+    ${monocypher_SOURCE_DIR}/src/optional/monocypher-ed25519.c)
+target_include_directories(monocypher SYSTEM PUBLIC
+    ${monocypher_SOURCE_DIR}/src ${monocypher_SOURCE_DIR}/src/optional)
+set_target_properties(monocypher PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # ---------------------------------------------------------------- FFmpeg
 include(${CMAKE_CURRENT_LIST_DIR}/FFmpeg.cmake)
 

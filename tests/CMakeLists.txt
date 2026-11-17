@@ -46,7 +46,10 @@ add_executable(vloomdaw_tests
     core/ThemePresetsTests.cpp
     core/TrackRoutingTests.cpp
     core/TransportLayoutTests.cpp
-    core/UndoHistoryTests.cpp)
+    core/UndoHistoryTests.cpp
+    core/MinisignTests.cpp
+    core/UpdateFeedTests.cpp
+    core/VersionTests.cpp)
 
 target_link_libraries(vloomdaw_tests PRIVATE vloomdaw_core Catch2::Catch2WithMain)
 vloomdaw_copy_ffmpeg_dlls(vloomdaw_tests)

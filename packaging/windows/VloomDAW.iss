@@ -76,3 +76,40 @@ Root: HKA; Subkey: "Software\Classes\VloomDAW.Project\shell\open\command"; Value
 
 [Run]
 Filename: "{app}\VloomDAW.exe"; Description: "{cm:LaunchProgram,VloomDAW}"; Flags: nowait postinstall skipifsilent
+; An update started by VloomDAW itself (ui/update/UpdateInstaller) runs
+; silently with /relaunch=1 and starts the new version when it is done.
+Filename: "{app}\VloomDAW.exe"; Flags: nowait runasoriginaluser; Check: RelaunchAfterUpdate
+
+[Code]
+// VloomDAW passes /waitpid=<its process id> when it updates itself: Setup
+// waits (at most two minutes) for it to exit, so no file is in use.
+function OpenProcess(Access: Cardinal; Inherit: Boolean; Pid: Cardinal): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: Cardinal): Cardinal;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+const
+  SYNCHRONIZE = $00100000;
+
+function InitializeSetup(): Boolean;
+var
+  Pid: Integer;
+  Process: THandle;
+begin
+  Pid := StrToIntDef(ExpandConstant('{param:waitpid|0}'), 0);
+  if Pid > 0 then begin
+    Process := OpenProcess(SYNCHRONIZE, False, Pid);
+    if Process <> 0 then begin
+      WaitForSingleObject(Process, 120000);
+      CloseHandle(Process);
+    end;
+  end;
+  Result := True;
+end;
+
+function RelaunchAfterUpdate(): Boolean;
+begin
+  Result := WizardSilent() and (ExpandConstant('{param:relaunch|0}') = '1');
+end;

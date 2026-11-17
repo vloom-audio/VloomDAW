@@ -38,6 +38,12 @@ struct AppSettings {
     bool metronomeOnStartup = false;
     bool associateProjectFiles = true; ///< Windows: register `.vloom` icon & double-click open
 
+    // Updates (ui/update)
+    bool checkForUpdates = true; ///< look for a new version once a day
+    bool betaUpdates = false; ///< also offer pre-releases (0.3.0-rc.1)
+    QString skippedUpdate; ///< tag the user chose to skip ("v0.3.0"); automatic checks pass it over
+    qint64 lastUpdateCheck = 0; ///< seconds since the epoch, UTC
+
     // Theme: preset ids, tuning knobs and per-role colours (core/ThemePresets)
     ThemeChoice theme;
 

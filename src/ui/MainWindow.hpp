@@ -81,6 +81,9 @@ class PluginEditorWindow;
 class PluginsPanel;
 class TransportBar;
 class WindowButtons;
+class UpdateDialog;
+class UpdateService;
+struct UpdateRelease;
 
 /// The main application window. Connects UI widgets to the AudioController.
 class MainWindow : public QMainWindow {
@@ -432,6 +435,15 @@ private:
     void updateRefreshRate();
     void showAbout();
 
+    // Updates (ui/update): an automatic check a day, Help > Check for Updates.
+    void createUpdates();
+    void checkForUpdates(bool manual);
+    /// `activate`: take the focus (a check the user asked for); an automatic
+    /// one appears without taking keys from the editors.
+    void showUpdate(const UpdateRelease& release, bool activate);
+    /// Saves the project, starts the installer and quits.
+    void installUpdate(const QString& installer);
+
     AudioController& audio_;
     MixerModel mixer_;
     Project project_{0};
@@ -486,6 +498,11 @@ private:
 
     TransportBar* transport_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
+    UpdateService* updates_ = nullptr;
+    QPointer<UpdateDialog> updateDialog_;
+    QTimer* updateTimer_ = nullptr; ///< hourly: checks once a day has passed since the last check
+    bool manualUpdateCheck_ = false; ///< the check under way was asked for: report its result
+    bool quittingForUpdate_ = false; ///< the installer runs: close without asking again
     QAction* closeProjectAction_ = nullptr;
     QAction* settingsAction_ = nullptr;
     ActivityBar* activityBar_ = nullptr;
