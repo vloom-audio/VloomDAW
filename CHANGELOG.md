@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-rc.1] - 2026-11-19
+
 ### Security
 - Refused UNC and network-share paths (`\\server\share\...`, `//server/share/...`) across `.vloom` plugin slots, relative sample resolution, project load/save/summary, CLI startup paths, recent projects, launcher file dialogs, and plugin scan folders/manual files (`ProjectFile`, `FilePaths`, `MainWindow`, `LauncherDialog`, `RecentProjects`, `PluginStore`, `PluginManagerDialog`, `main.cpp`) to prevent silent Windows SMB/NTLM credential leakage.
 - Hardened plugin thumbnail cache IDs and file lookups (`PluginMetadata::pluginThumbnailId`, `isValidPluginThumbnailId`, `PluginThumbnails`) against ill-formed non-UTF-8/unpaired-surrogate paths, `Builtin` vs. `Vst3` digest collisions, and directory traversal outside `thumbnails/`.
