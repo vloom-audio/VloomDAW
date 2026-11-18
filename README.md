@@ -113,7 +113,10 @@ ctest --preset dev
 ### 3. Launch VloomDAW
 
 * **macOS:** `open build/dev/src/VloomDAW.app`
-* **Linux / Windows:** `./build/dev/src/VloomDAW`
+* **Linux:** `./build/dev/bin/VloomDAW`
+* **Windows:** `build\dev\bin\VloomDAW.exe` (`build\dev\bin\Debug\` with the Visual Studio generator), after deploying Qt next to it once — see [docs/getting-started.md](docs/getting-started.md#3-build-test-run)
+
+The app and its helper programs (plugin probe, stem separator) land in `build/<preset>/bin/`, apart from CMake's own files.
 
 For platform-specific dependencies and IDE configuration, refer to **[docs/getting-started.md](docs/getting-started.md)**.
 

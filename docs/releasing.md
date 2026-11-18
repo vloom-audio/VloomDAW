@@ -8,6 +8,11 @@ Installers are built by GitHub Actions ([`release.yml`](../.github/workflows/rel
 | macOS 13+ (Apple silicon and Intel) | `VloomDAW-<version>-macos-universal.dmg` | `macdeployqt`, `hdiutil` |
 | Linux x86_64 (glibc 2.35+) | `VloomDAW-<version>-linux-x86_64.AppImage` | linuxdeploy + Qt plugin (pinned, SHA-256 checked) |
 
+On Windows the installed folder holds only `bin\` (`VloomDAW.exe`, its helper programs,
+every DLL, `qt.conf` and the Qt plugins in `bin\plugins`), `licenses\` and the uninstaller.
+The workflow stages exactly that with `cmake --install` and
+`windeployqt --plugindir stage/bin/plugins`, and Inno Setup installs the stage folder as it is.
+
 ## Making a release
 
 1. Update `VERSION` in the top-level `CMakeLists.txt` and the `CHANGELOG.md`
