@@ -165,6 +165,70 @@ void PlaylistView::setSelectedTrack(int track)
     repaintTrackRow(selectedTrack_);
 }
 
+void PlaylistView::setArmedTrack(int track)
+{
+    syncLayout();
+    const int next = (track >= 0 && track < trackCount()) ? track : -1;
+    if (next == armedTrack_)
+        return;
+    const int prev = armedTrack_;
+    armedTrack_ = next;
+    repaintTrackRow(prev);
+    repaintTrackRow(armedTrack_);
+}
+
+void PlaylistView::setMonitoredTrack(int track)
+{
+    syncLayout();
+    const int next = (track >= 0 && track < trackCount()) ? track : -1;
+    if (next == monitoredTrack_)
+        return;
+    const int prev = monitoredTrack_;
+    monitoredTrack_ = next;
+    repaintTrackRow(prev);
+    repaintTrackRow(monitoredTrack_);
+}
+
+void PlaylistView::setInputDeviceLabel(const QString& label)
+{
+    if (label == inputDeviceLabel_)
+        return;
+    inputDeviceLabel_ = label;
+    updateHeaders();
+}
+
+QRect PlaylistView::liveRecordingRect(const LiveRecordingView& rec) const
+{
+    if (rec.track < 0 || rec.track >= trackCount() || rec.endTick <= rec.startTick)
+        return {};
+    const int h = trackHeight(rec.track);
+    if (h <= 0)
+        return {};
+    const double ppt = pixelsPerTick();
+    const int scrollX = horizontalScrollBar()->value();
+    const int x1 = headerWidth_ + static_cast<int>(std::floor(rec.startTick * ppt)) - scrollX;
+    const int x2 = std::max(x1 + 4, headerWidth_ + static_cast<int>(std::ceil(rec.endTick * ppt)) - scrollX);
+    return QRect(x1, yOfTrack(rec.track), x2 - x1 + 2, h);
+}
+
+void PlaylistView::setLiveRecording(const std::optional<LiveRecordingView>& rec)
+{
+    syncLayout();
+    QRect dirty;
+    if (liveRecording_)
+        dirty = liveRecordingRect(*liveRecording_);
+    const int prevEnd = liveRecording_ ? static_cast<int>(liveRecording_->endTick) : 0;
+    liveRecording_ = rec;
+    if (liveRecording_) {
+        if (static_cast<int>(liveRecording_->endTick) / kTicksPerBar != prevEnd / kTicksPerBar)
+            updateScrollBars();
+        dirty = dirty.isEmpty() ? liveRecordingRect(*liveRecording_)
+                                : dirty.united(liveRecordingRect(*liveRecording_));
+    }
+    if (!dirty.isEmpty())
+        viewport()->update(dirty.intersected(gridRect()).adjusted(-2, -2, 2, 2));
+}
+
 void PlaylistView::selectTrackByUser(int track)
 {
     syncLayout();
@@ -327,7 +391,9 @@ void PlaylistView::updateTrackMeters(const std::vector<std::pair<float, float>>&
     for (std::size_t t = 0; t < n; ++t) {
         float peakL = 0.0f;
         float peakR = 0.0f;
-        if (project_->trackAudible(t) && mixer_ != nullptr) {
+        if ((project_->trackAudible(t) || static_cast<int>(t) == armedTrack_
+                || static_cast<int>(t) == monitoredTrack_)
+            && mixer_ != nullptr) {
             const int ins = trackMixerInsert(*project_, *mixer_, t);
             if (ins >= 0 && static_cast<std::size_t>(ins) < insertPeaks.size()) {
                 peakL = insertPeaks[static_cast<std::size_t>(ins)].first;
@@ -377,6 +443,8 @@ int PlaylistView::lengthTicks() const
     int end = kMinSongBars * kTicksPerBar;
     if (loopEnd_ > loopStart_)
         end = std::max(end, loopEnd_ + 8 * kTicksPerBar);
+    if (liveRecording_)
+        end = std::max(end, static_cast<int>(std::ceil(liveRecording_->endTick)) + 8 * kTicksPerBar);
     if (project_ != nullptr) {
         for (const Clip& clip : project_->clips())
             end = std::max(end, clip.start + project_->clipLength(clip) + 8 * kTicksPerBar);
@@ -836,6 +904,24 @@ void PlaylistView::paintPillButton(
     p.restore();
 }
 
+void PlaylistView::paintRecordArmButton(QPainter& p, const QRect& r, bool armed) const
+{
+    const Theme::Colors& c = Theme::colors();
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QColor fill = armed ? c.danger : c.window;
+    if (armed)
+        fill.setAlpha(65);
+    p.setPen(QPen(armed ? c.danger : c.border, 1));
+    p.setBrush(fill);
+    p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), 2.5, 2.5);
+
+    const QIcon armIcon
+        = Theme::icon(armed ? QStringLiteral("track-arm-active") : QStringLiteral("track-arm"));
+    armIcon.paint(&p, r.adjusted(2, 2, -2, -2));
+    p.restore();
+}
+
 void PlaylistView::paintInspectorBox(
     QPainter& p, const QRect& r, const QString& prefix, const QString& text, bool active) const
 {
@@ -960,9 +1046,27 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
         p.drawText(trackNumberRect(track), Qt::AlignCenter, QString::number(track + 1));
     }
 
-    // Studio One [M] & [S] buttons.
+    // Studio One [M], [S], [Record Arm] & [Input Monitor] buttons with Vloom SVG icons.
     paintPillButton(p, muteButtonRect(track), QStringLiteral("M"), pt.muted, c.accent);
     paintPillButton(p, soloButtonRect(track), QStringLiteral("S"), pt.solo, c.playing);
+    paintRecordArmButton(p, armButtonRect(track), track == armedTrack_);
+    {
+        const QRect monR = monitorButtonRect(track);
+        const bool monOn = track == monitoredTrack_;
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QColor fill = monOn ? c.accent : c.window;
+        if (monOn)
+            fill.setAlpha(55);
+        p.setPen(QPen(monOn ? c.accent : c.border, 1));
+        p.setBrush(fill);
+        p.drawRoundedRect(QRectF(monR).adjusted(0.5, 0.5, -0.5, -0.5), 2.5, 2.5);
+        const QIcon monIcon
+            = Theme::icon(monOn ? QStringLiteral("input-monitor-active") : QStringLiteral("input-monitor"));
+        const QRect iconR = monR.adjusted(2, 2, -2, -2);
+        monIcon.paint(&p, iconR);
+        p.restore();
+    }
 
     // Track name.
     if (track != editingTrack_ || inlineEditor_ == nullptr || !inlineEditor_->isVisible()) {
@@ -983,16 +1087,32 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
     std::optional<std::size_t> primaryCh = trackPrimaryChannel(*project_, t);
     if (!primaryCh && pt.insert > 0)
         primaryCh = insertPrimaryChannel(*project_, static_cast<std::size_t>(pt.insert));
+    const auto isMidiOrInstChannel = [&](std::size_t chIdx) {
+        const Channel& ch = project_->channels()[chIdx];
+        if (ch.instrument.has_value())
+            return true;
+        if (!ch.samplePath.empty())
+            return false;
+        for (const Clip& pc : project_->clips()) {
+            if (pc.track == track)
+                return true;
+        }
+        return std::any_of(
+            project_->patterns().begin(), project_->patterns().end(), [chIdx](const Pattern& pat) {
+                return chIdx < pat.channels.size()
+                    && (!pat.channels[chIdx].notes.empty() || !pat.channels[chIdx].controls.empty());
+            });
+    };
+    const bool isInstTrack = primaryCh && isMidiOrInstChannel(*primaryCh);
     const QRect badge = trackBadgeRect(track);
     if (!badge.isEmpty() && primaryCh) {
         p.save();
         p.setRenderHint(QPainter::Antialiasing, true);
-        const Channel& ch = project_->channels()[*primaryCh];
         const QColor badgeCol = pt.color ? toQColor(*pt.color).lighter(120) : c.textDim;
         const double bx = badge.left() + 1.0;
         const double bw = badge.width() - 2.0;
         const double cy = badge.center().y();
-        if (ch.instrument.has_value() || ch.samplePath.empty()) {
+        if (isInstTrack) {
             // Mini Studio One piano keyboard glyph (instrument or pure MIDI channel).
             const QRectF kb(bx, cy - 4.5, bw, 9.0);
             p.setPen(QPen(badgeCol, 1.1));
@@ -1074,6 +1194,7 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
     // Progressive expandable inspector rows when track is stretched taller.
     const QRect chRow = inspectorRowRect(track, 0);
     if (!chRow.isEmpty()) {
+        QString chPrefix = tr("CH");
         QString chText = tr("No Channel · Assign…");
         if (primaryCh) {
             const Channel& ch = project_->channels()[*primaryCh];
@@ -1083,12 +1204,27 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
                 if (ins > 0 && static_cast<std::size_t>(ins) < mixer_->size())
                     isMono = mixer_->track(static_cast<std::size_t>(ins)).mono;
             }
-            const QString mode = ch.instrument
-                ? tr("Instrument")
-                : (ch.samplePath.empty() ? tr("MIDI · No Instrument") : (isMono ? tr("Mono") : tr("Stereo")));
-            chText = QStringLiteral("%1  ·  %2").arg(QString::fromStdString(ch.name), mode);
+            if (ch.instrument) {
+                chText
+                    = QStringLiteral("%1  ·  %2")
+                          .arg(QString::fromStdString(ch.name), QString::fromStdString(ch.instrument->name));
+            } else if (isInstTrack) {
+                chText = QStringLiteral("%1  ·  %2")
+                             .arg(QString::fromStdString(ch.name), tr("MIDI · No Instrument"));
+            } else if (ch.samplePath.empty()) {
+                chPrefix = tr("IN");
+                if (!inputDeviceLabel_.isEmpty()) {
+                    chText = QStringLiteral("%1  ·  %2")
+                                 .arg(inputDeviceLabel_, isMono ? tr("Mono") : tr("Stereo (L+R)"));
+                } else {
+                    chText = isMono ? tr("Audio Input · Mono") : tr("Audio Input · Stereo (L+R)");
+                }
+            } else {
+                const QString mode = isMono ? tr("Mono") : tr("Stereo");
+                chText = QStringLiteral("%1  ·  %2").arg(QString::fromStdString(ch.name), mode);
+            }
         }
-        paintInspectorBox(p, chRow, tr("CH"), chText, primaryCh.has_value());
+        paintInspectorBox(p, chRow, chPrefix, chText, primaryCh.has_value());
     }
 
     const QRect routeRow = inspectorRowRect(track, 1);
@@ -1120,6 +1256,103 @@ void PlaylistView::paintTrackHeader(QPainter& p, int track) const
 
     // Bottom divider line.
     p.fillRect(QRect(0, h.bottom(), headerWidth_, 1), c.border);
+}
+
+void PlaylistView::paintLiveRecording(QPainter& p, const QRect& clipArea) const
+{
+    if (!liveRecording_)
+        return;
+    const LiveRecordingView& rec = *liveRecording_;
+    const QRect raw = liveRecordingRect(rec);
+    if (raw.isEmpty() || !raw.intersects(clipArea))
+        return;
+
+    const Theme::Colors& c = Theme::colors();
+    const QRectF r = QRectF(raw).adjusted(0.5, 1.0, -1.5, -2.0);
+    if (r.width() <= 1.0 || r.height() <= 4.0)
+        return;
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    QColor bodyBg = c.danger;
+    bodyBg.setAlpha(46);
+    p.fillRect(r, c.window);
+    p.fillRect(r, bodyBg);
+
+    const double headerH = std::min(15.0, r.height() * 0.36);
+    QColor headerBg = c.danger;
+    headerBg.setAlpha(215);
+    p.fillRect(QRectF(r.left(), r.top(), r.width(), headerH), headerBg);
+
+    if (r.width() > 28.0 && headerH >= 11.0) {
+        QFont hf = font();
+        hf.setPointSizeF(hf.pointSizeF() > 0 ? hf.pointSizeF() * 0.78 : 7.5);
+        hf.setBold(true);
+        p.setFont(hf);
+        p.setPen(c.text);
+        const QString title
+            = rec.label.isEmpty() ? tr("● Recording…") : tr("● %1 · Recording…").arg(rec.label);
+        const QRectF trRect(r.left() + 5.0, r.top(), std::max(0.0, r.width() - 10.0), headerH);
+        p.drawText(trRect, Qt::AlignLeft | Qt::AlignVCenter,
+            p.fontMetrics().elidedText(title, Qt::ElideRight, static_cast<int>(trRect.width())));
+    }
+
+    // Real-time live growing waveform ("สเกลคลื่นเสียงขณะอัด").
+    const QRectF waveArea(r.left() + 1.0, r.top() + headerH + 1.0, std::max(0.0, r.width() - 2.0),
+        std::max(0.0, r.height() - headerH - 2.0));
+    if (waveArea.height() >= 6.0 && waveArea.width() >= 1.0) {
+        const double midY = waveArea.center().y();
+        const double halfH = waveArea.height() * 0.46;
+
+        QColor zeroLine = c.danger;
+        zeroLine.setAlpha(85);
+        p.setPen(QPen(zeroLine, 1.0));
+        p.drawLine(QPointF(waveArea.left(), midY), QPointF(waveArea.right(), midY));
+
+        if (rec.peaks != nullptr && !rec.peaks->empty() && rec.peakSeconds > 0.0 && tempo_ > 0.0) {
+            const auto& peaks = *rec.peaks;
+            const int xStart = std::max(static_cast<int>(std::floor(waveArea.left())), clipArea.left());
+            const int xEnd = std::min(static_cast<int>(std::ceil(waveArea.right())), clipArea.right());
+            const double ppt = pixelsPerTick();
+            const int scrollX = horizontalScrollBar()->value();
+
+            QColor waveFill = c.danger.lighter(135);
+            waveFill.setAlpha(210);
+            p.setRenderHint(QPainter::Antialiasing, false);
+            const double secPerTick = 60.0 / (tempo_ * static_cast<double>(kTicksPerBeat));
+            for (int x = xStart; x < xEnd; ++x) {
+                const double t0
+                    = std::max(0.0, (static_cast<double>(x - headerWidth_ + scrollX) / ppt) - rec.startTick);
+                const double t1 = std::max(
+                    t0, (static_cast<double>(x + 1 - headerWidth_ + scrollX) / ppt) - rec.startTick);
+                const double s0 = t0 * secPerTick;
+                const double s1 = t1 * secPerTick;
+                const auto i0 = static_cast<std::size_t>(std::floor(s0 / rec.peakSeconds));
+                if (i0 >= peaks.size())
+                    break;
+                const auto i1 = std::min(peaks.size(),
+                    std::max(i0 + 1, static_cast<std::size_t>(std::ceil(s1 / rec.peakSeconds))));
+                float pk = 0.0f;
+                for (std::size_t k = i0; k < i1; ++k)
+                    pk = std::max(pk, peaks[k]);
+                const double amp = std::clamp(static_cast<double>(pk), 0.0, 1.0) * halfH;
+                if (amp >= 0.5) {
+                    const int yTop = static_cast<int>(std::floor(midY - amp));
+                    const int yBot = static_cast<int>(std::ceil(midY + amp));
+                    p.fillRect(x, yTop, 1, std::max(1, yBot - yTop), waveFill);
+                }
+            }
+            p.setRenderHint(QPainter::Antialiasing, true);
+        }
+    }
+
+    QColor borderCol = c.danger.lighter(115);
+    borderCol.setAlpha(235);
+    p.setPen(QPen(borderCol, 1.4));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(r, 3.0, 3.0);
+    p.restore();
 }
 
 void PlaylistView::paintEvent(QPaintEvent* event)
@@ -1337,6 +1570,7 @@ void PlaylistView::paintEvent(QPaintEvent* event)
             }
         }
         p.setOpacity(1.0);
+        paintLiveRecording(p, area);
         if (dropHints_.empty() && trackCount() == 0 && grid.width() > 220 && grid.height() > 90) {
             QFont emptyFont = font();
             emptyFont.setPointSizeF(emptyFont.pointSizeF() > 0 ? emptyFont.pointSizeF() * 0.92 : 9.5);
@@ -1651,6 +1885,26 @@ bool PlaylistView::viewportEvent(QEvent* event)
                     help->globalPos(), tr("Solo: only solo tracks (and their sub-tracks) play"), viewport());
                 return true;
             }
+            if (armButtonRect(track).contains(help->pos())) {
+                const QString devInfo = inputDeviceLabel_.isEmpty()
+                    ? tr("right-click to select microphone")
+                    : tr("Input: %1 — right-click to switch").arg(inputDeviceLabel_);
+                QToolTip::showText(help->globalPos(),
+                    tr("Record Arm (%1): arm this track to record live Audio or MIDI when pressing Play")
+                        .arg(devInfo),
+                    viewport());
+                return true;
+            }
+            if (monitorButtonRect(track).contains(help->pos())) {
+                const QString devInfo = inputDeviceLabel_.isEmpty()
+                    ? tr("right-click to select microphone")
+                    : tr("Input: %1 — right-click to switch").arg(inputDeviceLabel_);
+                QToolTip::showText(help->globalPos(),
+                    tr("Input Monitor (%1): hear live audio input through this track's Mixer FX chain")
+                        .arg(devInfo),
+                    viewport());
+                return true;
+            }
             if (volumeBarRect(track).contains(help->pos())) {
                 const double vol = mixer_ != nullptr ? trackMixVolume(*project_, *mixer_, t)
                                                      : project_->tracks()[t].volume;
@@ -1756,10 +2010,22 @@ QRect PlaylistView::soloButtonRect(int track) const
         kTrackButton};
 }
 
+QRect PlaylistView::armButtonRect(int track) const
+{
+    return {soloButtonRect(track).right() + kTrackButtonGap + 1, headerTopRowY(track), kTrackButton,
+        kTrackButton};
+}
+
+QRect PlaylistView::monitorButtonRect(int track) const
+{
+    return {
+        armButtonRect(track).right() + kTrackButtonGap + 1, headerTopRowY(track), kTrackButton, kTrackButton};
+}
+
 QRect PlaylistView::trackBadgeRect(int track) const
 {
     const int rightEdge = headerWidth_ - kMeterAreaWidth - 4;
-    if (rightEdge - kBadgeSize <= soloButtonRect(track).right() + 36)
+    if (rightEdge - kBadgeSize <= monitorButtonRect(track).right() + 36)
         return {};
     return {rightEdge - kBadgeSize, headerTopRowY(track) + (kTrackButton - kBadgeSize) / 2, kBadgeSize,
         kBadgeSize};
@@ -1767,7 +2033,7 @@ QRect PlaylistView::trackBadgeRect(int track) const
 
 QRect PlaylistView::trackNameRect(int track) const
 {
-    const int left = soloButtonRect(track).right() + 6;
+    const int left = monitorButtonRect(track).right() + 6;
     const QRect badge = trackBadgeRect(track);
     const int right = badge.isEmpty() ? headerWidth_ - kMeterAreaWidth - 4 : badge.left() - 4;
     return {left, headerTopRowY(track) - 1, std::max(0, right - left), kTrackButton + 2};
@@ -1846,6 +2112,14 @@ bool PlaylistView::handleTrackHeaderClick(int track, const QPoint& pos, const QP
     }
     if (soloButtonRect(track).contains(pos)) {
         emit trackSoloToggled(t, !project_->tracks()[t].solo);
+        return true;
+    }
+    if (armButtonRect(track).contains(pos)) {
+        emit trackRecordArmToggled(t, track != armedTrack_);
+        return true;
+    }
+    if (monitorButtonRect(track).contains(pos)) {
+        emit trackMonitorToggled(t, track != monitoredTrack_);
         return true;
     }
     if (const QRect r0 = inspectorRowRect(track, 0); !r0.isEmpty() && r0.contains(pos)) {
@@ -2060,15 +2334,28 @@ void PlaylistView::mousePressEvent(QMouseEvent* event)
 
     if (const int track = headerTrackAt(pos); track >= 0 && event->button() == Qt::RightButton) {
         selectTrackByUser(track);
+        const auto t = static_cast<std::size_t>(track);
+        if (armButtonRect(track).contains(pos) || monitorButtonRect(track).contains(pos)) {
+            emit trackChannelMenuRequested(t, globalPos);
+            return;
+        }
         QMenu menu(this);
         populateAddTrackActions(menu, track);
         menu.addSeparator();
-        const auto t = static_cast<std::size_t>(track);
         menu.addAction(tr("Rename…"), this, [this, track] { startTrackNameEdit(track); });
         addColorMenu(menu, project_->tracks()[t].color,
             [this, t](std::optional<std::uint32_t> color) { emit trackColorChanged(t, color); });
         menu.addSeparator();
-        menu.addAction(tr("Channel / Source…"), this,
+        QAction* armAct = menu.addAction(
+            tr("Record Arm"), this, [this, t](bool on) { emit trackRecordArmToggled(t, on); });
+        armAct->setCheckable(true);
+        armAct->setChecked(track == armedTrack_);
+        QAction* monAct = menu.addAction(
+            tr("Monitor Audio Input"), this, [this, t](bool on) { emit trackMonitorToggled(t, on); });
+        monAct->setCheckable(true);
+        monAct->setChecked(track == monitoredTrack_);
+        menu.addSeparator();
+        menu.addAction(tr("Audio Input / Source…"), this,
             [this, t, globalPos] { emit trackChannelMenuRequested(t, globalPos); });
         menu.addAction(tr("Mixer Insert Routing…"), this,
             [this, t, globalPos] { emit trackRoutingMenuRequested(t, globalPos); });

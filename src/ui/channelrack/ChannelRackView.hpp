@@ -69,6 +69,8 @@ signals:
     void addBarRequested();
     /// A colour (0xRRGGBB) was picked for `channel` (right-click its name); nullopt: none.
     void channelColorChanged(std::size_t channel, std::optional<std::uint32_t> color);
+    /// Full channel context menu requested at `globalPos`.
+    void channelMenuRequested(std::size_t channel, const QPoint& globalPos);
 
 protected:
     void paintEvent(QPaintEvent* event) override;

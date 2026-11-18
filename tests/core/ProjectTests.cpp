@@ -797,3 +797,62 @@ TEST_CASE("Non-finite infinity inputs are rejected by track and channel setters 
     CHECK(restored.tracks()[0].volume == 0.8);
     CHECK(restored.tracks()[0].pan == 0.0);
 }
+
+TEST_CASE(
+    "Channel noteEffects, pluginOutputs, notesFrom and pattern ControlPoints clamp and remap", "[project]")
+{
+    Project p;
+    // ControlPoints: clamped, grow patternLength, mark pattern non-empty, and split by channel.
+    CHECK(p.isPatternEmpty(0));
+    p.setControls(0, 1,
+        {
+            ControlPoint{-10, ControlKind::PitchBend, 99, -2.5, 20},
+            ControlPoint{kTicksPerBar + 120, ControlKind::Controller, 1, 1.5, -3},
+        });
+    CHECK_FALSE(p.isPatternEmpty(0));
+    CHECK(p.patternLength(0) == 2 * kTicksPerBar);
+    const auto* ctrls = p.controls(0, 1);
+    REQUIRE(ctrls != nullptr);
+    REQUIRE(ctrls->size() == 2);
+    CHECK((*ctrls)[0].start == 0);
+    CHECK((*ctrls)[0].value == -1.0);
+    CHECK((*ctrls)[0].midiChannel == 15);
+    CHECK((*ctrls)[1].start == kTicksPerBar + 120);
+    CHECK((*ctrls)[1].number == 1);
+    CHECK((*ctrls)[1].value == 1.0);
+    CHECK((*ctrls)[1].midiChannel == 0);
+
+    const auto split = p.splitPatternByChannel(0);
+    REQUIRE(split.size() == 1);
+    CHECK(*p.controls(split[0], 1) == *ctrls);
+
+    // Note effects cap at kMaxNoteEffects (8).
+    for (std::size_t i = 0; i < Project::kMaxNoteEffects; ++i) {
+        PluginSlot fx;
+        fx.name = "Arp " + std::to_string(i);
+        CHECK(p.addChannelNoteEffect(0, fx));
+    }
+    CHECK_FALSE(p.addChannelNoteEffect(0, PluginSlot{}));
+    p.setChannelNoteEffectBypassed(0, 2, true);
+    CHECK(p.channels()[0].noteEffects[2].bypassed);
+    CHECK(p.removeChannelNoteEffect(0, 0));
+    CHECK(p.channels()[0].noteEffects.size() == Project::kMaxNoteEffects - 1);
+
+    // Multi-outputs remap when inserts move or are deleted, and trim trailing -1s.
+    p.setChannelPluginOutputs(0, {2, 4, -1, -1});
+    REQUIRE(p.channels()[0].pluginOutputs == std::vector<int>{2, 4});
+    p.moveInsert(2, 3);
+    CHECK(p.channels()[0].pluginOutputs == std::vector<int>{3, 4});
+    p.removeInsert(3);
+    CHECK(p.channels()[0].pluginOutputs == std::vector<int>{-1, 3});
+    p.removeInsert(3);
+    CHECK(p.channels()[0].pluginOutputs.empty());
+
+    // notesFrom rejects self and out-of-range indices.
+    p.setChannelNotesFrom(1, 0);
+    CHECK(p.channels()[1].notesFrom == 0);
+    p.setChannelNotesFrom(1, 1);
+    CHECK(p.channels()[1].notesFrom == -1);
+    p.setChannelNotesFrom(1, 99);
+    CHECK(p.channels()[1].notesFrom == -1);
+}

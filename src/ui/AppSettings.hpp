@@ -3,6 +3,7 @@
 #pragma once
 
 #include "core/AudioFormat.hpp"
+#include "core/AudioIoSetup.hpp"
 #include "core/ThemePresets.hpp"
 
 #include <QString>
@@ -15,11 +16,16 @@ namespace vloomdaw {
 struct AppSettings {
     enum class PositionMode { BarsBeats = 0, Time = 1 };
 
-    // Audio
+    // Audio & MIDI I/O
     QString outputDevice; ///< device name; empty = system default
     int outputDeviceOccurrence = 1; ///< which device of that name (see DeviceRef)
+    bool inputEnabled = false; ///< false = audio input disabled; true = open `inputDevice` (empty = default)
+    QString inputDevice; ///< audio input device name; empty = system default
+    int inputDeviceOccurrence = 1;
+    QString midiInputDevice; ///< MIDI input port name; empty = none
     int sampleRate = kDefaultSampleRate;
     int bufferFrames = kDefaultBufferFrames;
+    AudioIoConfig ioConfig = defaultAudioIoConfig();
 
     // Browser
     QStringList browserFolders; ///< the user's sample folders

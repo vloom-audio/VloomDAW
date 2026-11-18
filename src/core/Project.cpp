@@ -45,7 +45,12 @@ Project Project::restored(const std::vector<Channel>& channels, const std::vecto
         p.setChannelInsert(c, in.insert);
         p.setChannelColor(c, in.color);
         p.setChannelInstrument(c, in.instrument);
+        for (const PluginSlot& ne : in.noteEffects)
+            (void)p.addChannelNoteEffect(c, ne);
+        p.setChannelPluginOutputs(c, in.pluginOutputs);
     }
+    for (std::size_t c = 0; c < channels.size() && c < p.channels_.size(); ++c)
+        p.setChannelNotesFrom(c, channels[c].notesFrom);
 
     for (const Pattern& in : patterns) {
         if (p.patterns_.size() >= kMaxPatterns)
@@ -62,9 +67,14 @@ Project Project::restored(const std::vector<Channel>& channels, const std::vecto
             const ChannelPattern& saved = in.channels[c];
             for (std::size_t s = 0; s < saved.steps.size() && s < out.steps.size(); ++s)
                 out.steps[s] = saved.steps[s];
-            out.notes.reserve(saved.notes.size());
-            for (const Note& note : saved.notes)
-                out.notes.push_back(clamped(note));
+            const std::size_t noteCap = std::min(saved.notes.size(), kMaxPatternNotes);
+            out.notes.reserve(noteCap);
+            for (std::size_t n = 0; n < noteCap; ++n)
+                out.notes.push_back(clamped(saved.notes[n]));
+            const std::size_t ctrlCap = std::min(saved.controls.size(), kMaxPatternNotes);
+            out.controls.reserve(ctrlCap);
+            for (std::size_t k = 0; k < ctrlCap; ++k)
+                out.controls.push_back(clamped(saved.controls[k]));
         }
         p.patterns_.push_back(std::move(pattern));
     }
@@ -133,6 +143,83 @@ void Project::setChannelInstrument(std::size_t channel, std::optional<PluginSlot
         channels_[channel].instrument = std::move(instrument);
 }
 
+bool Project::addChannelNoteEffect(std::size_t channel, PluginSlot effect)
+{
+    if (channel >= channels_.size() || channels_[channel].noteEffects.size() >= kMaxNoteEffects)
+        return false;
+    channels_[channel].noteEffects.push_back(std::move(effect));
+    return true;
+}
+
+bool Project::replaceChannelNoteEffect(std::size_t channel, std::size_t slot, PluginSlot effect)
+{
+    if (channel >= channels_.size() || slot >= channels_[channel].noteEffects.size())
+        return false;
+    channels_[channel].noteEffects[slot] = std::move(effect);
+    return true;
+}
+
+bool Project::removeChannelNoteEffect(std::size_t channel, std::size_t slot)
+{
+    if (channel >= channels_.size() || slot >= channels_[channel].noteEffects.size())
+        return false;
+    channels_[channel].noteEffects.erase(
+        channels_[channel].noteEffects.begin() + static_cast<std::ptrdiff_t>(slot));
+    return true;
+}
+
+void Project::setChannelNoteEffectBypassed(std::size_t channel, std::size_t slot, bool bypassed)
+{
+    if (channel < channels_.size() && slot < channels_[channel].noteEffects.size())
+        channels_[channel].noteEffects[slot].bypassed = bypassed;
+}
+
+void Project::setChannelNoteEffects(std::size_t channel, std::vector<PluginSlot> effects)
+{
+    if (channel >= channels_.size())
+        return;
+    if (effects.size() > kMaxNoteEffects)
+        effects.resize(kMaxNoteEffects);
+    channels_[channel].noteEffects = std::move(effects);
+}
+
+void Project::setChannelPluginOutputs(std::size_t channel, std::vector<int> outputs)
+{
+    if (channel >= channels_.size())
+        return;
+    if (outputs.size() > kMaxExtraOutputs)
+        outputs.resize(kMaxExtraOutputs);
+    for (int& ins : outputs)
+        ins = std::max(ins, -1);
+    while (!outputs.empty() && outputs.back() < 0)
+        outputs.pop_back();
+    channels_[channel].pluginOutputs = std::move(outputs);
+}
+
+void Project::setChannelPluginOutput(std::size_t channel, std::size_t outputIndex, int insert)
+{
+    if (channel >= channels_.size() || outputIndex >= kMaxExtraOutputs)
+        return;
+    auto& outs = channels_[channel].pluginOutputs;
+    if (outputIndex >= outs.size())
+        outs.resize(outputIndex + 1, -1);
+    outs[outputIndex] = std::max(insert, -1);
+    while (!outs.empty() && outs.back() < 0)
+        outs.pop_back();
+}
+
+void Project::setChannelNotesFrom(std::size_t channel, int sourceChannel)
+{
+    if (channel >= channels_.size())
+        return;
+    if (sourceChannel < 0 || static_cast<std::size_t>(sourceChannel) >= channels_.size()
+        || static_cast<std::size_t>(sourceChannel) == channel) {
+        channels_[channel].notesFrom = -1;
+        return;
+    }
+    channels_[channel].notesFrom = sourceChannel;
+}
+
 void Project::setChannelName(std::size_t channel, const std::string& name)
 {
     if (channel < channels_.size())
@@ -175,6 +262,14 @@ std::size_t Project::removeInsert(int insert)
         } else if (c.insert > insert) {
             --c.insert;
         }
+        for (int& out : c.pluginOutputs) {
+            if (out == insert)
+                out = -1;
+            else if (out > insert)
+                --out;
+        }
+        while (!c.pluginOutputs.empty() && c.pluginOutputs.back() < 0)
+            c.pluginOutputs.pop_back();
     }
     for (PlaylistTrack& t : tracks_) {
         if (t.insert == insert)
@@ -189,10 +284,15 @@ void Project::moveInsert(int from, int to)
 {
     if (from < 1 || to < 1 || from == to)
         return;
-    for (Channel& c : channels_)
+    for (Channel& c : channels_) {
         if (c.insert >= 1)
             c.insert = static_cast<int>(movedIndex(static_cast<std::size_t>(c.insert),
                 static_cast<std::size_t>(from), static_cast<std::size_t>(to)));
+        for (int& out : c.pluginOutputs)
+            if (out >= 1)
+                out = static_cast<int>(movedIndex(static_cast<std::size_t>(out),
+                    static_cast<std::size_t>(from), static_cast<std::size_t>(to)));
+    }
     for (PlaylistTrack& t : tracks_)
         if (t.insert >= 1)
             t.insert = static_cast<int>(movedIndex(static_cast<std::size_t>(t.insert),
@@ -293,7 +393,7 @@ bool Project::isPatternEmpty(std::size_t pattern) const
         return false;
     return std::all_of(
         patterns_[pattern].channels.begin(), patterns_[pattern].channels.end(), [](const ChannelPattern& cp) {
-            return cp.notes.empty()
+            return cp.notes.empty() && cp.controls.empty()
                 && std::none_of(cp.steps.begin(), cp.steps.end(), [](bool on) { return on; });
         });
 }
@@ -335,7 +435,8 @@ std::vector<std::size_t> Project::splitPatternByChannel(std::size_t pattern)
     std::size_t at = pattern + 1;
     for (std::size_t ch = 0; ch < source.channels.size() && ch < channels_.size(); ++ch) {
         const ChannelPattern& cp = source.channels[ch];
-        if (cp.notes.empty() && std::none_of(cp.steps.begin(), cp.steps.end(), [](bool on) { return on; }))
+        if (cp.notes.empty() && cp.controls.empty()
+            && std::none_of(cp.steps.begin(), cp.steps.end(), [](bool on) { return on; }))
             continue;
         Pattern part = emptyPattern(source.name + " - " + channels_[ch].name);
         part.steps = source.steps; // same length as the original
@@ -381,9 +482,12 @@ int Project::patternLength(std::size_t pattern) const
     if (pattern >= patterns_.size())
         return kTicksPerBar;
     int end = std::max(kTicksPerBar, patterns_[pattern].steps * kTicksPerStep);
-    for (const ChannelPattern& cp : patterns_[pattern].channels)
+    for (const ChannelPattern& cp : patterns_[pattern].channels) {
         for (const Note& n : cp.notes)
             end = std::max(end, n.end());
+        for (const ControlPoint& ctrl : cp.controls)
+            end = std::max(end, ctrl.start + 1);
+    }
     return (end + kTicksPerBar - 1) / kTicksPerBar * kTicksPerBar;
 }
 
@@ -433,6 +537,16 @@ Note Project::clamped(Note note)
     return note;
 }
 
+ControlPoint Project::clamped(ControlPoint point)
+{
+    point.start = std::max(0, point.start);
+    point.number = std::clamp(point.number, 0, 127);
+    point.midiChannel = std::clamp(point.midiChannel, 0, 15);
+    const double minVal = point.kind == ControlKind::PitchBend ? -1.0 : 0.0;
+    point.value = std::isfinite(point.value) ? std::clamp(point.value, minVal, 1.0) : 0.0;
+    return point;
+}
+
 const std::vector<Note>* Project::notes(std::size_t pattern, std::size_t channel) const
 {
     const ChannelPattern* cp = channelPattern(pattern, channel);
@@ -472,6 +586,26 @@ void Project::removeNote(std::size_t pattern, std::size_t channel, std::size_t i
     ChannelPattern* cp = channelPattern(pattern, channel);
     if (cp != nullptr && index < cp->notes.size())
         cp->notes.erase(cp->notes.begin() + static_cast<std::ptrdiff_t>(index));
+}
+
+const std::vector<ControlPoint>* Project::controls(std::size_t pattern, std::size_t channel) const
+{
+    const ChannelPattern* cp = channelPattern(pattern, channel);
+    return cp != nullptr ? &cp->controls : nullptr;
+}
+
+void Project::setControls(std::size_t pattern, std::size_t channel, std::vector<ControlPoint> controls)
+{
+    ChannelPattern* cp = channelPattern(pattern, channel);
+    if (cp == nullptr)
+        return;
+    if (controls.size() > kMaxPatternNotes)
+        controls.resize(kMaxPatternNotes);
+    for (ControlPoint& point : controls)
+        point = clamped(point);
+    std::stable_sort(controls.begin(), controls.end(),
+        [](const ControlPoint& a, const ControlPoint& b) { return a.start < b.start; });
+    cp->controls = std::move(controls);
 }
 
 // ---------------------------------------------------------------- playlist

@@ -5,9 +5,11 @@
 #include "audio/PluginHost.hpp"
 #include "core/MixerModel.hpp"
 
+#include <vloom/engine/mixer/MixerGraph.hpp>
 #include <vloom/engine/mixer/MixerState.hpp>
 
 #include <memory>
+#include <vector>
 
 namespace vloomdaw {
 
@@ -19,5 +21,9 @@ namespace vloomdaw {
 /// left out), bypassed as the slots say.
 [[nodiscard]] std::unique_ptr<const vloom::MixerState> engineMixerState(
     const MixerModel& mixer, const PluginResolver& plugins = {});
+
+/// Returns any mixer routes in `state` that `vloom-engine` skipped due to a
+/// cycle or invalid target (`vloom::droppedRoutes`).
+[[nodiscard]] std::vector<vloom::MixerRoute> droppedMixerRoutes(const vloom::MixerState& state);
 
 } // namespace vloomdaw

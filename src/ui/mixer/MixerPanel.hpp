@@ -52,6 +52,8 @@ public:
     void setTrackColor(std::size_t track, std::optional<std::uint32_t> color);
     void setTrackRole(std::size_t track, MixerRole role);
     void setTrackMono(std::size_t track, bool mono);
+    void setTrackRecordArmed(std::size_t track, bool armed);
+    void setTrackInputMonitored(std::size_t track, bool monitored);
     void startTrackRename(std::size_t track);
     void setSelectedTrack(std::size_t track);
     [[nodiscard]] std::size_t selectedTrack() const { return selectedTrack_; }
@@ -81,6 +83,8 @@ signals:
     void muteToggled(std::size_t track, bool muted);
     void soloToggled(std::size_t track, bool soloed);
     void monoToggled(std::size_t track, bool mono);
+    void recordArmInsertToggled(std::size_t track, bool armed);
+    void monitorInsertToggled(std::size_t track, bool monitored);
     void closeRequested();
     void detachRequested();
     void addInsertRequested();
@@ -113,11 +117,13 @@ signals:
     void sendLevelChanged(std::size_t track, std::size_t sendSlot, double level);
     void sendMuteToggled(std::size_t track, std::size_t sendSlot, bool muted);
     void sendPreFaderToggled(std::size_t track, std::size_t sendSlot, bool preFader);
+    void sendSidechainToggled(std::size_t track, std::size_t sendSlot, bool sidechain);
     void sendMenuRequested(std::size_t track, std::size_t sendSlot, const QPoint& globalPos);
 
     void clearAllSoloRequested();
     void clearAllMuteRequested();
     void bypassAllEffectsToggled(bool bypassed);
+    void audioIoSetupRequested();
 
 private:
     void connectStrip(MixerStrip* strip);

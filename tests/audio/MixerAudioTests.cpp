@@ -107,3 +107,23 @@ TEST_CASE("Mono mode on inserts and Master sums stereo L and R channels to true 
     CHECK(left[3] == Approx(0.25f));
     CHECK(right[3] == Approx(0.25f));
 }
+
+TEST_CASE("Sidechain sends and dropped mixer route cycle inspection work with vloom-engine", "[audio]")
+{
+    MixerModel mixer(2);
+    REQUIRE(mixer.addSend(1, 2, 0.8, true, true));
+    auto state = engineMixerState(mixer);
+    REQUIRE(state != nullptr);
+    REQUIRE(state->inserts.size() == 2);
+    REQUIRE(state->inserts[0].sends.size() == 1);
+    CHECK(state->inserts[0].sends[0].target == 2);
+    CHECK(state->inserts[0].sends[0].preFader);
+    CHECK(state->inserts[0].sends[0].sidechain);
+    CHECK(droppedMixerRoutes(*state).empty());
+
+    // Artificially inject a cycle into a vloom::MixerState copy to verify droppedMixerRoutes().
+    vloom::MixerState cyclic = *state;
+    cyclic.inserts[1].output = 1; // 2 -> 1 while 1 -> 2 send exists
+    const auto dropped = droppedMixerRoutes(cyclic);
+    CHECK_FALSE(dropped.empty());
+}

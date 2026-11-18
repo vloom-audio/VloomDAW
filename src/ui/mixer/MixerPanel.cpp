@@ -197,7 +197,6 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
 
     auto* showLbl = new QLabel(tr("Channels:"), footerBox);
     showLbl->setObjectName(QStringLiteral("panelHint"));
-    footerRow->addWidget(showLbl);
 
     const auto makeFooterPill = [footerBox](const QString& text, const QString& tip, bool checkable) {
         auto* btn = new QPushButton(text, footerBox);
@@ -208,6 +207,20 @@ MixerPanel::MixerPanel(std::size_t insertCount, QWidget* parent)
         btn->setToolTip(tip);
         return btn;
     };
+
+    auto* ioBtn = makeFooterPill(
+        tr("I/O"), tr("Audio I/O Setup — configure physical input & output channel routing"), false);
+    ioBtn->setIcon(Theme::icon(QStringLiteral("audio-io")));
+    ioBtn->setIconSize(QSize(13, 13));
+    connect(ioBtn, &QPushButton::clicked, this, &MixerPanel::audioIoSetupRequested);
+    footerRow->addWidget(ioBtn);
+
+    auto* sepIo = new QFrame(footerBox);
+    sepIo->setFrameShape(QFrame::VLine);
+    sepIo->setObjectName(QStringLiteral("mixerFooterSep"));
+    footerRow->addWidget(sepIo);
+
+    footerRow->addWidget(showLbl);
 
     auto* filterGroup = new QButtonGroup(this);
     filterGroup->setExclusive(true);
@@ -371,6 +384,16 @@ void MixerPanel::showStripContextMenu(MixerStrip* strip, const QPoint& globalPos
     monoAct->setCheckable(true);
     monoAct->setChecked(strip->isMono());
 
+    QAction* armAct = menu.addAction(
+        tr("Record Arm"), this, [this, index](bool on) { emit recordArmInsertToggled(index, on); });
+    armAct->setCheckable(true);
+    armAct->setChecked(strip->isRecordArmed());
+
+    QAction* monAct = menu.addAction(
+        tr("Monitor Audio Input"), this, [this, index](bool on) { emit monitorInsertToggled(index, on); });
+    monAct->setCheckable(true);
+    monAct->setChecked(strip->isInputMonitored());
+
     if (strip->hasInstrumentSource()) {
         menu.addSeparator();
         menu.addAction(Theme::icon(QStringLiteral("track-instrument")), tr("Open Instrument Editor…"), this,
@@ -465,6 +488,14 @@ void MixerPanel::connectStrip(MixerStrip* strip)
     connect(strip, &MixerStrip::monoToggled, this, [this, strip](bool mono) {
         if (const auto i = strips_.indexOf(strip); i >= 0)
             emit monoToggled(static_cast<std::size_t>(i), mono);
+    });
+    connect(strip, &MixerStrip::recordArmToggled, this, [this, strip](bool armed) {
+        if (const auto i = strips_.indexOf(strip); i > 0)
+            emit recordArmInsertToggled(static_cast<std::size_t>(i), armed);
+    });
+    connect(strip, &MixerStrip::monitorToggled, this, [this, strip](bool monitored) {
+        if (const auto i = strips_.indexOf(strip); i > 0)
+            emit monitorInsertToggled(static_cast<std::size_t>(i), monitored);
     });
     connect(strip, &MixerStrip::stripDragMoved, this, [this, strip](const QPoint& globalPos) {
         const auto fromIdx = strips_.indexOf(strip);
@@ -600,10 +631,26 @@ void MixerPanel::connectStrip(MixerStrip* strip)
         if (const auto i = strips_.indexOf(strip); i > 0)
             emit sendPreFaderToggled(static_cast<std::size_t>(i), slot, preFader);
     });
+    connect(strip, &MixerStrip::sendSidechainToggled, this, [this, strip](std::size_t slot, bool sidechain) {
+        if (const auto i = strips_.indexOf(strip); i > 0)
+            emit sendSidechainToggled(static_cast<std::size_t>(i), slot, sidechain);
+    });
     connect(strip, &MixerStrip::sendMenuRequested, this, [this, strip](std::size_t slot, const QPoint& at) {
         if (const auto i = strips_.indexOf(strip); i > 0)
             emit sendMenuRequested(static_cast<std::size_t>(i), slot, at);
     });
+}
+
+void MixerPanel::setTrackRecordArmed(std::size_t track, bool armed)
+{
+    if (track > 0 && track < trackCount())
+        strips_[static_cast<qsizetype>(track)]->setRecordArmed(armed);
+}
+
+void MixerPanel::setTrackInputMonitored(std::size_t track, bool monitored)
+{
+    if (track > 0 && track < trackCount())
+        strips_[static_cast<qsizetype>(track)]->setInputMonitored(monitored);
 }
 
 void MixerPanel::setTrackEffects(std::size_t track, const std::vector<PluginSlot>& effects)

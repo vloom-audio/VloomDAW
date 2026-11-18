@@ -15,6 +15,7 @@
 #include <QDropEvent>
 #include <QEvent>
 #include <QFontMetrics>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -39,11 +40,11 @@ namespace vloomdaw {
 
 namespace {
 
-constexpr int kInsertWidth = 82;
+constexpr int kInsertWidth = 86;
 constexpr int kInsertWideWidth = 108;
 constexpr int kMasterWidth = 88;
 constexpr int kMasterWideWidth = 114;
-constexpr int kMinStripHeight = 276;
+constexpr int kMinStripHeight = 296;
 constexpr int kMinFaderHeight = 52;
 constexpr int kSendRowHeight = 19;
 
@@ -245,6 +246,7 @@ signals:
     void sendLevelChanged(std::size_t slot, double level);
     void sendMuteToggled(std::size_t slot, bool muted);
     void sendPreFaderToggled(std::size_t slot, bool preFader);
+    void sendSidechainToggled(std::size_t slot, bool sidechain);
     void sendMenuRequested(std::size_t slot, const QPoint& globalPos);
 
 protected:
@@ -283,12 +285,13 @@ protected:
             p.drawLine(rowRect.left(), rowRect.bottom(), rowRect.right(), rowRect.bottom());
 
             // Power indicator dot (left 13 px)
-            const QColor pwrCol = s.muted ? QColor(0x52, 0x58, 0x62) : QColor(0x38, 0xbd, 0xf8);
+            const QColor activeCol = s.sidechain ? c.accent : QColor(0x38, 0xbd, 0xf8);
+            const QColor pwrCol = s.muted ? QColor(0x52, 0x58, 0x62) : activeCol;
             p.setPen(QPen(pwrCol, 1.3));
             p.setBrush(Qt::NoBrush);
             p.drawEllipse(QPointF(rowRect.left() + 6.5, rowRect.top() + 6.5), 3.2, 3.2);
 
-            // Pre-fader badge on right (13 px)
+            // Pre-fader badge on right (13 px) and optional Sidechain badge next to it
             const QRect preRect(rowRect.right() - 13, rowRect.top() + 1, 12, 10);
             p.setPen(s.preFader ? QColor(0xf5, 0x9e, 0x0b) : c.textDim);
             QFont pf = f;
@@ -296,14 +299,23 @@ protected:
             p.setFont(pf);
             p.drawText(preRect, Qt::AlignCenter, QStringLiteral("P"));
 
+            int rightBadgesW = 15;
+            if (s.sidechain) {
+                const QRect scRect(rowRect.right() - 28, rowRect.top() + 1, 14, 10);
+                p.setPen(s.muted ? c.textDim : c.accent);
+                p.drawText(scRect, Qt::AlignCenter, QStringLiteral("SC"));
+                rightBadgesW = 30;
+            }
+
             // Target name
             p.setFont(f);
             p.setPen(s.muted ? c.textDim : c.text);
-            const QRect nameRect(rowRect.left() + 13, rowRect.top(), std::max(8, rowRect.width() - 28), 11);
+            const QRect nameRect(
+                rowRect.left() + 13, rowRect.top(), std::max(8, rowRect.width() - (13 + rightBadgesW)), 11);
             p.drawText(nameRect, Qt::AlignLeft | Qt::AlignVCenter,
                 fm.elidedText(s.targetName, Qt::ElideRight, nameRect.width()));
 
-            // Studio One blue horizontal send level bar along the bottom 4 px
+            // Studio One horizontal send level bar along the bottom 4 px
             const QRectF barBg(
                 rowRect.left() + 3.0, rowRect.bottom() - 4.5, std::max(6.0, rowRect.width() - 6.0), 3.2);
             p.setPen(Qt::NoPen);
@@ -312,7 +324,7 @@ protected:
 
             const double fillW = std::clamp(s.level, 0.0, 1.0) * barBg.width();
             if (fillW >= 1.0) {
-                p.setBrush(s.muted ? QColor(0x4b, 0x55, 0x63) : QColor(0x38, 0xbd, 0xf8));
+                p.setBrush(s.muted ? QColor(0x4b, 0x55, 0x63) : activeCol);
                 p.drawRoundedRect(QRectF(barBg.left(), barBg.top(), fillW, barBg.height()), 1.2, 1.2);
             }
         }
@@ -334,14 +346,18 @@ protected:
             return;
         }
         if (event->button() == Qt::LeftButton) {
-            if (event->position().x() <= 14.0
-                && (static_cast<int>(event->position().y()) - 1) % kSendRowHeight < 12) {
+            const bool inTopBand = (static_cast<int>(event->position().y()) - 1) % kSendRowHeight < 12;
+            if (event->position().x() <= 14.0 && inTopBand) {
                 emit sendMuteToggled(slot, !sends_[slot].muted);
                 return;
             }
-            if (event->position().x() >= width() - 15.0
-                && (static_cast<int>(event->position().y()) - 1) % kSendRowHeight < 12) {
+            if (event->position().x() >= width() - 15.0 && inTopBand) {
                 emit sendPreFaderToggled(slot, !sends_[slot].preFader);
+                return;
+            }
+            if (sends_[slot].sidechain && event->position().x() >= width() - 30.0
+                && event->position().x() < width() - 15.0 && inTopBand) {
+                emit sendSidechainToggled(slot, false);
                 return;
             }
             draggingSlot_ = idx;
@@ -362,10 +378,10 @@ protected:
         sends_[slot].level = dragLevel_;
         update();
         emit sendLevelChanged(slot, dragLevel_);
+        const QString title = sends_[slot].sidechain ? tr("%1 (Sidechain)").arg(sends_[slot].targetName)
+                                                     : sends_[slot].targetName;
         QToolTip::showText(event->globalPosition().toPoint(),
-            tr("%1: %2").arg(
-                sends_[slot].targetName, QString::fromStdString(formatDb(faderToGain(dragLevel_)))),
-            this);
+            tr("%1: %2").arg(title, QString::fromStdString(formatDb(faderToGain(dragLevel_)))), this);
     }
 
     void mouseReleaseEvent(QMouseEvent* event) override
@@ -852,6 +868,7 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
         connect(sendRack_, &MixerSendRack::sendLevelChanged, this, &MixerStrip::sendLevelChanged);
         connect(sendRack_, &MixerSendRack::sendMuteToggled, this, &MixerStrip::sendMuteToggled);
         connect(sendRack_, &MixerSendRack::sendPreFaderToggled, this, &MixerStrip::sendPreFaderToggled);
+        connect(sendRack_, &MixerSendRack::sendSidechainToggled, this, &MixerStrip::sendSidechainToggled);
         connect(sendRack_, &MixerSendRack::sendMenuRequested, this, &MixerStrip::sendMenuRequested);
         layout->addWidget(sendRack_, 0, Qt::AlignHCenter);
     }
@@ -908,12 +925,15 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
     connect(panBar_, &StripPanBar::valueChanged, this, &MixerStrip::panChanged);
     layout->addWidget(panBar_);
 
-    // 5. [M] & [S] Buttons + Studio One Mono / Stereo Toggle
-    auto* buttons = new QHBoxLayout;
+    // 5. Studio 2x2 Button Cluster ([M | S] on top, [Arm | Input Monitor] below) + Mono / Stereo Toggle
+    auto* clusterFrame = new QFrame(this);
+    clusterFrame->setObjectName(QStringLiteral("stripButtonCluster"));
+    auto* buttons = new QGridLayout(clusterFrame);
     buttons->setContentsMargins(0, 0, 0, 0);
-    buttons->setSpacing(3);
-    const auto addToggle = [&](const QString& text, const QString& objectName, const QString& tip) {
-        auto* b = new QToolButton(this);
+    buttons->setHorizontalSpacing(1);
+    buttons->setVerticalSpacing(1);
+    const auto makeClusterBtn = [&](const QString& text, const QString& objectName, const QString& tip) {
+        auto* b = new QToolButton(clusterFrame);
         b->setText(text);
         b->setObjectName(objectName);
         b->setCheckable(true);
@@ -923,16 +943,39 @@ MixerStrip::MixerStrip(Kind kind, const QString& name, const QString& number, QW
         b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         b->setFixedHeight(20);
         b->installEventFilter(this);
-        buttons->addWidget(b);
         return b;
     };
-    mute_ = addToggle(QStringLiteral("M"), QStringLiteral("muteButton"), QString());
+    mute_ = makeClusterBtn(QStringLiteral("M"), QStringLiteral("muteButton"), QString());
+    mute_->setProperty("corner", kind == Kind::Insert ? QStringLiteral("tl") : QStringLiteral("all"));
     connect(mute_, &QToolButton::toggled, this, &MixerStrip::muteToggled);
+    buttons->addWidget(mute_, 0, 0);
     if (kind == Kind::Insert) {
-        solo_ = addToggle(QStringLiteral("S"), QStringLiteral("soloButton"), QString());
+        solo_ = makeClusterBtn(QStringLiteral("S"), QStringLiteral("soloButton"), QString());
         connect(solo_, &QToolButton::toggled, this, &MixerStrip::soloToggled);
+        buttons->addWidget(solo_, 0, 1);
+
+        arm_ = makeClusterBtn(QString(), QStringLiteral("armButton"), QString());
+        arm_->setIcon(Theme::icon(QStringLiteral("track-arm")));
+        arm_->setIconSize(QSize(13, 13));
+        connect(arm_, &QToolButton::toggled, this, [this](bool on) {
+            recordArmed_ = on;
+            arm_->setIcon(Theme::icon(on ? QStringLiteral("track-arm-active") : QStringLiteral("track-arm")));
+            emit recordArmToggled(on);
+        });
+        buttons->addWidget(arm_, 1, 0);
+
+        monitor_ = makeClusterBtn(QString(), QStringLiteral("monitorButton"), QString());
+        monitor_->setIcon(Theme::icon(QStringLiteral("input-monitor")));
+        monitor_->setIconSize(QSize(13, 13));
+        connect(monitor_, &QToolButton::toggled, this, [this](bool on) {
+            inputMonitored_ = on;
+            monitor_->setIcon(
+                Theme::icon(on ? QStringLiteral("input-monitor-active") : QStringLiteral("input-monitor")));
+            emit monitorToggled(on);
+        });
+        buttons->addWidget(monitor_, 1, 1);
     }
-    layout->addLayout(buttons);
+    layout->addWidget(clusterFrame);
 
     monoBtn_ = new StripStereoButton(kind == Kind::Master, this);
     monoBtn_->installEventFilter(this);
@@ -1043,14 +1086,15 @@ void MixerStrip::syncRackHeights()
         fxResizeHandle_->setVisible(true);
 
     // Measure exact available vertical budget above the guaranteed minimum fader height.
-    const bool wantSendsSection = sendsHdr_ != nullptr && (sendCount_ > 0 || height() >= 358);
+    const bool wantSendsSection = sendsHdr_ != nullptr && (sendCount_ > 0 || height() >= 376);
     if (sendsHdr_ != nullptr)
         sendsHdr_->setVisible(wantSendsSection);
 
+    const int clusterPx = (kind_ == Kind::Insert) ? 43 : 22;
     const int fixedChrome = 10 /* margins */ + 16 /* insertsHdr */ + 7 /* fxResizeHandle */
-        + (wantSendsSection ? 16 : 0)
-        + 40 /* source + output pills */ + 30 /* panBar */ + 20 /* M/S */ + 20 /* Stereo/Mono */ + 15 /* db */
-        + kMinFaderHeight + 15 /* number+badge */ + 21 /* namePlate */ + 26 /* layout gaps */;
+        + (wantSendsSection ? 16 : 0) + 40 /* source + output pills */ + 30 /* panBar */ + clusterPx
+        + 20 /* Stereo/Mono */ + 15 /* db */ + kMinFaderHeight + 15 /* number+badge */ + 21 /* namePlate */
+        + 26 /* layout gaps */;
     const int avail = std::max(18, height() - fixedChrome);
 
     int sendRows = 0;
@@ -1137,6 +1181,27 @@ void MixerStrip::setMono(bool mono)
         monoBtn_->setMono(mono);
     }
     refreshRoutingPills();
+}
+
+void MixerStrip::setRecordArmed(bool armed)
+{
+    recordArmed_ = armed;
+    if (arm_ != nullptr) {
+        const QSignalBlocker blockArm(arm_);
+        arm_->setChecked(armed);
+        arm_->setIcon(Theme::icon(armed ? QStringLiteral("track-arm-active") : QStringLiteral("track-arm")));
+    }
+}
+
+void MixerStrip::setInputMonitored(bool monitored)
+{
+    inputMonitored_ = monitored;
+    if (monitor_ != nullptr) {
+        const QSignalBlocker blockMon(monitor_);
+        monitor_->setChecked(monitored);
+        monitor_->setIcon(Theme::icon(
+            monitored ? QStringLiteral("input-monitor-active") : QStringLiteral("input-monitor")));
+    }
 }
 
 void MixerStrip::setEffects(const std::vector<PluginSlot>& effects)
@@ -1592,6 +1657,16 @@ void MixerStrip::setLabel(const QString& name, const QString& number)
         const QString soloTip = tr("Solo %1").arg(label);
         solo_->setToolTip(soloTip);
         solo_->setAccessibleName(soloTip);
+    }
+    if (arm_ != nullptr) {
+        const QString armTip = tr("Record Arm %1").arg(label);
+        arm_->setToolTip(armTip);
+        arm_->setAccessibleName(armTip);
+    }
+    if (monitor_ != nullptr) {
+        const QString monTip = tr("Monitor live audio input through %1").arg(label);
+        monitor_->setToolTip(monTip);
+        monitor_->setAccessibleName(monTip);
     }
 }
 

@@ -72,6 +72,12 @@ public:
                     fn(*inst);
                     snap.project.setChannelInstrument(c, std::move(inst));
                 }
+                const auto& noteFx = snap.project.channels()[c].noteEffects;
+                for (std::size_t ne = 0; ne < noteFx.size(); ++ne) {
+                    PluginSlot copy = noteFx[ne];
+                    fn(copy);
+                    snap.project.replaceChannelNoteEffect(c, ne, std::move(copy));
+                }
             }
             for (std::size_t m = 0; m < snap.mixer.size(); ++m) {
                 const auto& effects = snap.mixer.track(m).effects;

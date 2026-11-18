@@ -14,8 +14,13 @@ namespace vloomdaw {
 namespace {
 constexpr QLatin1StringView kOutputDevice{"audio/outputDevice"};
 constexpr QLatin1StringView kOutputDeviceOccurrence{"audio/outputDeviceOccurrence"};
+constexpr QLatin1StringView kInputEnabled{"audio/inputEnabled"};
+constexpr QLatin1StringView kInputDevice{"audio/inputDevice"};
+constexpr QLatin1StringView kInputDeviceOccurrence{"audio/inputDeviceOccurrence"};
+constexpr QLatin1StringView kMidiInputDevice{"midi/inputDevice"};
 constexpr QLatin1StringView kSampleRate{"audio/sampleRate"};
 constexpr QLatin1StringView kBufferFrames{"audio/bufferFrames"};
+constexpr QLatin1StringView kAudioIoConfig{"audio/ioSetupJson"};
 constexpr QLatin1StringView kStartPositionMode{"general/startPositionMode"};
 constexpr QLatin1StringView kMetronomeOnStartup{"general/startWithMetronome"};
 constexpr QLatin1StringView kAssociateProjectFiles{"general/associateProjectFiles"};
@@ -33,6 +38,7 @@ constexpr QLatin1StringView kStemMuteOriginal{"stems/muteOriginal"};
 constexpr QLatin1StringView kStemOverlap{"stems/overlap"};
 constexpr QLatin1StringView kThemePalette{"theme/palette"};
 constexpr QLatin1StringView kThemeAccent{"theme/accent"};
+constexpr QLatin1StringView kThemePinkDefaultMigrated{"theme/pinkDefaultMigrated"};
 constexpr QLatin1StringView kThemeHue{"theme/hue"};
 constexpr QLatin1StringView kThemeSaturation{"theme/saturation"};
 constexpr QLatin1StringView kThemeBrightness{"theme/brightness"};
@@ -59,8 +65,14 @@ AppSettings AppSettings::load()
     AppSettings a;
     a.outputDevice = s.value(kOutputDevice).toString();
     a.outputDeviceOccurrence = std::max(1, s.value(kOutputDeviceOccurrence, 1).toInt());
+    a.inputEnabled = s.value(kInputEnabled, false).toBool();
+    a.inputDevice = s.value(kInputDevice).toString();
+    a.inputDeviceOccurrence = std::max(1, s.value(kInputDeviceOccurrence, 1).toInt());
+    a.midiInputDevice = s.value(kMidiInputDevice).toString().left(256);
     a.sampleRate = validSampleRate(s.value(kSampleRate, a.sampleRate).toInt());
     a.bufferFrames = validBufferFrames(s.value(kBufferFrames, a.bufferFrames).toInt());
+    if (s.contains(kAudioIoConfig))
+        a.ioConfig = deserializeAudioIoConfig(s.value(kAudioIoConfig).toString().toStdString());
     a.startPositionMode
         = s.value(kStartPositionMode, 0).toInt() == 1 ? PositionMode::Time : PositionMode::BarsBeats;
     a.metronomeOnStartup = s.value(kMetronomeOnStartup, a.metronomeOnStartup).toBool();
@@ -79,6 +91,13 @@ AppSettings AppSettings::load()
     t.adjustments.text = s.value(kThemeText, t.adjustments.text).toDouble();
     for (const RoleKey& role : kRoleKeys)
         t.overrides.*role.member = parseHex(s.value(role.key).toString().toStdString());
+    if (!s.value(kThemePinkDefaultMigrated, false).toBool()) {
+        if (t.accentId == "orange" && !t.overrides.selection.has_value())
+            t.accentId = "pink";
+        QSettings w;
+        w.setValue(kThemePinkDefaultMigrated, true);
+        w.setValue(kThemeAccent, QString::fromStdString(t.accentId));
+    }
 
     if (s.contains(kBrowserFolders)) {
         a.browserFolders = s.value(kBrowserFolders).toStringList();
@@ -103,8 +122,13 @@ void AppSettings::save() const
     QSettings s;
     s.setValue(kOutputDevice, outputDevice);
     s.setValue(kOutputDeviceOccurrence, outputDeviceOccurrence);
+    s.setValue(kInputEnabled, inputEnabled);
+    s.setValue(kInputDevice, inputDevice);
+    s.setValue(kInputDeviceOccurrence, inputDeviceOccurrence);
+    s.setValue(kMidiInputDevice, midiInputDevice);
     s.setValue(kSampleRate, sampleRate);
     s.setValue(kBufferFrames, bufferFrames);
+    s.setValue(kAudioIoConfig, QString::fromStdString(serializeAudioIoConfig(ioConfig)));
     s.setValue(kStartPositionMode, static_cast<int>(startPositionMode));
     s.setValue(kMetronomeOnStartup, metronomeOnStartup);
     s.setValue(kAssociateProjectFiles, associateProjectFiles);

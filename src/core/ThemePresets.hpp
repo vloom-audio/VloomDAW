@@ -53,6 +53,9 @@ struct AccentSpec {
 /// or hand-edited setting must not break the app).
 [[nodiscard]] const PaletteSpec& paletteById(std::string_view id);
 [[nodiscard]] const AccentSpec& accentById(std::string_view id);
+/// Default accent id paired with `paletteId` ("pink" for neutral dark palettes,
+/// and each tinted palette's matching accent colour).
+[[nodiscard]] std::string_view defaultAccentForPalette(std::string_view paletteId) noexcept;
 
 /// WCAG 2 relative luminance (0 = black, 1 = white).
 [[nodiscard]] double relativeLuminance(Rgb color);
@@ -98,7 +101,7 @@ struct ResolvedTheme {
 /// Everything the user chose for the theme; what the settings store.
 struct ThemeChoice {
     std::string paletteId = "midnight";
-    std::string accentId = "orange";
+    std::string accentId = "pink";
     ThemeAdjustments adjustments;
     ThemeOverrides overrides;
 };

@@ -49,7 +49,10 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
   - `pan`: -1 .. 1;
   - `insert`: the mixer insert, 0 = master;
   - `color`: `#rrggbb`;
-  - `instrument`: a plugin (below).
+  - `instrument`: a plugin (below);
+  - `noteEffects`: optional list of up to 8 MIDI note-effect plugins chained before `instrument`;
+  - `pluginOutputs`: optional list of mixer insert indices (`-1` = off, `0` = master, `1..125` = insert) for extra stereo outputs `2 .. N+1`;
+  - `notesFrom`: optional 0-based channel index whose post-note-effect notes `instrument` also plays.
 - **Pattern:**
   - `name`;
   - `steps`: the number of step pads, 1 .. 256;
@@ -57,7 +60,8 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
     - `steps`: a string with one character per pad, `x` = on, `.` = off;
     - `notes`: a list of `[key, start, length]`, in ticks (960 per beat),
       or `[key, start, length, velocity]` when the velocity (1 .. 127) is
-      not the default of 100.
+      not the default of 100;
+    - `controls`: optional list of continuous MIDI events (`{"start": ticks, "kind": "bend"|"cc"|"pressure", "number": cc, "value": v, "channel": ch}`).
 - **Track (playlist):**
   - `name` and `named` (false: shown as "Track N");
   - `muted`, `solo` and `collapsed`;
@@ -84,7 +88,7 @@ A VloomDAW project is one UTF-8 JSON file with the extension `.vloom`.
 - `role`: `standard`, `bus`, `fx` or `aux` (inserts);
 - `fader`, `pan`, `muted`, `soloed`, `mono` and `color`;
 - `output`: destination mixer strip (`0` = master, or a `bus`/`aux` index);
-- `sends`: up to 8 auxiliary sends (`target`, `level`, `muted`, `preFader`);
+- `sends`: up to 8 auxiliary or sidechain sends (`target`, `level`, `muted`, `preFader`, optional `sidechain`);
 - `effects`: a list of plugins, in processing order.
 
 ## Plugins

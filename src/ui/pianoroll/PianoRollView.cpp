@@ -7,7 +7,9 @@
 #include "ui/widgets/ColorMenu/ColorMenu.hpp"
 #include "ui/widgets/Timeline/Timeline.hpp"
 
+#include <QInputDialog>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPolygonF>
@@ -152,6 +154,16 @@ void PianoRollView::setKey(int root, Scale scale)
     viewport()->update();
 }
 
+void PianoRollView::setLaneMode(LaneMode mode, int cc)
+{
+    if (drag_ != Drag::None)
+        endDrag();
+    laneMode_ = mode;
+    if (mode == LaneMode::Controller)
+        laneCc_ = std::clamp(cc, 0, kMaxMidiControlNumber);
+    viewport()->update();
+}
+
 void PianoRollView::setSnapTicks(int ticks)
 {
     snapTicks_ = std::max(kMinNoteLength, ticks);
@@ -289,6 +301,49 @@ const std::vector<Note>* PianoRollView::notes() const
     return project_ != nullptr ? project_->notes(pattern_, channel_) : nullptr;
 }
 
+const std::vector<ControlPoint>* PianoRollView::controls() const
+{
+    return project_ != nullptr ? project_->controls(pattern_, channel_) : nullptr;
+}
+
+bool PianoRollView::matchesActiveLane(const ControlPoint& pt) const
+{
+    switch (laneMode_) {
+    case LaneMode::Velocity:
+        return false;
+    case LaneMode::PitchBend:
+        return pt.kind == ControlKind::PitchBend;
+    case LaneMode::Controller:
+        return pt.kind == ControlKind::Controller && pt.number == laneCc_;
+    case LaneMode::Pressure:
+        return pt.kind == ControlKind::Pressure;
+    }
+    return false;
+}
+
+QString PianoRollView::activeLaneShortLabel() const
+{
+    switch (laneMode_) {
+    case LaneMode::Velocity:
+        return tr("Velocity");
+    case LaneMode::PitchBend:
+        return tr("Pitch");
+    case LaneMode::Controller:
+        if (laneCc_ == 1)
+            return tr("Mod CC1");
+        if (laneCc_ == 11)
+            return tr("Expr 11");
+        if (laneCc_ == 64)
+            return tr("Sust 64");
+        if (laneCc_ == 74)
+            return tr("Cut 74");
+        return tr("CC %1").arg(laneCc_);
+    case LaneMode::Pressure:
+        return tr("AfterTch");
+    }
+    return tr("Velocity");
+}
+
 double PianoRollView::pixelsPerTick() const { return pixelsPerBeat_ / kTicksPerBeat; }
 
 int PianoRollView::lengthTicks() const
@@ -310,6 +365,12 @@ QRect PianoRollView::laneRect() const
     // A short window keeps most of its height for the notes.
     const int height = std::min(kLaneHeight, std::max(0, (v.height() - timeline::kRulerHeight) / 3));
     return {kKeyboardWidth, v.height() - height, v.width() - kKeyboardWidth, height};
+}
+
+QRect PianoRollView::laneCornerRect() const
+{
+    const QRect lane = laneRect();
+    return {0, lane.top(), kKeyboardWidth, lane.height()};
 }
 
 QRect PianoRollView::gridRect() const
@@ -515,24 +576,91 @@ void PianoRollView::paintEvent(QPaintEvent* event)
 
     timeline::paintPlayhead(p, grid, scale, playhead_);
 
-    // The velocity lane: a stem per note, as tall as the note is hard.
+    // The velocity / MIDI control lane along the bottom.
     const QRect laneArea = lane.intersected(event->rect());
     if (!laneArea.isEmpty()) {
         p.fillRect(laneArea, c.rail);
         p.fillRect(QRect(lane.left(), lane.top(), lane.width(), 1).intersected(laneArea), c.border);
-        if (list != nullptr) {
+        if (laneMode_ == LaneMode::Velocity) {
+            if (list != nullptr) {
+                p.save();
+                p.setClipRect(laneArea);
+                const int room = std::max(1, lane.height() - kLanePad);
+                for (std::size_t i = 0; i < list->size(); ++i) {
+                    const Note& note = (*list)[i];
+                    const int x = static_cast<int>(std::lround(scale.x(note.start)));
+                    if (x + 6 < laneArea.left() || x - 6 > laneArea.right())
+                        continue;
+                    const int height = std::max(2, room * note.velocity / kMaxVelocity);
+                    const QColor stem = isSelected(selection_, i) ? c.text : shaded(fill, note.velocity);
+                    p.fillRect(QRect(x, lane.bottom() - height + 1, 2, height), stem);
+                    p.fillRect(QRect(x, lane.bottom() - height + 1, 6, 3), stem); // its flag
+                }
+                p.restore();
+            }
+        } else {
             p.save();
             p.setClipRect(laneArea);
-            const int room = std::max(1, lane.height() - kLanePad);
-            for (std::size_t i = 0; i < list->size(); ++i) {
-                const Note& note = (*list)[i];
-                const int x = static_cast<int>(std::lround(scale.x(note.start)));
-                if (x + 6 < laneArea.left() || x - 6 > laneArea.right())
-                    continue;
-                const int height = std::max(2, room * note.velocity / kMaxVelocity);
-                const QColor stem = isSelected(selection_, i) ? c.text : shaded(fill, note.velocity);
-                p.fillRect(QRect(x, lane.bottom() - height + 1, 2, height), stem);
-                p.fillRect(QRect(x, lane.bottom() - height + 1, 6, 3), stem); // its flag
+            const int finest = snapEnabled_ ? std::min(snapTicks_, kTicksPerStep) : kTicksPerBeat;
+            timeline::paintGrid(p, laneArea, scale, finest);
+
+            const bool bipolar = (laneMode_ == LaneMode::PitchBend);
+            const double topY = lane.top() + kLanePad;
+            const double botY = lane.bottom() - 2;
+            const double spanY = std::max(4.0, botY - topY);
+            const double zeroY = bipolar ? (topY + spanY * 0.5) : botY;
+
+            if (bipolar) {
+                p.fillRect(QRect(laneArea.left(), static_cast<int>(std::lround(zeroY)), laneArea.width(), 1),
+                    c.border);
+            }
+
+            const std::vector<ControlPoint>* allPts
+                = (drag_ == Drag::ControlDraw || drag_ == Drag::ControlErase) ? &dragControls_ : controls();
+            if (allPts != nullptr) {
+                std::vector<ControlPoint> pts;
+                pts.reserve(allPts->size());
+                for (const ControlPoint& pt : *allPts) {
+                    if (matchesActiveLane(pt))
+                        pts.push_back(pt);
+                }
+                std::sort(pts.begin(), pts.end(),
+                    [](const ControlPoint& a, const ControlPoint& b) { return a.start < b.start; });
+
+                const auto yForVal = [&](double val) {
+                    if (bipolar) {
+                        const double norm = (1.0 - std::clamp(val, -1.0, 1.0)) * 0.5;
+                        return topY + norm * spanY;
+                    }
+                    const double norm = 1.0 - std::clamp(val, 0.0, 1.0);
+                    return topY + norm * spanY;
+                };
+
+                p.setRenderHint(QPainter::Antialiasing, true);
+                const QColor areaTint(c.accent.red(), c.accent.green(), c.accent.blue(), 68);
+                const int endLimitX = static_cast<int>(std::lround(scale.x(lengthTicks())));
+                for (std::size_t i = 0; i < pts.size(); ++i) {
+                    const double x0 = scale.x(pts[i].start);
+                    const double x1 = (i + 1 < pts.size())
+                        ? scale.x(pts[i + 1].start)
+                        : std::max(x0 + 6.0, static_cast<double>(endLimitX));
+                    if (x1 < laneArea.left() - 4.0 || x0 > laneArea.right() + 4.0)
+                        continue;
+                    const double y = yForVal(pts[i].value);
+                    const double rectTop = std::min(y, zeroY);
+                    const double rectH = std::max(1.0, std::abs(zeroY - y));
+                    p.fillRect(QRectF(x0, rectTop, std::max(1.0, x1 - x0), rectH), areaTint);
+
+                    p.setPen(QPen(c.accent, 1.5));
+                    p.drawLine(QPointF(x0, y), QPointF(x1, y));
+                    if (i + 1 < pts.size()) {
+                        const double yNext = yForVal(pts[i + 1].value);
+                        p.drawLine(QPointF(x1, y), QPointF(x1, yNext));
+                    }
+                    p.setPen(Qt::NoPen);
+                    p.setBrush(c.text);
+                    p.drawEllipse(QPointF(x0, y), 2.4, 2.4);
+                }
             }
             p.restore();
         }
@@ -575,15 +703,45 @@ void PianoRollView::paintEvent(QPaintEvent* event)
     p.restore();
     p.fillRect(QRect(kKeyboardWidth - 1, keys.top(), 1, keys.height()), c.border);
 
-    // The corners: above the keyboard, and beside the lane.
+    // The corners: above the keyboard, and beside the lane (lane mode selector).
     p.fillRect(QRect(0, 0, kKeyboardWidth, timeline::kRulerHeight), c.panel);
     if (lane.height() > 0) {
-        const QRect corner(0, lane.top(), kKeyboardWidth, lane.height());
+        const QRect corner = laneCornerRect();
         p.fillRect(corner, c.panel);
         p.fillRect(QRect(0, lane.top(), kKeyboardWidth, 1), c.border);
+        p.fillRect(QRect(kKeyboardWidth - 1, lane.top(), 1, lane.height()), c.border);
+
+        const QRect pill(
+            3, lane.top() + 4, kKeyboardWidth - 7, std::min(19, std::max(14, lane.height() - 6)));
+        const bool cornerHovered = hover_ && corner.contains(*hover_);
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(QPen(cornerHovered ? c.textDim : c.border, 1.0));
+        p.setBrush(cornerHovered ? c.raised : c.window);
+        p.drawRoundedRect(QRectF(pill).adjusted(0.5, 0.5, -0.5, -0.5), 3.0, 3.0);
+
         p.setFont(small);
-        p.setPen(c.textDim);
-        p.drawText(corner.adjusted(6, 4, -4, 0), Qt::AlignLeft | Qt::AlignTop, tr("Velocity"));
+        p.setPen(laneMode_ == LaneMode::Velocity ? c.text : c.accent);
+        p.drawText(pill.adjusted(4, 0, -9, 0), Qt::AlignLeft | Qt::AlignVCenter, activeLaneShortLabel());
+
+        QPolygonF chev;
+        const double cx = pill.right() - 5.5;
+        const double cy = pill.center().y() + 0.5;
+        chev << QPointF(cx - 2.6, cy - 1.4) << QPointF(cx + 2.6, cy - 1.4) << QPointF(cx, cy + 2.0);
+        p.setPen(Qt::NoPen);
+        p.setBrush(c.textDim);
+        p.drawPolygon(chev);
+        p.restore();
+
+        if (lane.height() >= 42) {
+            p.setFont(small);
+            p.setPen(c.textDim);
+            const QString sub = (laneMode_ == LaneMode::PitchBend)
+                ? tr("±Bend")
+                : (laneMode_ == LaneMode::Velocity ? tr("0–127") : tr("Curve"));
+            p.drawText(QRect(4, pill.bottom() + 2, kKeyboardWidth - 8, lane.bottom() - pill.bottom() - 3),
+                Qt::AlignLeft | Qt::AlignTop, sub);
+        }
     }
 }
 
@@ -680,6 +838,15 @@ void PianoRollView::endDrag()
         return;
     }
 
+    if (finishedDrag == Drag::ControlDraw || finishedDrag == Drag::ControlErase) {
+        if (dragControlChanged_)
+            emit controlEditFinished();
+        dragControlChanged_ = false;
+        dragControls_.clear();
+        refresh();
+        return;
+    }
+
     if (dragChanged_)
         emit editFinished();
     dragChanged_ = false;
@@ -770,14 +937,154 @@ void PianoRollView::setVelocityAt(const QPoint& from, const QPoint& to)
     edit(dragNotes_);
 }
 
+void PianoRollView::drawControlAt(const QPoint& from, const QPoint& to, Qt::KeyboardModifiers mods)
+{
+    const QRect lane = laneRect();
+    if (lane.height() <= kLanePad || laneMode_ == LaneMode::Velocity)
+        return;
+
+    const int grid = effectiveGrid(mods);
+    const int tFrom = std::max(0, snapDown(std::max(0.0, tickAt(from.x())), grid));
+    const int tTo = std::max(0, snapDown(std::max(0.0, tickAt(to.x())), grid));
+    const int tMin = std::min(tFrom, tTo);
+    const int tMax = std::max(tFrom, tTo);
+
+    const double topY = lane.top() + kLanePad;
+    const double botY = lane.bottom() - 2;
+    const double spanY = std::max(4.0, botY - topY);
+    const double norm = std::clamp((botY - static_cast<double>(to.y())) / spanY, 0.0, 1.0);
+
+    ControlKind kind = ControlKind::PitchBend;
+    int cc = 0;
+    double value = 0.0;
+    if (laneMode_ == LaneMode::PitchBend) {
+        kind = ControlKind::PitchBend;
+        value = std::clamp(norm * 2.0 - 1.0, -1.0, 1.0);
+        if (std::abs(value) < 0.025)
+            value = 0.0;
+    } else if (laneMode_ == LaneMode::Controller) {
+        kind = ControlKind::Controller;
+        cc = laneCc_;
+        value = norm;
+    } else {
+        kind = ControlKind::Pressure;
+        value = norm;
+    }
+
+    // Remove existing points of the active lane across the swept interval [tMin, tMax]
+    // so dragging paints a clean continuous curve without leftover spikes in between.
+    dragControls_.erase(std::remove_if(dragControls_.begin(), dragControls_.end(),
+                            [this, tMin, tMax](const ControlPoint& pt) {
+                                return matchesActiveLane(pt) && pt.start >= tMin && pt.start <= tMax;
+                            }),
+        dragControls_.end());
+
+    if (dragControls_.size() >= kMaxPatternControls)
+        return;
+    dragControls_.push_back(Project::clamped(ControlPoint{tTo, kind, cc, value}));
+    std::stable_sort(dragControls_.begin(), dragControls_.end(),
+        [](const ControlPoint& a, const ControlPoint& b) { return a.start < b.start; });
+    dragControlChanged_ = true;
+    emit controlsChanged(dragControls_);
+    viewport()->update();
+}
+
+void PianoRollView::eraseControlAt(const QPoint& from, const QPoint& to)
+{
+    if (laneMode_ == LaneMode::Velocity)
+        return;
+    const double reachTicks = std::max(1.0, 4.0 / pixelsPerTick());
+    const int tMin
+        = std::max(0, static_cast<int>(std::floor(std::min(tickAt(from.x()), tickAt(to.x())) - reachTicks)));
+    const int tMax = static_cast<int>(std::ceil(std::max(tickAt(from.x()), tickAt(to.x())) + reachTicks));
+    const std::size_t before = dragControls_.size();
+    dragControls_.erase(std::remove_if(dragControls_.begin(), dragControls_.end(),
+                            [this, tMin, tMax](const ControlPoint& pt) {
+                                return matchesActiveLane(pt) && pt.start >= tMin && pt.start <= tMax;
+                            }),
+        dragControls_.end());
+    if (dragControls_.size() == before)
+        return;
+    dragControlChanged_ = true;
+    emit controlsChanged(dragControls_);
+    viewport()->update();
+}
+
+void PianoRollView::openLaneMenu(const QPoint& globalPos)
+{
+    const auto* allPts = controls();
+    const auto hasPoints = [allPts](ControlKind kind, int cc) {
+        if (allPts == nullptr)
+            return false;
+        return std::any_of(allPts->begin(), allPts->end(), [kind, cc](const ControlPoint& pt) {
+            return pt.kind == kind && (kind != ControlKind::Controller || pt.number == cc);
+        });
+    };
+
+    QMenu menu(this);
+    const auto addLaneItem = [&](const QString& title, LaneMode mode, int cc, bool hasData) {
+        const QString text = hasData ? QStringLiteral("%1  •").arg(title) : title;
+        QAction* act = menu.addAction(text, this, [this, mode, cc] { setLaneMode(mode, cc); });
+        act->setCheckable(true);
+        act->setChecked(laneMode_ == mode && (mode != LaneMode::Controller || laneCc_ == cc));
+    };
+
+    addLaneItem(tr("Note Velocity"), LaneMode::Velocity, 0, notes() != nullptr && !notes()->empty());
+    menu.addSeparator();
+    addLaneItem(tr("Pitch Bend"), LaneMode::PitchBend, 0, hasPoints(ControlKind::PitchBend, 0));
+    addLaneItem(tr("Mod Wheel (CC 1)"), LaneMode::Controller, 1, hasPoints(ControlKind::Controller, 1));
+    addLaneItem(tr("Expression (CC 11)"), LaneMode::Controller, 11, hasPoints(ControlKind::Controller, 11));
+    addLaneItem(
+        tr("Sustain Pedal (CC 64)"), LaneMode::Controller, 64, hasPoints(ControlKind::Controller, 64));
+    addLaneItem(
+        tr("Filter Cutoff (CC 74)"), LaneMode::Controller, 74, hasPoints(ControlKind::Controller, 74));
+    addLaneItem(
+        tr("Channel Pressure (Aftertouch)"), LaneMode::Pressure, 0, hasPoints(ControlKind::Pressure, 0));
+
+    menu.addSeparator();
+    menu.addAction(tr("Other MIDI CC (0–127)…"), this, [this] {
+        bool ok = false;
+        const int cc = QInputDialog::getInt(
+            this, tr("Select MIDI CC"), tr("MIDI Controller Number (0–127):"), laneCc_, 0, 127, 1, &ok);
+        if (ok)
+            setLaneMode(LaneMode::Controller, cc);
+    });
+
+    if (laneMode_ != LaneMode::Velocity && allPts != nullptr) {
+        const bool activeHasPts = std::any_of(
+            allPts->begin(), allPts->end(), [this](const ControlPoint& pt) { return matchesActiveLane(pt); });
+        if (activeHasPts) {
+            menu.addSeparator();
+            menu.addAction(tr("Clear %1 Curve").arg(activeLaneShortLabel()), this, [this] {
+                const auto* cur = controls();
+                if (cur == nullptr)
+                    return;
+                std::vector<ControlPoint> next;
+                next.reserve(cur->size());
+                for (const ControlPoint& pt : *cur) {
+                    if (!matchesActiveLane(pt))
+                        next.push_back(pt);
+                }
+                if (next.size() != cur->size()) {
+                    emit controlsChanged(next);
+                    emit controlEditFinished();
+                    viewport()->update();
+                }
+            });
+        }
+    }
+
+    menu.exec(globalPos);
+}
+
 void PianoRollView::updateHoverCursor(const QPoint& pos)
 {
-    if (rulerRect().contains(pos)) {
+    if (rulerRect().contains(pos) || laneCornerRect().contains(pos)) {
         viewport()->setCursor(Qt::PointingHandCursor);
         return;
     }
     if (laneRect().contains(pos)) {
-        viewport()->setCursor(Qt::SizeVerCursor);
+        viewport()->setCursor(laneMode_ == LaneMode::Velocity ? Qt::SizeVerCursor : Qt::CrossCursor);
         return;
     }
     if (!gridRect().contains(pos)) {
@@ -835,11 +1142,37 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    // Bottom velocity lane edits note velocities.
-    if (event->button() == Qt::LeftButton && laneRect().contains(pos)) {
-        dragNotes_ = *list;
-        beginDrag(Drag::Velocity, 0, pos);
-        setVelocityAt(pos, pos);
+    // Bottom-left lane corner opens the Velocity / Pitch Bend / MIDI CC selector menu.
+    if ((event->button() == Qt::LeftButton || event->button() == Qt::RightButton)
+        && laneCornerRect().contains(pos)) {
+        openLaneMenu(event->globalPosition().toPoint());
+        return;
+    }
+
+    // Bottom lane edits note velocities or MIDI control curves.
+    if (laneRect().contains(pos)) {
+        if (laneMode_ == LaneMode::Velocity) {
+            if (event->button() == Qt::LeftButton) {
+                dragNotes_ = *list;
+                beginDrag(Drag::Velocity, 0, pos);
+                setVelocityAt(pos, pos);
+            }
+            return;
+        }
+        const auto* curControls = controls();
+        dragControls_ = curControls != nullptr ? *curControls : std::vector<ControlPoint>{};
+        dragControlChanged_ = false;
+        if (event->button() == Qt::RightButton
+            || (event->button() == Qt::LeftButton && tool_ == Tool::Delete)) {
+            beginDrag(Drag::ControlErase, 0, pos);
+            eraseControlAt(pos, pos);
+            return;
+        }
+        if (event->button() == Qt::LeftButton) {
+            beginDrag(Drag::ControlDraw, 0, pos);
+            drawControlAt(pos, pos, event->modifiers());
+            return;
+        }
         return;
     }
 
@@ -929,6 +1262,27 @@ void PianoRollView::mousePressEvent(QMouseEvent* event)
 void PianoRollView::mouseDoubleClickEvent(QMouseEvent* event)
 {
     const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && laneMode_ == LaneMode::PitchBend && laneRect().contains(pos)) {
+        if (drag_ == Drag::ControlDraw || drag_ == Drag::ControlErase)
+            endDrag();
+        const auto* curControls = controls();
+        std::vector<ControlPoint> next = curControls != nullptr ? *curControls : std::vector<ControlPoint>{};
+        const int grid = effectiveGrid(event->modifiers());
+        const int t = std::max(0, snapDown(std::max(0.0, tickAt(pos.x())), grid));
+        next.erase(
+            std::remove_if(next.begin(), next.end(),
+                [t](const ControlPoint& pt) { return pt.kind == ControlKind::PitchBend && pt.start == t; }),
+            next.end());
+        if (next.size() < kMaxPatternControls) {
+            next.push_back(Project::clamped(ControlPoint{t, ControlKind::PitchBend, 0, 0.0}));
+            std::stable_sort(next.begin(), next.end(),
+                [](const ControlPoint& a, const ControlPoint& b) { return a.start < b.start; });
+            emit controlsChanged(next);
+            emit controlEditFinished();
+            viewport()->update();
+        }
+        return;
+    }
     if (event->button() == Qt::LeftButton && tool_ == Tool::Select && gridRect().contains(pos)) {
         if (const auto hit = noteAt(pos)) {
             // Double-clicking an existing note in Select mode deletes it cleanly.
@@ -955,7 +1309,11 @@ void PianoRollView::mouseDoubleClickEvent(QMouseEvent* event)
 void PianoRollView::mouseMoveEvent(QMouseEvent* event)
 {
     const QPoint pos = event->position().toPoint();
+    const QRect corner = laneCornerRect();
+    const bool wasInCorner = hover_ && corner.contains(*hover_);
     hover_ = pos;
+    if (wasInCorner != corner.contains(pos))
+        viewport()->update(corner);
     const auto* list = notes();
     if (drag_ == Drag::None || list == nullptr) {
         if (tool_ == Tool::Slice && gridRect().contains(pos)) {
@@ -1049,6 +1407,12 @@ void PianoRollView::mouseMoveEvent(QMouseEvent* event)
     case Drag::Velocity:
         setVelocityAt(dragLast_, pos);
         break;
+    case Drag::ControlDraw:
+        drawControlAt(dragLast_, pos, event->modifiers());
+        break;
+    case Drag::ControlErase:
+        eraseControlAt(dragLast_, pos);
+        break;
     case Drag::Keys:
         sound(pos.y() >= timeline::kRulerHeight && pos.y() < gridRect().bottom() ? keyAt(pos.y()) : -1,
             lastVelocity_);
@@ -1064,7 +1428,10 @@ void PianoRollView::mouseReleaseEvent(QMouseEvent* /*event*/) { endDrag(); }
 bool PianoRollView::viewportEvent(QEvent* event)
 {
     if (event->type() == QEvent::Leave) {
+        const bool wasInCorner = hover_ && laneCornerRect().contains(*hover_);
         hover_.reset();
+        if (wasInCorner)
+            viewport()->update(laneCornerRect());
         if (drag_ == Drag::None && sliceLine_) {
             sliceLine_.reset();
             viewport()->update();

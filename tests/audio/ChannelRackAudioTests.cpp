@@ -589,3 +589,113 @@ TEST_CASE(
     CHECK(std::isfinite(state->audioClips[0].rate));
     CHECK(state->audioClips[0].rate == 1.0);
 }
+
+namespace {
+
+class DummyMidiProcessor : public vloom::AudioProcessor {
+public:
+    explicit DummyMidiProcessor(bool noteFx = false, int extraOuts = 0)
+        : noteFx_(noteFx)
+        , extraOuts_(extraOuts)
+    {
+    }
+    [[nodiscard]] vloom::PluginInfo info() const override
+    {
+        vloom::PluginInfo i;
+        i.kind = noteFx_ ? vloom::PluginInfo::Kind::Effect : vloom::PluginInfo::Kind::Instrument;
+        return i;
+    }
+    [[nodiscard]] bool makesNotes() const override { return noteFx_; }
+    [[nodiscard]] int extraOutputCount() const override { return extraOuts_; }
+    bool activate(double /*sampleRate*/, int /*maxBlockFrames*/) override { return true; }
+    void process(const vloom::ProcessContext& ctx) noexcept override
+    {
+        if (noteFx_ && ctx.notesOutCount != nullptr) {
+            int n = 0;
+            for (const auto& ev : ctx.notes) {
+                if (static_cast<std::size_t>(n) >= ctx.notesOut.size())
+                    break;
+                auto shifted = ev;
+                shifted.key = static_cast<std::int16_t>(std::clamp(ev.key + 12, 0, 127));
+                ctx.notesOut[static_cast<std::size_t>(n++)] = shifted;
+            }
+            *ctx.notesOutCount = n;
+        }
+    }
+
+private:
+    bool noteFx_ = false;
+    int extraOuts_ = 0;
+};
+
+} // namespace
+
+TEST_CASE("ChannelRackAudio builds noteEffect chains, pluginOutputs, notesFrom and MIDI controls", "[audio]")
+{
+    auto inst0 = std::make_shared<vloom::PluginInstance>(std::make_unique<DummyMidiProcessor>(false, 2));
+    auto inst1 = std::make_shared<vloom::PluginInstance>(std::make_unique<DummyMidiProcessor>(false, 0));
+    auto arp1 = std::make_shared<vloom::PluginInstance>(std::make_unique<DummyMidiProcessor>(true, 0));
+    auto arp2 = std::make_shared<vloom::PluginInstance>(std::make_unique<DummyMidiProcessor>(true, 0));
+    REQUIRE(inst0->activate(kRate, vloom::kMaxBlockFrames));
+    REQUIRE(inst1->activate(kRate, vloom::kMaxBlockFrames));
+    REQUIRE(arp1->activate(kRate, vloom::kMaxBlockFrames));
+    REQUIRE(arp2->activate(kRate, vloom::kMaxBlockFrames));
+
+    Project project;
+    PluginSlot sInst0;
+    sInst0.instance = 10;
+    project.setChannelInstrument(0, sInst0);
+    project.setChannelPluginOutputs(0, {2, 4});
+
+    PluginSlot sArp1;
+    sArp1.instance = 20;
+    PluginSlot sArp2;
+    sArp2.instance = 21;
+    REQUIRE(project.addChannelNoteEffect(0, sArp1));
+    REQUIRE(project.addChannelNoteEffect(0, sArp2));
+
+    PluginSlot sInst1;
+    sInst1.instance = 11;
+    project.setChannelInstrument(1, sInst1);
+    project.setChannelNotesFrom(1, 0);
+
+    project.addNote(0, 0, Note{60, 0, 240, 100});
+    project.setControls(0, 0,
+        {
+            ControlPoint{0, ControlKind::PitchBend, 0, -0.25, 0},
+            ControlPoint{120, ControlKind::Controller, 1, 0.8, 0},
+        });
+    project.addClip(Clip{0, 0, 0});
+
+    ChannelRackAudio rack;
+    rack.setPluginResolver([&](std::uint64_t h) -> std::shared_ptr<vloom::PluginInstance> {
+        if (h == 10)
+            return inst0;
+        if (h == 11)
+            return inst1;
+        if (h == 20)
+            return arp1;
+        if (h == 21)
+            return arp2;
+        return nullptr;
+    });
+
+    std::vector<ChannelRackAudio::LoadError> errors;
+    const auto patState = rack.build(project, 0, kRate, false, errors);
+    REQUIRE(patState != nullptr);
+    CHECK(patState->channels[0].noteEffect == arp1);
+    REQUIRE(patState->channels[0].noteEffects.size() == 1);
+    CHECK(patState->channels[0].noteEffects[0] == arp2);
+    CHECK(patState->channels[0].pluginOutputs == std::vector<int>{2, 4});
+    CHECK(patState->channels[1].notesFrom == 0);
+    REQUIRE(patState->channels[0].controls.size() == 2);
+    CHECK(patState->channels[0].controls[0].type == vloom::ControlEvent::Type::PitchBend);
+    CHECK(patState->channels[0].controls[1].type == vloom::ControlEvent::Type::Controller);
+    CHECK(patState->channels[0].controls[1].number == 1);
+
+    const auto songState = rack.build(project, 0, kRate, true, errors);
+    REQUIRE(songState != nullptr);
+    REQUIRE(songState->patterns.size() == 1);
+    REQUIRE(songState->patterns[0].controls.size() == 4);
+    CHECK(songState->patterns[0].controls[0].size() == 2);
+}

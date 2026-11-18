@@ -25,9 +25,9 @@ Everything VloomDAW has today, with how far each feature goes. The
 | Time signature display | ✅ | Next to the tempo |
 | Song position LCD | ✅ | Bar · beat · tick (960 PPQ), or click for min : sec . ms |
 | Master volume knob | ✅ | Drives the engine's master gain |
-| Pitch knob | ⏳ | M2: transposes instruments |
-| Pattern / song mode | ✅ | `L`: PAT loops the current pattern; SONG plays the playlist (pattern and audio clips) from the playhead, once — looping the song arrives in M3 |
-| Record arm | 🎨 | `R`; keeps the armed state only; audio input in M6 |
+| Pitch knob | ✅ | Transposes channel-rack step and sampler/synth playback in semitones (`Engine::setMasterPitch`) |
+| Pattern / song mode | ✅ | `L`: PAT loops the current pattern; SONG plays and loops the playlist (or the active Loop Bar range) |
+| Record arm, Audio & MIDI recording | ✅ | `R`; records live hardware MIDI notes & CC/Pitch Bend (`MidiTake`) into patterns/clips and live audio input (`AudioTake`) to 32-bit float WAV clips per loop pass with latency compensation |
 | Key LCD (root note and scale) | ✅ | C .. B; major, minors, modes, pentatonics, blues, chromatic; shades the piano roll |
 | Pattern selector | ✅ | Add, pick and delete patterns by name; the channel rack plays the selected one |
 | Patterns menu | ✅ / ⏳ | Find first / next empty (`Shift+F4`, `F4`, `Ctrl+F4` without naming), Rename (`F2`), Transpose, Insert one (`Shift+Ctrl+Ins`), Clone (`Shift+Ctrl+C`), Delete (`Shift+Ctrl+Del`, asks when the pattern is not empty), Move up / down (`Shift+Ctrl+Up / Down`), Split by channel. Colours and rendering to an audio clip arrive in M3 |
@@ -55,7 +55,7 @@ the transport in all three editors.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Mixer panel (`F9`) | ✅ | Master (`Main`) and 0-125 console strips (`Standard`, `Bus`, `FX`, `Aux`), added via `+ Bus / + FX / + Aux / + Channel` or right-clicking empty space; draggable `Inserts` FX rack height (0–9 visible rows, remembered across sessions), `Sends` rack (up to 8 pre/post-fader sends per strip), submix output routing (`Main`, `Bus`, `Aux`), `Stereo / Mono` DSP summing toggle on inserts and Master, `<C>` bipolar pan bar, fader (unity at 80 %), dB readout, mute, solo, and double-click inline rename |
+| Mixer panel (`F9`) | ✅ | Master (`Main`) and 0-125 console strips (`Standard`, `Bus`, `FX`, `Aux`), added via `+ Bus / + FX / + Aux / + Channel` or right-clicking empty space; draggable `Inserts` FX rack height (0–9 visible rows, remembered across sessions), `Sends` rack (up to 8 pre/post-fader and **Sidechain (`SC`)** sends per strip), per-strip **Record Arm (`●`)** & **Audio Input Monitor (`I`)** buttons synced 1:1 with Playlist track headers and Transport `Record` (`R`), submix output routing (`Main`, `Bus`, `Aux`), `Stereo / Mono` DSP summing toggle on inserts and Master, `<C>` bipolar pan bar, fader (unity at 80 %), dB readout, mute, solo, and double-click inline rename |
 | Master track | ✅ | Gain, pan, mute, `Stereo / Mono` summing and master FX drive the engine; the meter shows the real output |
 | Insert tracks | ✅ | Fader, pan, mute, solo, `Stereo / Mono` summing, FX slots, sends, submix output and meter act on the channels and buses routed to them |
 | Peak meters | ✅ | Stereo, with peak hold and a clip light |

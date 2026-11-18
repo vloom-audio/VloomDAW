@@ -33,12 +33,16 @@ class PianoRollView : public QAbstractScrollArea {
 
 public:
     enum class Tool { Select, Draw, Paint, Slice, Delete, Playback };
+    enum class LaneMode { Velocity, PitchBend, Controller, Pressure };
 
     explicit PianoRollView(QWidget* parent = nullptr);
 
     void setProject(const Project* project);
     void setTarget(std::size_t pattern, std::size_t channel);
     void setKey(int root, Scale scale);
+    void setLaneMode(LaneMode mode, int cc = 1);
+    [[nodiscard]] LaneMode laneMode() const { return laneMode_; }
+    [[nodiscard]] int laneController() const { return laneCc_; }
     /// Playhead in ticks from the pattern start (< 0: hidden).
     void setPlayhead(double tick);
     /// What notes snap to, in ticks (e.g. kTicksPerStep / 2 for 1/32 notes);
@@ -89,6 +93,10 @@ signals:
     void notesChanged(const std::vector<vloomdaw::Note>& notes);
     /// The edit that notesChanged() made is complete: one step to undo.
     void editFinished();
+    /// MIDI control curve points (pitch bend / CC / channel pressure) changed during a lane drag.
+    void controlsChanged(const std::vector<vloomdaw::ControlPoint>& controls);
+    /// The edit that controlsChanged() made is complete: one step to undo.
+    void controlEditFinished();
     /// A key is to sound (the keyboard, or a note being placed), until keyReleased().
     void keyPressed(int key, int velocity);
     void keyReleased(int key);
@@ -126,6 +134,8 @@ private:
         Slice, ///< Slice tool held: cuts notes crossed by the slice line
         Scrub, ///< Playback tool or Ruler held: scrubs transport position
         Velocity, ///< in the lane: sets the velocity of the stems it passes over
+        ControlDraw, ///< in the lane: draws/updates MIDI control curve points
+        ControlErase, ///< in the lane: erases MIDI control curve points
         Keys, ///< on the keyboard: plays the key under the mouse
     };
 
@@ -136,11 +146,15 @@ private:
     };
 
     [[nodiscard]] const std::vector<Note>* notes() const;
+    [[nodiscard]] const std::vector<ControlPoint>* controls() const;
+    [[nodiscard]] bool matchesActiveLane(const ControlPoint& pt) const;
+    [[nodiscard]] QString activeLaneShortLabel() const;
     [[nodiscard]] double pixelsPerTick() const;
     [[nodiscard]] int lengthTicks() const; ///< scrollable length
     [[nodiscard]] QRect rulerRect() const;
     [[nodiscard]] QRect gridRect() const; ///< right of the keyboard, between the ruler and the lane
-    [[nodiscard]] QRect laneRect() const; ///< the velocity lane, right of the keyboard
+    [[nodiscard]] QRect laneRect() const; ///< the velocity/control lane, right of the keyboard
+    [[nodiscard]] QRect laneCornerRect() const; ///< bottom-left lane selector area under the keyboard
     [[nodiscard]] double tickAt(int x) const;
     [[nodiscard]] int keyAt(int y) const;
     [[nodiscard]] int yOfKey(int key) const; ///< top of the row
@@ -166,6 +180,9 @@ private:
     void sound(int key, int velocity);
     void eraseAt(const QPoint& pos);
     void setVelocityAt(const QPoint& from, const QPoint& to);
+    void drawControlAt(const QPoint& from, const QPoint& to, Qt::KeyboardModifiers mods);
+    void eraseControlAt(const QPoint& from, const QPoint& to);
+    void openLaneMenu(const QPoint& globalPos);
     void nudge(int ticks, int keys);
 
     const Project* project_ = nullptr;
@@ -174,6 +191,8 @@ private:
     int root_ = 0;
     Scale scale_ = Scale::Major;
     Tool tool_ = Tool::Select;
+    LaneMode laneMode_ = LaneMode::Velocity;
+    int laneCc_ = 1;
     double playhead_ = -1.0;
     double pixelsPerBeat_ = 64.0;
     int lastLength_ = kTicksPerStep; ///< length of the next new note
@@ -192,6 +211,8 @@ private:
 
     Drag drag_ = Drag::None;
     std::vector<Note> dragNotes_; ///< the notes when the drag began (Erase, Velocity: as it left them)
+    std::vector<ControlPoint> dragControls_; ///< control points while dragging a control lane
+    bool dragControlChanged_ = false;
     NoteSelection boxBase_; ///< Box: what was selected before it
     std::optional<SliceLine> sliceLine_;
     int paintLastSlot_ = -1;

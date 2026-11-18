@@ -67,6 +67,26 @@ public:
     [[nodiscard]] int selectedTrack() const { return selectedTrack_; }
     void setSelectedTrack(int track);
 
+    [[nodiscard]] int armedTrack() const { return armedTrack_; }
+    void setArmedTrack(int track);
+
+    [[nodiscard]] int monitoredTrack() const { return monitoredTrack_; }
+    void setMonitoredTrack(int track);
+
+    /// Active hardware capture device label shown on Audio track `IN` rows & tooltips.
+    void setInputDeviceLabel(const QString& label);
+
+    /// Live growing recording region + real-time waveform rendered while recording audio.
+    struct LiveRecordingView {
+        int track = -1;
+        double startTick = 0.0;
+        double endTick = 0.0;
+        double peakSeconds = 0.005;
+        QString label;
+        const std::vector<float>* peaks = nullptr;
+    };
+    void setLiveRecording(const std::optional<LiveRecordingView>& rec);
+
     /// What Draw and Paint place: a pattern clip of pattern `index`, or an
     /// audio clip of channel `index`'s sample.
     struct ClipSource {
@@ -191,6 +211,8 @@ signals:
     void trackOutdentRequested(std::size_t track);
     void trackMuteToggled(std::size_t track, bool muted);
     void trackSoloToggled(std::size_t track, bool solo);
+    void trackRecordArmToggled(std::size_t track, bool armed);
+    void trackMonitorToggled(std::size_t track, bool monitored);
     /// Header fader (`0..1`) or pan (`-1..+1`) adjusted on `track`.
     void trackVolumeChanged(std::size_t track, double volume);
     void trackPanChanged(std::size_t track, double pan);
@@ -274,6 +296,8 @@ private:
     [[nodiscard]] QRect trackNumberRect(int track) const;
     [[nodiscard]] QRect muteButtonRect(int track) const;
     [[nodiscard]] QRect soloButtonRect(int track) const;
+    [[nodiscard]] QRect armButtonRect(int track) const;
+    [[nodiscard]] QRect monitorButtonRect(int track) const;
     [[nodiscard]] QRect trackBadgeRect(int track) const;
     [[nodiscard]] QRect trackNameRect(int track) const;
     [[nodiscard]] QRect volumeBarRect(int track) const;
@@ -290,6 +314,7 @@ private:
     void paintTrackMeter(QPainter& p, int track) const;
     void paintPillButton(
         QPainter& p, const QRect& r, const QString& label, bool on, const QColor& onColor) const;
+    void paintRecordArmButton(QPainter& p, const QRect& r, bool armed) const;
     void paintInspectorBox(
         QPainter& p, const QRect& r, const QString& prefix, const QString& text, bool active) const;
     [[nodiscard]] QPixmap waveTile(const ClipAudio* info, int tileIndex, int waveH, double secondsPerPixel,
@@ -358,10 +383,16 @@ private:
     void beginDrag(ClipRef clip, const QPoint& pos);
     void startTrackNameEdit(int track);
     void commitTrackNameEdit();
+    [[nodiscard]] QRect liveRecordingRect(const LiveRecordingView& rec) const;
+    void paintLiveRecording(QPainter& p, const QRect& clipArea) const;
 
     const Project* project_ = nullptr;
     const MixerModel* mixer_ = nullptr;
     int selectedTrack_ = 0;
+    int armedTrack_ = -1;
+    int monitoredTrack_ = -1;
+    QString inputDeviceLabel_;
+    std::optional<LiveRecordingView> liveRecording_;
     int headerWidth_ = kDefaultHeaderWidth;
     bool resizingHeaderWidth_ = false;
     int headerResizeStartX_ = 0;
