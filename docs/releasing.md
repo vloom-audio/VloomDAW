@@ -38,7 +38,11 @@ up), sign on the machine that holds the key instead:
 A tag with a pre-release part (`v0.3.0-rc.1`) is offered only to users who
 turned on *Include beta versions*. The tag's version must be newer than the
 installed one by [semver](https://semver.org) rules, and its numbers must
-match `VERSION` in `CMakeLists.txt` (the workflow checks).
+match `VERSION` in `CMakeLists.txt` (the workflow checks). Name candidates
+`-rc.1`, `-rc.2`… (with the dot: `rc10` would sort before `rc2`). The app
+reports the tag's full version (the workflow passes it as
+`VLOOMDAW_VERSION_LABEL`), so a copy of `0.1.0-rc.1` knows `0.1.0` is newer and
+offers it.
 
 To get installers without releasing, run the workflow from the Actions tab
 ("Run workflow"): they are attached to the run as artifacts for 14 days, with

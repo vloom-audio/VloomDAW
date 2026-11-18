@@ -142,6 +142,7 @@ jobs:
         working-directory: VloomDAW
         env:
           CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           extra=()
           if [[ "$RUNNER_OS" == macOS ]]; then
@@ -153,7 +154,8 @@ jobs:
           if [[ "$RUNNER_OS" != Windows ]]; then
             extra+=(-DFFMPEG_ROOT="$GITHUB_WORKSPACE/ffmpeg-prefix")
           fi
-          cmake --preset release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" "${extra[@]}"
+          # The full version (0.1.0-rc.1) is what the app reports; see src/CMakeLists.txt.
+          cmake --preset release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DVLOOMDAW_VERSION_LABEL="$VERSION" "${extra[@]}"
 
       - name: Build
         working-directory: VloomDAW

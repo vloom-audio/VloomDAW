@@ -59,7 +59,20 @@ target_sources(vloomdaw_core PRIVATE
     audio/StemAudio.cpp)
 target_include_directories(vloomdaw_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(vloomdaw_core PUBLIC vloom::engine vloom::dsp PRIVATE vloomdaw::ffmpeg signalsmith-stretch nlohmann_json::nlohmann_json monocypher)
-target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${PROJECT_VERSION}")
+# The version the app reports (About, the updater, project files): the release
+# workflow passes the tag's full version, e.g. 0.1.0-rc.1, so a release
+# candidate knows it is older than 0.1.0 and is offered it. Its numbers must be
+# the project's VERSION; without it, the app reports PROJECT_VERSION.
+set(VLOOMDAW_VERSION_LABEL "${PROJECT_VERSION}" CACHE STRING "Version the app reports, e.g. 0.1.0-rc.1")
+if(NOT VLOOMDAW_VERSION_LABEL MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$")
+    message(FATAL_ERROR "VLOOMDAW_VERSION_LABEL '${VLOOMDAW_VERSION_LABEL}' is not a semantic version")
+endif()
+string(REGEX REPLACE "-.*$" "" vloomdaw_label_numbers "${VLOOMDAW_VERSION_LABEL}")
+if(NOT vloomdaw_label_numbers STREQUAL PROJECT_VERSION)
+    message(FATAL_ERROR "VLOOMDAW_VERSION_LABEL ${VLOOMDAW_VERSION_LABEL} does not match VERSION ${PROJECT_VERSION}")
+endif()
+message(STATUS "VloomDAW: reports version ${VLOOMDAW_VERSION_LABEL}")
+target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_VERSION="${VLOOMDAW_VERSION_LABEL}")
 if(VLOOMDAW_STEMS_ONNX)
     # The model store offers the ONNX models only where the helper can run them.
     target_compile_definitions(vloomdaw_core PUBLIC VLOOMDAW_STEMS_ONNX)
