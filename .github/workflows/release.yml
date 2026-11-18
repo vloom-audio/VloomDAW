@@ -44,7 +44,11 @@ jobs:
           - name: windows
             os: windows-2022 # has Inno Setup 6
           - name: macos
-            os: macos-15
+            # The same pool as ci.yml: macos-15 (arm64) jobs were cancelled
+            # unstarted for lack of capacity. The app is built universal
+            # (arm64 + x86_64) and for macOS 13+, so the runner version only
+            # needs to carry the Xcode that builds that.
+            os: macos-latest
           - name: linux
             os: ubuntu-22.04 # an older glibc: the AppImage runs on more distributions
     defaults:
