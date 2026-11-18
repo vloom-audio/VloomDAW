@@ -411,18 +411,23 @@ endif()
 # Windows: FFmpeg's DLLs (LGPL) go next to the app, with FFmpeg's licence.
 # macOS and Linux release builds link a static FFmpeg (scripts/build-ffmpeg.sh).
 # The stem separator's ONNX Runtime and DirectML, with their licences.
+# Both are Windows-only: their licences go to licenses/, beside bin/
+# (packaging/windows/VloomDAW.iss installs both folders).
+set(VLOOMDAW_INSTALL_LICENSEDIR licenses)
 if(VLOOMDAW_STEMS_ONNX)
     install(FILES ${VLOOMDAW_ONNX_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
     list(GET VLOOMDAW_ONNX_LICENSES 0 _ort_license)
     list(GET VLOOMDAW_ONNX_LICENSES 1 _ort_notices)
     list(GET VLOOMDAW_ONNX_LICENSES 2 _dml_license)
-    install(FILES "${_ort_license}" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME OnnxRuntime-LICENSE.txt)
-    install(FILES "${_ort_notices}" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME OnnxRuntime-ThirdPartyNotices.txt)
-    install(FILES "${_dml_license}" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME DirectML-LICENSE.txt)
+    install(FILES "${_ort_license}" DESTINATION ${VLOOMDAW_INSTALL_LICENSEDIR} RENAME OnnxRuntime-LICENSE.txt)
+    install(FILES "${_ort_notices}" DESTINATION ${VLOOMDAW_INSTALL_LICENSEDIR}
+        RENAME OnnxRuntime-ThirdPartyNotices.txt)
+    install(FILES "${_dml_license}" DESTINATION ${VLOOMDAW_INSTALL_LICENSEDIR} RENAME DirectML-LICENSE.txt)
 endif()
 if(WIN32 AND VLOOMDAW_FFMPEG_DLLS)
     install(FILES ${VLOOMDAW_FFMPEG_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
     if(EXISTS "${FFMPEG_ROOT}/LICENSE.txt")
-        install(FILES "${FFMPEG_ROOT}/LICENSE.txt" DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME FFmpeg-LICENSE.txt)
+        install(FILES "${FFMPEG_ROOT}/LICENSE.txt" DESTINATION ${VLOOMDAW_INSTALL_LICENSEDIR}
+            RENAME FFmpeg-LICENSE.txt)
     endif()
 endif()

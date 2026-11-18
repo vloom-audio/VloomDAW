@@ -118,7 +118,9 @@ jobs:
         run: |
           cmake -S vloom-engine/tools/vloom-plugin-bridge -B bridge32 -A Win32
           cmake --build bridge32 --config Release
-          cp bridge32/Release/vloom-plugin-bridge32.exe VloomDAW/build/dev/
+          # Next to the app and the tests (build/<preset>/bin, per configuration
+          # with the Visual Studio generator).
+          cp bridge32/Release/vloom-plugin-bridge32.exe VloomDAW/build/dev/bin/Debug/
 
       - name: Test
         working-directory: VloomDAW
