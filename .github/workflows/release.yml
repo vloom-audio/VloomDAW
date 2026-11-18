@@ -6,7 +6,10 @@ name: Release
 #   Linux:   VloomDAW-<version>-linux-x86_64.AppImage
 #
 # - A tag v* (e.g. v0.2.0) builds them and opens a DRAFT GitHub Release with
-#   them and SHA256SUMS.txt; a maintainer reviews and publishes it.
+#   them and SHA256SUMS.txt. The "sign" job then waits for a maintainer to
+#   approve it (the release-signing environment), signs SHA256SUMS.txt with
+#   the update key and uploads SHA256SUMS.txt.minisig; a maintainer then
+#   reviews and publishes the draft. See docs/releasing.md.
 # - "Run workflow" (Actions tab) or a PR that changes packaging builds them
 #   as workflow artifacts only (kept 14 days).
 #
@@ -92,7 +95,9 @@ jobs:
           else
             version="${base}-dev.${GITHUB_SHA::7}"
           fi
-          [[ "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || { echo "::error::unusable version '$version'"; exit 1; }
+          # The same rule as CMake's VLOOMDAW_VERSION_LABEL and sign-release.sh:
+          # x.y.z with an optional pre-release, no build metadata (+...).
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::unusable version '$version'"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           # Numbers only, for the Windows file version resource.
           echo "numeric=$(grep -oE '^[0-9]+([.][0-9]+){0,3}' <<< "$version")" >> "$GITHUB_OUTPUT"
@@ -143,6 +148,7 @@ jobs:
         working-directory: VloomDAW
         env:
           CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           extra=()
           if [[ "$RUNNER_OS" == macOS ]]; then
@@ -154,7 +160,8 @@ jobs:
           if [[ "$RUNNER_OS" != Windows ]]; then
             extra+=(-DFFMPEG_ROOT="$GITHUB_WORKSPACE/ffmpeg-prefix")
           fi
-          cmake --preset release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" "${extra[@]}"
+          # The full version (0.1.0-rc.1) is what the app reports; see src/CMakeLists.txt.
+          cmake --preset release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DVLOOMDAW_VERSION_LABEL="$VERSION" "${extra[@]}"
 
       - name: Build
         working-directory: VloomDAW
@@ -267,3 +274,63 @@ jobs:
           cat SHA256SUMS.txt
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
             --title "VloomDAW ${GITHUB_REF_NAME}" --generate-notes ./*
+
+  sign:
+    name: sign the release
+    if: github.ref_type == 'tag'
+    needs: release
+    runs-on: ubuntu-24.04
+    # Runs only after a maintainer approves it: the release-signing
+    # environment requires a reviewer and holds the minisign secret key
+    # (MINISIGN_SECRET_KEY) and its password (MINISIGN_PASSWORD), so no other
+    # job, branch or pull request can reach them.
+    environment: release-signing
+    permissions:
+      contents: write # uploads the signature to the draft release
+    steps:
+      - name: Check out the public key
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: packaging/update/minisign.pub
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends minisign
+
+      - name: Sign SHA256SUMS.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$RUNNER_TEMP/sign"
+          mkdir -p "$work/dist"
+          trap 'rm -rf "$work"' EXIT
+          # Sign only a release tag (the same rule as scripts/sign-release.sh):
+          # the trigger is just v*, and "vfoo" must not get the update key.
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$GITHUB_REF_NAME is not a release tag (v<major>.<minor>.<patch>[-<pre-release>])"
+            exit 1
+          fi
+          if [ -z "$MINISIGN_SECRET_KEY" ] || [ -z "$MINISIGN_PASSWORD" ]; then
+            echo "::error::MINISIGN_SECRET_KEY and MINISIGN_PASSWORD must be set in the release-signing environment"
+            exit 1
+          fi
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$work/dist" \
+            --pattern SHA256SUMS.txt --pattern 'VloomDAW-*'
+          # Vouch only for what was checked: every listed file must be here and match.
+          (cd "$work/dist" && sha256sum --check --strict SHA256SUMS.txt)
+          # Secrets set from Windows may carry CRLF line ends: minisign wants LF.
+          printf '%s\n' "$MINISIGN_SECRET_KEY" | tr -d '\r' > "$work/vloomdaw.key"
+          printf '%s\n' "$MINISIGN_PASSWORD" | tr -d '\r' |
+            minisign -S -s "$work/vloomdaw.key" -m "$work/dist/SHA256SUMS.txt" \
+              -t "VloomDAW $GITHUB_REF_NAME SHA256SUMS.txt"
+          rm -f "$work/vloomdaw.key"
+          # The signature must verify with the key built into the app.
+          minisign -V -p packaging/update/minisign.pub -m "$work/dist/SHA256SUMS.txt"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$work/dist/SHA256SUMS.txt.minisig"
+          echo "Signed: $GITHUB_REF_NAME now carries SHA256SUMS.txt.minisig. Publish the draft when ready."
