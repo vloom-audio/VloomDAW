@@ -309,8 +309,9 @@ jobs:
             --pattern SHA256SUMS.txt --pattern 'VloomDAW-*'
           # Vouch only for what was checked: every listed file must be here and match.
           (cd "$work/dist" && sha256sum --check --strict SHA256SUMS.txt)
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$work/vloomdaw.key"
-          printf '%s\n' "$MINISIGN_PASSWORD" |
+          # Secrets set from Windows may carry CRLF line ends: minisign wants LF.
+          printf '%s\n' "$MINISIGN_SECRET_KEY" | tr -d '\r' > "$work/vloomdaw.key"
+          printf '%s\n' "$MINISIGN_PASSWORD" | tr -d '\r' |
             minisign -S -s "$work/vloomdaw.key" -m "$work/dist/SHA256SUMS.txt" \
               -t "VloomDAW $GITHUB_REF_NAME SHA256SUMS.txt"
           rm -f "$work/vloomdaw.key"
