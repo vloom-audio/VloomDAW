@@ -51,8 +51,24 @@ ctest --preset dev
 | OS | Run |
 |---|---|
 | macOS | `open build/dev/src/VloomDAW.app` |
-| Windows | `build\dev\src\Debug\VloomDAW.exe` (Visual Studio generator) |
-| Linux | `build/dev/src/VloomDAW` |
+| Windows | `build\dev\bin\VloomDAW.exe` (Ninja; `build\dev\bin\Debug\` with the Visual Studio generator) |
+| Linux | `build/dev/bin/VloomDAW` |
+
+On Windows and Linux the app, its helper programs (`vloomdaw-plugin-probe`,
+`vloomdaw-stems`, the plugin bridge) and the DLLs they need land in
+`build/<preset>/bin/`, apart from CMake's own files; the app finds its helpers next
+to itself.
+
+On Windows, put Qt next to the app once (and again after updating Qt). Its plugins go
+in `bin\plugins`, and `qt.conf` tells Qt to look there, as in the installed app:
+
+```sh
+windeployqt --debug --no-translations --plugindir build/dev/bin/plugins build/dev/bin/VloomDAW.exe
+cp packaging/windows/qt.conf build/dev/bin/
+```
+
+(`--release` for the `release` preset; `copy packaging\windows\qt.conf build\dev\bin\` in
+`cmd`.) Without that step, run it with `%QT_DIR%\bin` on `PATH` and no `qt.conf` in `bin`.
 
 Speed tip: `export CPM_SOURCE_CACHE="$HOME/.cache/cpm"` shares downloaded
 dependencies between builds and repos.

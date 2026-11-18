@@ -166,9 +166,14 @@ jobs:
         run: |
           cmake -S vloom-engine/tools/vloom-plugin-bridge -B bridge32 -A Win32
           cmake --build bridge32 --config Release
+          # stage/ becomes the install folder as it is: bin/ (the programs,
+          # every DLL, qt.conf, the Qt plugins in bin/plugins) and licenses/.
           cmake --install VloomDAW/build/release --config Release --prefix stage
           cp bridge32/Release/vloom-plugin-bridge32.exe stage/bin/
-          windeployqt --release --no-translations --no-compiler-runtime stage/bin/VloomDAW.exe
+          windeployqt --release --no-translations --no-compiler-runtime \
+            --plugindir stage/bin/plugins stage/bin/VloomDAW.exe
+          # Tells Qt its plugins are in bin/plugins, not next to the exe.
+          cp VloomDAW/packaging/windows/qt.conf stage/bin/
           # The MSVC runtime goes next to the app (app-local), so it runs on a
           # PC without the VC++ Redistributable. windeployqt cannot find it
           # outside a developer prompt: take it from Visual Studio directly.
@@ -177,13 +182,14 @@ jobs:
           crt=$(ls -d "$(cygpath -u "$vs")"/VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT | sort -V | tail -n1)
           test -d "$crt" || { echo "::error::MSVC runtime not found"; exit 1; }
           cp "$crt"/*.dll stage/bin/
-          ls stage/bin/*.dll
+          ls stage/bin/*.dll stage/bin/plugins stage/licenses
+          test -f stage/bin/plugins/platforms/qwindows.dll || { echo "::error::no Qt platform plugin in stage/bin/plugins"; exit 1; }
           iscc="$(command -v iscc || true)"
           [[ -n "$iscc" ]] || iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           mkdir -p dist
           # Inno Setup options take "-" as well as "/"; "-" keeps Git Bash from
           # turning "/D..." into a path.
-          "$iscc" "-DAppVersion=$VERSION" "-DNumericVersion=$NUMERIC_VERSION" "-DStageDir=$(cygpath -w "$PWD/stage/bin")" \
+          "$iscc" "-DAppVersion=$VERSION" "-DNumericVersion=$NUMERIC_VERSION" "-DStageDir=$(cygpath -w "$PWD/stage")" \
             "-DOutputDir=$(cygpath -w "$PWD/dist")" "$(cygpath -w "$PWD/VloomDAW/packaging/windows/VloomDAW.iss")"
 
       - name: Package (macOS)
