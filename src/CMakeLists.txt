@@ -396,6 +396,14 @@ if(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:vloomdaw-plugin-probe> $<TARGET_FILE:vloomdaw-stems> $<TARGET_FILE_DIR:VloomDAW>/
         VERBATIM)
+    # Recording and input monitoring open the microphone (CoreAudio input):
+    # without a usage description macOS ends the app the moment it does.
+    # Added to whichever Info.plist the bundle was given, before signing.
+    add_custom_command(TARGET VloomDAW POST_BUILD
+        COMMAND plutil -replace NSMicrophoneUsageDescription -string
+            "VloomDAW records and monitors audio from the inputs you choose."
+            $<TARGET_BUNDLE_CONTENT_DIR:VloomDAW>/Info.plist
+        VERBATIM)
 else()
     set_target_properties(vloomdaw-plugin-probe vloomdaw-stems PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:VloomDAW>)
