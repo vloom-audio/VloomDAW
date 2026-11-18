@@ -8,7 +8,7 @@
 [![C++ Standard](https://img.shields.io/badge/C%2B%2B-20-ec4899.svg?style=flat-square)](#system-requirements)
 [![Framework: Qt 6](https://img.shields.io/badge/Qt-6.5%2B-10b981.svg?style=flat-square)](https://www.qt.io/)
 [![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20Windows%20%7C%20Linux-475569.svg?style=flat-square)](#quick-start)
-[![Milestone: M1](https://img.shields.io/badge/Milestone-M1%20(Channel%20Rack)-f59e0b.svg?style=flat-square)](#roadmap)
+[![Milestone: M6](https://img.shields.io/badge/Milestone-M6%20(Complete)-10b981.svg?style=flat-square)](#roadmap)
 
 [**Quick Start**](#quick-start) · [**Features**](#features) · [**Roadmap**](#roadmap) · [**Documentation**](#documentation) · [**Contributing**](#contributing) · [**Sponsor**](https://github.com/sponsors/vloom-audio)
 
@@ -16,34 +16,34 @@
 
 ---
 
-**VloomDAW** is a free, 100% open-source Digital Audio Workstation engineered around a fast, pattern-based production workflow. Designed from the ground up for beatmakers, composers, and sound designers, it brings step sequencing, a channel rack, piano roll editing, timeline arrangement, and real-time mixing to a native cross-platform studio environment.
+**VloomDAW** is a free, 100% open-source Digital Audio Workstation engineered around a fast, pattern-and-timeline production workflow. Designed from the ground up for beatmakers, vocal/instrument recording, composers, and sound designers, it combines step sequencing, an expressive Piano Roll with MIDI CC lanes, a multi-track Playlist with AI stem separation, a Studio-style Mixer Console with Sidechain & Bus routing, and full VST3 / VST2 / CLAP hosting in a native cross-platform studio environment.
 
 To ensure deterministic performance and strict separation of concerns, real-time audio processing lives in a standalone, UI-free repository: **[vloom-engine](https://github.com/vloom-audio/vloom-engine)**.
 
-> **🎯 Current Milestone: M1 — Channel Rack (Complete)**  
-> Drop audio samples directly onto the Channel Rack to sequence 16-step patterns through the real-time engine, with per-channel routing into dedicated Mixer inserts. Both the Piano Roll and Playlist interfaces are available for editing today, with audio playback scheduled for **M2** and **M3**.
+> **🎯 Current Milestone: M6 — Audio/MIDI Recording, I/O Matrix & Console Routing (Complete)**  
+> Record latency-compensated hardware audio takes and live MIDI performances directly into the Playlist and Piano Roll, configure physical Mono/Stereo input & output buses in the **Audio I/O Setup** matrix, host VST3, VST2 (32/64-bit), and CLAP instruments/effects with MIDI FX chains and multi-outputs, and export stems or mastered songs across WAV, FLAC, MP3, Ogg, and M4A.
 
 ---
 
 ## ✨ Features
 
-Below is an overview of current capabilities. For a granular breakdown of implementation status (*active*, *UI-only*, or *planned*), see the **[Full Feature Matrix](docs/features.md)**.
+Below is an overview of current capabilities. For a granular breakdown of implementation status, see the **[Full Feature Matrix](docs/features.md)**.
 
-### 🥁 Sequencing & Arrangement
-* **Transport & Timing** — Play, stop, metronome, tap tempo, LCD tempo/position readouts, master output trim, and musical key/scale display.
-* **Channel Rack & Step Sequencer** — Drag-and-drop sample loading across 16-step pads with per-channel gain and target mixer insert routing. Pattern edits apply seamlessly in real time without cutting active voices.
-* **Sample Browser** — Integrated directory browser for auditioning and dragging local audio assets straight onto the rack.
-* **Song Editors *(UI Preview)*** — Expressive Piano Roll editor (audio engine integration in **M2**) and Pattern Playlist timeline (**M3**).
+### 🥁 Sequencing, Recording & Arrangement
+* **Transport & Live Recording** — Play, stop, cycle loop, metronome, tap tempo, master pitch transpose, and latency-compensated **Audio & MIDI Recording** (`R`) with live growing waveform previews on armed tracks.
+* **Channel Rack & Step Sequencer** — Drag-and-drop audio sample & instrument loading across 1–16 bar patterns with per-channel volume, pan, mixer insert routing, **MIDI Note Effects** (up to 8 arpeggiators/chord FX), **Multi-Output Routing**, and **Shared Notes** layering.
+* **Piano Roll & MIDI Control Lanes** — Marquee selection, Draw, Paint, Slice, Legato, Scale Snap, pitch transposition, and bottom **MIDI Control Lanes** (`Velocity`, `Pitch Bend`, `Mod Wheel`, `Expression`, `Sustain`, `CC 0–127`, `Channel Pressure`).
+* **Playlist & AI Stem Extractor** — Multi-track timeline with **Loop Bar** range markers, `.mid` / audio / `.vloom` drag-and-drop, per-track Record Arm & Input Monitor, and GPU-accelerated **Demucs / MDX-Net Stem Separation**.
 
-### 🎚️ Mixing, Audio & Plugins
-* **Real-Time Mixer** — Master bus plus 16 insert tracks featuring real-time pan, faders, mute, solo, and responsive peak metering.
-* **Native Audio Backends** — Low-latency output via **CoreAudio** (macOS), **WASAPI** (Windows), and **ALSA** (Linux) powered by `vloom-engine`, including graceful hot-plug fallback to the system default device and automatic recovery.
-* **Sandboxed Plugin Discovery** — On-demand **VST3** and **CLAP** scanning (never triggered unprompted on startup). Metadata probing runs in an isolated child process (`vloomdaw-plugin-probe`) so faulty third-party plugins cannot crash the host. Browse by category, vendor, or format *(plugin audio hosting lands in **M4/M5**)*.
+### 🎚️ Mixing, Audio I/O & Plugins
+* **Studio Console Mixer** — Right-anchored `Main` bus plus up to 125 `Standard`, `Bus`, `FX`, and `Aux` channels with a 2×2 `[M | S]` / `[Arm | Monitor]` cluster, `Stereo / Mono` summing, `Inserts` FX rack, Pre/Post & **Sidechain (`SC`)** `Sends`, and delay compensation.
+* **Audio Driver & I/O Matrix Setup** — Low-latency **CoreAudio** (macOS), **WASAPI** (Windows), and **ALSA** (Linux) backends with hot-plug recovery, Separate vs. Unified interface mode, and a dedicated **Audio I/O Setup** matrix (`Inputs` / `Outputs` physical channel routing and live meters), accessible from both the Start Hub and Mixer.
+* **VST3, VST2, CLAP & Built-in DSP** — Isolated out-of-process scanning (`vloomdaw-plugin-probe`) and 32-bit Windows VST2 bridging (`vloom-plugin-bridge32`), factory preset browser, plus built-in Wavetable Synth and interactive Spectrum EQ.
 
-### 🖥️ Workspace & Performance
-* **Detachable Frameless Panels** — Detach the Mixer, Piano Roll, and Playlist into independent windows. Custom client-side headers integrate window controls while preserving native OS snapping and resizing on Windows and macOS.
-* **High-Refresh Rendering** — Adaptive UI frame pacing up to **240 Hz**, paired with a built-in real-time performance overlay (`Ctrl/Cmd + Shift + D`).
-* **Theme Engine** — Seven curated dark presets with customizable color parameters and built-in contrast validation.
+### 🖥️ Workspace & Customization
+* **Start Hub & Signed Auto-Updates** — Standalone studio launcher with arrangement previews, quick BPM presets, live Out/Mic status & I/O setup, `.vloom` Explorer file association, and Ed25519/Minisign-verified updates.
+* **Detachable High-Refresh Panels** — Detach the Mixer, Piano Roll, and Playlist into independent frameless windows with adaptive frame pacing up to **240 Hz** (`Ctrl/Cmd + Shift + D` overlay).
+* **Theme Engine** — Seven dark presets (`Midnight`, `Graphite`, and `Deep Black` with Vloom's signature rose-pink `#e8457c` accent, plus palette-matched `Slate`, `Forest`, `Plum`, and `Ember`), custom role overrides, and WCAG contrast checks.
 
 ---
 
@@ -55,9 +55,13 @@ Below is an overview of current capabilities. For a granular breakdown of implem
 | <kbd>Shift</kbd> + <kbd>Space</kbd> | Stop and return to start |
 | <kbd>Home</kbd> | Return playhead to start |
 | <kbd>L</kbd> | Toggle Pattern / Song mode |
-| <kbd>R</kbd> | Arm / Disarm recording *(audio input in M6)* |
+| <kbd>R</kbd> | Arm / Disarm Audio & MIDI recording |
 | <kbd>T</kbd> | Tap tempo |
 | <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>M</kbd> | Toggle metronome |
+| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>Z</kbd> / <kbd>Y</kbd> | Undo / Redo |
+| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>T</kbd> | Open Add Tracks dialog |
+| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>E</kbd> | Export Song / Loop Range |
+| <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>W</kbd> | Close Project and return to Start Hub |
 | <kbd>F5</kbd> / <kbd>F6</kbd> / <kbd>F7</kbd> / <kbd>F9</kbd> | Focus Playlist / Channel Rack / Piano Roll / Mixer |
 | <kbd>Alt</kbd> + <kbd>F8</kbd> | Show / Hide Sample Browser |
 | <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> + <kbd>,</kbd> | Open Settings |
@@ -122,8 +126,9 @@ VloomDAW/
 ├── src/
 │   ├── app/              # Application entry point; wires AudioController and MainWindow
 │   ├── audio/            # Qt-free AudioController; bridges project/mixer state to vloom-engine
-│   ├── core/             # Qt-free domain models: project state, mixer graph, plugin scanner
-│   ├── probe/            # vloomdaw-plugin-probe: out-of-process VST3/CLAP metadata extractor
+│   ├── core/             # Qt-free domain models: project state, mixer, I/O setup, undo, plugin catalog
+│   ├── probe/            # vloomdaw-plugin-probe: out-of-process VST3/VST2/CLAP metadata extractor
+│   ├── stems/            # vloomdaw-stems: out-of-process ONNX / Demucs AI stem separator
 │   └── ui/               # Qt 6 Widgets frontend (target: vloomdaw_ui)
 │       ├── MainWindow    # Primary workspace shell and engine binding
 │       ├── Theme         # Theme presets, color tokens, and stylesheet engine
@@ -150,12 +155,13 @@ VloomDAW/
 | :---: | :--- | :---: |
 | **M0** | Workspace shell, audio device configuration, transport, metronome, sample browser | ✅ Complete |
 | **M1** | Channel rack & 16-step sequencer with real-time sample playback and mixer insert routing | ✅ Complete |
-| **M1.5** | Per-channel panning and browser sample preview | 🎯 Next Up |
-| **M2** | Piano roll audio playback, first built-in synthesizer, undo/redo history | 🗓️ Planned |
-| **M3** | Playlist timeline playback, song arrangement mode, offline WAV export | 🗓️ Planned |
-| **M4** | Project serialization (save/load), CLAP plugin hosting, mixer effect slots *(First Alpha)* | 🗓️ Planned |
-| **M5** | VST3 plugin hosting, built-in DSP effects, auxiliary mixer sends | 🗓️ Planned |
-| **M6** | Hardware audio recording and real-time MIDI input | 🗓️ Planned |
+| **M1.5** | Per-channel panning, pattern selector, and browser sample waveform preview | ✅ Complete |
+| **M2** | Piano roll audio playback, built-in wavetable synthesizer, master pitch, undo/redo history | ✅ Complete |
+| **M3** | Playlist timeline playback, Song/Pattern mode, Loop Bar, multi-format offline export | ✅ Complete |
+| **M4** | `.vloom` project save/load, audio & MIDI import, CLAP plugin hosting, mixer effect slots | ✅ Complete |
+| **M5** | VST3 & VST2 hosting (with 32-bit bridge), built-in DSP effects, Bus/FX/Aux & Sidechain sends, AI stem separation | ✅ Complete |
+| **M6** | Hardware audio input & monitoring, Audio I/O Setup matrix, Audio & MIDI recording, MIDI FX & multi-outputs | ✅ Complete |
+| **v1.0** | Autosave & crash recovery, count-in / punch recording, pattern colours & light theme | 🎯 Next Up |
 
 Detailed milestone specifications and completion criteria are tracked in **[docs/roadmap.md](docs/roadmap.md)**.
 
@@ -167,6 +173,7 @@ Detailed milestone specifications and completion criteria are tracked in **[docs
 * **[Development Roadmap](docs/roadmap.md)** — Milestone definitions and path to v1.0.
 * **[Getting Started](docs/getting-started.md)** — Toolchain setup, Qt/FFmpeg configuration, and IDE workflows.
 * **[System Architecture](docs/architecture.md)** — Threading model and state synchronization between UI, `AudioController`, and `vloom-engine`.
+* **[Project File Format](docs/project-file.md)** — Schema reference for `.vloom` JSON project files, channels, MIDI FX, clips, and routing.
 * **[UI Guidelines](docs/ui-guidelines.md)** — Custom widget conventions, theming tokens, and iconography rules.
 * **[Engine Documentation](https://github.com/vloom-audio/vloom-engine/tree/main/docs)** — Real-time audio thread invariants, DSP graph, and timing specs.
 
