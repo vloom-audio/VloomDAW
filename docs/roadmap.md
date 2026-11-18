@@ -10,27 +10,27 @@ the pinned engine bumped (see the `vloom-dev` skill, `full-stack-feature.md`).
 "Done when" is the acceptance test for the milestone; the feature list and the
 README roadmap are updated in the same PR that makes a feature work.
 
-## Where every unfinished feature goes
+## Milestone status summary
 
-| Feature (feature list) | Today | Milestone |
+| Milestone | Scope | Status |
 |---|---|---|
-| Pattern selector | Works: the channel rack plays the selected pattern | M1.5 (mark ✅) |
-| Channel pan | ⏳ engine ready, no control | M1.5 |
-| Preview samples | ⏳ | M1.5 |
-| Key LCD | 🎨 shading already in the piano roll | M2 (notes follow it) |
-| Piano roll | 🎨 | M2 |
-| Pitch knob | ⏳ | M2 |
-| Undo / redo | not started | M2 |
-| Playlist | 🎨 | M3 |
-| Pattern / song mode | ⏳ | M3 |
-| Export (WAV) | ✅ | M3 |
-| Open, Open Recent, Save, Save As | ✅ | M4 (autosave and crash recovery still to come) |
-| Import (samples, MIDI files) | ⏳ | M4 |
-| Loading and playing plugins | ⏳ | M4 (CLAP), M5 (VST3) |
-| Mixer effects | not started | M4 (plugins), M5 (built-in) |
-| Record arm | 🎨 no audio input | M6 |
-| MIDI input (keyboards) | not started | M6 |
-| Light theme | ⏳ | Any time (UI only) |
+| **M0** | Workspace shell, audio device configuration, transport, metronome, sample browser | ✅ Complete |
+| **M1** | Channel rack & 16-step sequencer with real-time sample playback and mixer insert routing | ✅ Complete |
+| **M1.5** | Per-channel panning, pattern selector, and sample browser waveform preview | ✅ Complete |
+| **M2** | Piano roll playback, built-in wavetable synthesizer, master pitch, and undo/redo history | ✅ Complete |
+| **M3** | Playlist arrangement playback, Song/Pattern mode, Loop Bar, and multi-format offline export (WAV, FLAC, MP3, Ogg, M4A) | ✅ Complete |
+| **M4** | `.vloom` project save/load, audio & multi-track MIDI import, CLAP hosting, mixer insert FX, and Start Hub | ✅ Complete |
+| **M5** | VST 3 & VST 2 hosting (with 32-bit Windows bridge), built-in EQ/FX, Bus/FX/Aux channels, Pre/Post & Sidechain sends, PDC, and stem separation | ✅ Complete |
+| **M6** | Hardware audio input & monitoring, Audio I/O Setup channel routing matrix, latency-compensated Audio & MIDI recording, MIDI FX chains, multi-output instruments, and Piano Roll MIDI CC/Pitch Bend lanes | ✅ Complete |
+
+### Remaining polish toward v1.0
+
+| Feature | Status | Notes |
+|---|---|---|
+| Autosave & crash recovery | ⏳ | Periodic background recovery snapshots for unsaved `.vloom` sessions |
+| Count-in & punch-in / punch-out | ⏳ | Pre-roll count-in bars and automated punch markers during audio/MIDI recording |
+| Pattern colours & bounce to audio clip | ⏳ | Custom colour per pattern in `Patterns` menu and in-place pattern rendering |
+| Light theme | ⏳ | High-contrast light preset in `core/ThemePresets` |
 
 ## M1.5 — finish the channel rack (small)
 

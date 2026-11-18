@@ -60,6 +60,15 @@ TEST_CASE("Ids are unique and unknown ids fall back to the default", "[theme]")
 
     CHECK(paletteById("slate").id == "slate");
     CHECK(paletteById("no-such-theme").id == palettes().front().id);
+    CHECK(accents().front().id == "pink");
+    CHECK(ThemeChoice{}.accentId == "pink");
+    CHECK(defaultAccentForPalette("midnight") == "pink");
+    CHECK(defaultAccentForPalette("graphite") == "pink");
+    CHECK(defaultAccentForPalette("deep-black") == "pink");
+    CHECK(defaultAccentForPalette("slate") == "blue");
+    CHECK(defaultAccentForPalette("forest") == "green");
+    CHECK(defaultAccentForPalette("plum") == "violet");
+    CHECK(defaultAccentForPalette("ember") == "orange");
     CHECK(accentById("").id == accents().front().id);
     CHECK(accentById("violet").id == "violet");
 }

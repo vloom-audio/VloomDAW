@@ -233,7 +233,7 @@ bool MixerModel::setOutput(std::size_t index, int target)
     return true;
 }
 
-bool MixerModel::canAddSend(std::size_t index, int target) const
+bool MixerModel::canAddSend(std::size_t index, int target, bool sidechain) const
 {
     if (index == kMaster || !valid(index))
         return false;
@@ -243,18 +243,18 @@ bool MixerModel::canAddSend(std::size_t index, int target) const
     if (dst == index || tracks_[index].sends.size() >= kMaxSends)
         return false;
     const bool exists = std::any_of(tracks_[index].sends.begin(), tracks_[index].sends.end(),
-        [target](const MixerSend& s) { return s.target == target; });
+        [target, sidechain](const MixerSend& s) { return s.target == target && s.sidechain == sidechain; });
     if (exists)
         return false;
     return !reaches(dst, index);
 }
 
-bool MixerModel::addSend(std::size_t index, int target, double level, bool preFader)
+bool MixerModel::addSend(std::size_t index, int target, double level, bool preFader, bool sidechain)
 {
-    if (!canAddSend(index, target))
+    if (!canAddSend(index, target, sidechain))
         return false;
     const double safeLevel = std::isfinite(level) ? std::clamp(level, 0.0, 1.0) : 0.8;
-    tracks_[index].sends.push_back(MixerSend{target, safeLevel, false, preFader});
+    tracks_[index].sends.push_back(MixerSend{target, safeLevel, false, preFader, sidechain});
     return true;
 }
 
@@ -282,6 +282,20 @@ void MixerModel::setSendPreFader(std::size_t index, std::size_t sendSlot, bool p
 {
     if (index != kMaster && valid(index) && sendSlot < tracks_[index].sends.size())
         tracks_[index].sends[sendSlot].preFader = preFader;
+}
+
+void MixerModel::setSendSidechain(std::size_t index, std::size_t sendSlot, bool sidechain)
+{
+    if (index == kMaster || !valid(index) || sendSlot >= tracks_[index].sends.size())
+        return;
+    const int target = tracks_[index].sends[sendSlot].target;
+    for (std::size_t i = 0; i < tracks_[index].sends.size(); ++i) {
+        if (i != sendSlot && tracks_[index].sends[i].target == target
+            && tracks_[index].sends[i].sidechain == sidechain) {
+            return;
+        }
+    }
+    tracks_[index].sends[sendSlot].sidechain = sidechain;
 }
 
 bool MixerModel::addEffect(std::size_t index, PluginSlot effect)
@@ -429,7 +443,8 @@ bool MixerModel::isTrackAudible(std::size_t index) const
                 }
             }
             for (const MixerSend& s : tracks_[i].sends) {
-                if (s.muted || s.target <= 0 || static_cast<std::size_t>(s.target) >= tracks_.size())
+                if (s.muted || s.sidechain || s.target <= 0
+                    || static_cast<std::size_t>(s.target) >= tracks_.size())
                     continue;
                 const auto dst = static_cast<std::size_t>(s.target);
                 if (!audible[dst] && !tracks_[dst].muted) {

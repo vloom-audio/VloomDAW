@@ -125,7 +125,9 @@ protected:
             p.fillRect(QRectF(l + x, t + 3, w * 0.15, 8), qcolor(pal.display));
             p.fillRect(QRectF(l + x + 3, t + 6, w * 0.15 - 6, 2), qcolor(pal.displayText));
         }
-        p.fillRect(QRectF(l + 4, t + 4, 6, 6), ui.accent);
+        const QColor tileAccent
+            = isChecked() ? ui.accent : qcolor(accentById(defaultAccentForPalette(pal.id)).color);
+        p.fillRect(QRectF(l + 4, t + 4, 6, 6), tileAccent);
         // Side bar.
         p.fillRect(QRectF(l, t + 14, w * 0.06, h - 14), qcolor(pal.rail));
         p.fillRect(QRectF(l + w * 0.06, t + 14, w * 0.22, h - 14), qcolor(pal.sidebar));
@@ -137,7 +139,7 @@ protected:
             for (int s = 0; s < 8; ++s) {
                 const bool on = (row + s) % 3 == 0;
                 p.fillRect(QRectF(rackX + s * (w * 0.052), t + 20 + row * 9, w * 0.042, 6),
-                    on ? ui.accent : qcolor(pal.raised));
+                    on ? tileAccent : qcolor(pal.raised));
             }
         // Mixer with meters.
         const double mixY = t + h * 0.68;
@@ -258,7 +260,10 @@ ThemeSettingsPage::ThemeSettingsPage(QWidget* parent)
         grid->setColumnStretch(column, 1); // equal columns across the card
     presetCard->addWide(tiles);
     connect(presets_, &QButtonGroup::idClicked, this, [this](int id) {
-        choice_.paletteId = std::string(palettes()[static_cast<std::size_t>(id)].id);
+        const std::string_view palId = palettes()[static_cast<std::size_t>(id)].id;
+        choice_.paletteId = std::string(palId);
+        choice_.accentId = std::string(defaultAccentForPalette(palId));
+        choice_.overrides.selection = std::nullopt;
         edit();
     });
 

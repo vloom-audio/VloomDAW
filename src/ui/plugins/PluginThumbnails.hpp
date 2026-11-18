@@ -5,12 +5,14 @@
 #include <QPixmap>
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 
 #include <functional>
 #include <string>
 #include <string_view>
 
+class QComboBox;
 class QPushButton;
 class QToolButton;
 class QLabel;
@@ -47,9 +49,12 @@ struct PluginEditorContext {
     QString slotTitle; ///< e.g. "1 - CA-2A" or "Serum 2"
     bool bypassed = false;
     bool favorite = false;
+    QStringList programs{};
+    int currentProgram = -1;
 
     std::function<void(bool bypassed)> onSetBypassed;
     std::function<void(bool favorite)> onToggleFavorite;
+    std::function<void(int index)> onSelectProgram;
     std::function<void()> onReplace;
     std::function<void()> onRemove;
     std::function<void()> onShowInMixer;
@@ -58,8 +63,8 @@ struct PluginEditorContext {
 
 /// Studio One-style 32 px toolbar shown above an open plugin GUI or generic
 /// parameter editor: power/bypass toggle, slot dropdown menu (Favorite,
-/// Replace, Disable, Remove, Show in Mixer, Update Plug-in Thumbnail) and a
-/// 1-click "Update Thumbnail" capture button.
+/// Replace, Disable, Remove, Show in Mixer, Update Plug-in Thumbnail), optional
+/// factory program selector, and a 1-click "Update Thumbnail" capture button.
 class PluginEditorHeader : public QWidget {
     Q_OBJECT
 
@@ -85,6 +90,7 @@ private:
     QToolButton* powerBtn_ = nullptr;
     QLabel* locationLbl_ = nullptr;
     QPushButton* slotMenuBtn_ = nullptr;
+    QComboBox* programCombo_ = nullptr;
     QPushButton* captureBtn_ = nullptr;
 };
 

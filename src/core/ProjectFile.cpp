@@ -119,6 +119,28 @@ std::string_view fitName(AudioClip::Fit fit)
     }
 }
 
+std::string_view controlKindText(ControlKind kind)
+{
+    switch (kind) {
+    case ControlKind::PitchBend:
+        return "bend";
+    case ControlKind::Pressure:
+        return "pressure";
+    case ControlKind::Controller:
+        break;
+    }
+    return "cc";
+}
+
+ControlKind controlKindFromText(std::string_view text)
+{
+    if (text == "bend")
+        return ControlKind::PitchBend;
+    if (text == "pressure")
+        return ControlKind::Pressure;
+    return ControlKind::Controller;
+}
+
 std::string_view pluginFormatText(PluginFormat format)
 {
     switch (format) {
@@ -426,6 +448,19 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
             j["color"] = *color;
         if (ch.instrument)
             j["instrument"] = pluginJson(*ch.instrument, at(data.states.instruments, c));
+        if (!ch.noteEffects.empty()) {
+            Json neList = Json::array();
+            const auto* neStates = at(data.states.noteEffects, c);
+            for (std::size_t ne = 0; ne < ch.noteEffects.size(); ++ne) {
+                neList.push_back(
+                    pluginJson(ch.noteEffects[ne], neStates != nullptr ? at(*neStates, ne) : nullptr));
+            }
+            j["noteEffects"] = std::move(neList);
+        }
+        if (!ch.pluginOutputs.empty())
+            j["pluginOutputs"] = ch.pluginOutputs;
+        if (ch.notesFrom >= 0)
+            j["notesFrom"] = ch.notesFrom;
         channels.push_back(std::move(j));
     }
     root["channels"] = std::move(channels);
@@ -444,7 +479,18 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
                 notes.push_back(n.velocity == kDefaultVelocity
                         ? Json::array({n.key, n.start, n.length})
                         : Json::array({n.key, n.start, n.length, n.velocity}));
-            perChannel.push_back({{"steps", steps}, {"notes", std::move(notes)}});
+            Json cpJson = {{"steps", steps}, {"notes", std::move(notes)}};
+            if (!cp.controls.empty()) {
+                Json controls = Json::array();
+                for (const ControlPoint& ctrl : cp.controls) {
+                    controls.push_back(ctrl.midiChannel == 0
+                            ? Json::array({ctrl.start, controlKindText(ctrl.kind), ctrl.number, ctrl.value})
+                            : Json::array({ctrl.start, controlKindText(ctrl.kind), ctrl.number, ctrl.value,
+                                  ctrl.midiChannel}));
+                }
+                cpJson["controls"] = std::move(controls);
+            }
+            perChannel.push_back(std::move(cpJson));
         }
         patterns.push_back(
             {{"name", pattern.name}, {"steps", pattern.steps}, {"channels", std::move(perChannel)}});
@@ -495,8 +541,11 @@ std::string ProjectFile::write(const ProjectData& data, const std::filesystem::p
         if (i != MixerModel::kMaster && !t.sends.empty()) {
             Json sends = Json::array();
             for (const MixerSend& s : t.sends) {
-                sends.push_back(
-                    {{"target", s.target}, {"level", s.level}, {"muted", s.muted}, {"preFader", s.preFader}});
+                Json sj = {
+                    {"target", s.target}, {"level", s.level}, {"muted", s.muted}, {"preFader", s.preFader}};
+                if (s.sidechain)
+                    sj["sidechain"] = true;
+                sends.push_back(std::move(sj));
             }
             j["sends"] = std::move(sends);
         }
@@ -618,10 +667,35 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
         c.pan = in.number<double>(j, "pan", 0.0, -1.0, 1.0);
         c.insert = in.number<int>(j, "insert", 0, 0, static_cast<int>(MixerModel::kMaxInserts));
         c.color = in.color(j, "color");
+        c.notesFrom = in.number<int>(j, "notesFrom", -1, -1, static_cast<int>(kMaxChannels));
+        if (const auto outsIt = j.find("pluginOutputs"); outsIt != j.end() && outsIt->is_array()) {
+            for (std::size_t o = 0; o < outsIt->size() && o < Project::kMaxExtraOutputs; ++o) {
+                const Json& elem = (*outsIt)[o];
+                int dst = -1;
+                if (elem.is_number()) {
+                    const double d = elem.get<double>();
+                    if (std::isfinite(d)) {
+                        dst = std::clamp(static_cast<int>(d), -1, static_cast<int>(MixerModel::kMaxInserts));
+                    }
+                }
+                c.pluginOutputs.push_back(dst);
+            }
+        }
         std::vector<std::uint8_t> state;
         if (const auto inst = j.find("instrument"); inst != j.end())
             c.instrument = readPlugin(*inst, in, state);
         data.states.instruments.push_back(c.instrument ? std::move(state) : std::vector<std::uint8_t>{});
+
+        std::vector<std::vector<std::uint8_t>> neStates;
+        for (const Json* nep : in.array(j, "noteEffects", Project::kMaxNoteEffects)) {
+            std::vector<std::uint8_t> neState;
+            if (auto slot = readPlugin(*nep, in, neState);
+                slot && c.noteEffects.size() < Project::kMaxNoteEffects) {
+                c.noteEffects.push_back(std::move(*slot));
+                neStates.push_back(std::move(neState));
+            }
+        }
+        data.states.noteEffects.push_back(std::move(neStates));
         channels.push_back(std::move(c));
     }
 
@@ -655,6 +729,31 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
                     };
                     cp.notes.push_back(Note{value(n[0]), value(n[1]), value(n[2]),
                         n.size() == 4 ? value(n[3]) : kDefaultVelocity});
+                }
+                for (const Json* kp : in.array(cj, "controls", kMaxNotes)) {
+                    const Json& k = *kp;
+                    if (!k.is_array() || (k.size() != 4 && k.size() != 5) || !k[0].is_number()
+                        || !k[1].is_string() || !k[2].is_number() || !k[3].is_number()
+                        || (k.size() == 5 && !k[4].is_number())) {
+                        continue;
+                    }
+                    const double rawStart = k[0].get<double>();
+                    const double rawNum = k[2].get<double>();
+                    const double rawVal = k[3].get<double>();
+                    if (!std::isfinite(rawStart) || !std::isfinite(rawNum) || !std::isfinite(rawVal))
+                        continue;
+                    ControlPoint ctrl;
+                    ctrl.start = static_cast<int>(
+                        std::clamp(rawStart, 0.0, static_cast<double>(std::numeric_limits<int>::max() / 2)));
+                    ctrl.kind = controlKindFromText(k[1].get_ref<const std::string&>());
+                    ctrl.number = static_cast<int>(std::clamp(rawNum, 0.0, 127.0));
+                    ctrl.value = rawVal;
+                    if (k.size() == 5) {
+                        const double rawCh = k[4].get<double>();
+                        if (std::isfinite(rawCh))
+                            ctrl.midiChannel = static_cast<int>(std::clamp(rawCh, 0.0, 15.0));
+                    }
+                    cp.controls.push_back(Project::clamped(ctrl));
                 }
             }
             p.channels.push_back(std::move(cp));
@@ -772,7 +871,8 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
             const double level = in.number<double>(s, "level", 0.8, 0.0, 1.0);
             const bool muted = Reader::flag(s, "muted");
             const bool preFader = Reader::flag(s, "preFader");
-            if (data.mixer.addSend(i, target, level, preFader)) {
+            const bool sidechain = Reader::flag(s, "sidechain");
+            if (data.mixer.addSend(i, target, level, preFader, sidechain)) {
                 data.mixer.setSendMuted(i, data.mixer.track(i).sends.size() - 1, muted);
             } else {
                 in.warn("A mixer send that formed a loop or pointed to a missing channel was left out");
@@ -783,11 +883,22 @@ ProjectFile::ReadResult readUnguarded(std::string_view text, const std::filesyst
         data.states.effects.emplace_back(); // the master
 
     // A channel plays into an insert the mixer has; otherwise into the master.
-    for (std::size_t c = 0; c < data.project.channels().size(); ++c)
+    for (std::size_t c = 0; c < data.project.channels().size(); ++c) {
         if (static_cast<std::size_t>(data.project.channels()[c].insert) > data.mixer.insertCount()) {
             data.project.setChannelInsert(c, 0);
             in.warn("A channel routed to a mixer insert that does not exist now plays into the master");
         }
+        std::vector<int> outs = data.project.channels()[c].pluginOutputs;
+        bool clampedOut = false;
+        for (int& dst : outs) {
+            if (dst > static_cast<int>(data.mixer.insertCount())) {
+                dst = -1;
+                clampedOut = true;
+            }
+        }
+        if (clampedOut)
+            data.project.setChannelPluginOutputs(c, std::move(outs));
+    }
     for (std::size_t t = 0; t < data.project.tracks().size(); ++t)
         if (data.project.tracks()[t].insert > static_cast<int>(data.mixer.insertCount()))
             data.project.setTrackInsert(t, -1);
@@ -868,7 +979,7 @@ ProjectSummary ProjectFile::summarize(const ProjectData& data)
     summary.tempo = data.song.tempo;
     summary.channels = p.channels().size();
     for (const Channel& c : p.channels())
-        summary.plugins += c.instrument ? 1 : 0;
+        summary.plugins += (c.instrument ? 1 : 0) + c.noteEffects.size();
     for (std::size_t i = 0; i < data.mixer.size(); ++i)
         summary.plugins += data.mixer.track(i).effects.size();
 

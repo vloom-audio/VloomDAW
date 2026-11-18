@@ -326,6 +326,18 @@ QPushButton#pluginSlotMenuBtn:hover, QPushButton#pluginCaptureBtn:hover {
     background: @raised;
     border-color: @textDim;
 }
+QComboBox#pluginProgramCombo {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 5px;
+    color: @text;
+    font-size: 8.5pt;
+    padding: 1px 6px;
+}
+QComboBox#pluginProgramCombo:hover {
+    background: @raised;
+    border-color: @textDim;
+}
 QPushButton#accentButton { background: @accent; border-color: @accent; color: @window; font-weight: 600; }
 QPushButton#accentButton:hover { border-color: @text; }
 QPushButton#accentButton:disabled { background: @raised; border-color: @border; color: @textDim; }
@@ -486,19 +498,59 @@ QLabel#stripName { font-size: 8pt; font-weight: 600; }
 QLabel#stripDb, QLabel#stripNumber { color: @textDim; font-size: 8pt; }
 QLabel#stripNumber { font-weight: 700; }
 QLabel#stripRoute { color: @textDim; font-size: 7pt; }
-QToolButton#muteButton, QToolButton#soloButton {
-    background: @window;
+QFrame#stripButtonCluster {
+    background: @border;
     border: 1px solid @border;
     border-radius: 4px;
+}
+QToolButton#muteButton, QToolButton#soloButton, QToolButton#armButton, QToolButton#monitorButton {
+    background: @window;
+    border: none;
+    border-radius: 0px;
     color: @textDim;
-    font-size: 8pt;
+    font-size: 8.2pt;
     font-weight: 700;
-    min-width: 20px;
+    min-width: 18px;
     padding: 1px 0;
 }
-QToolButton#muteButton:hover, QToolButton#soloButton:hover { border-color: @textDim; }
-QToolButton#muteButton:checked { background: @accentTint; color: @accent; border-color: @accent; }
-QToolButton#soloButton:checked { background: @playingTint; color: @playing; border-color: @playing; }
+QToolButton#muteButton[corner="tl"] { border-top-left-radius: 3px; }
+QToolButton#muteButton[corner="all"] { border-radius: 3px; }
+QToolButton#soloButton { border-top-right-radius: 3px; }
+QToolButton#armButton { border-bottom-left-radius: 3px; }
+QToolButton#monitorButton { border-bottom-right-radius: 3px; }
+QToolButton#muteButton:hover, QToolButton#soloButton:hover, QToolButton#armButton:hover, QToolButton#monitorButton:hover {
+    background: @raised;
+    color: @text;
+}
+QToolButton#muteButton:checked { background: @accentTint; color: @accent; }
+QToolButton#soloButton:checked { background: @playingTint; color: @playing; }
+QToolButton#armButton:checked { background: @dangerTint; color: @danger; }
+QToolButton#monitorButton:checked { background: @accentTint; color: @accent; }
+
+/* Audio I/O Setup matrix dialog. */
+QDialog#audioIoDialog { background: @window; }
+QPushButton#ioTabButton {
+    background: @panel;
+    border: 1px solid @border;
+    border-bottom: none;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+    color: @textDim;
+    font-size: 9pt;
+    font-weight: 700;
+    padding: 5px 18px;
+}
+QPushButton#ioTabButton:hover { background: @raised; color: @text; }
+QPushButton#ioTabButton:checked {
+    background: @accent;
+    border-color: @accent;
+    color: @window;
+}
+QFrame#ioMatrixPanel {
+    background: @panel;
+    border: 1px solid @border;
+    border-radius: 6px;
+}
 /* A strip's FX rack (slots with bypass switches, FL Studio / Studio One style). */
 QFrame#fxRack {
     background: #14171a;
@@ -952,11 +1004,11 @@ QIcon Theme::icon(const QString& name)
 QColor Theme::patternColor(std::size_t index)
 {
     static const QColor kHues[] = {
-        QColor(0xff, 0x8a, 0x3d), // accent orange
+        QColor(0xe8, 0x45, 0x7c), // accent pink
         QColor(0x5e, 0xea, 0xd4), // teal
         QColor(0xa7, 0x8b, 0xfa), // violet
         QColor(0x4a, 0xde, 0x80), // green
-        QColor(0xf4, 0x72, 0xb6), // pink
+        QColor(0xff, 0x8a, 0x3d), // orange
         QColor(0x60, 0xa5, 0xfa), // blue
         QColor(0xfa, 0xcc, 0x15), // yellow
     };

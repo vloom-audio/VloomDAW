@@ -514,3 +514,59 @@ TEST_CASE("Song loop markers and loopEnabled round-trip cleanly", "[project-file
     REQUIRE(readVst2.data->project.channels()[0].instrument.has_value());
     CHECK(readVst2.data->project.channels()[0].instrument->format == PluginFormat::Vst2);
 }
+
+TEST_CASE("Sidechain sends, MIDI controls, noteEffects, pluginOutputs and notesFrom round-trip cleanly",
+    "[project-file]")
+{
+    ProjectData saved;
+    saved.mixer = MixerModel(3);
+    REQUIRE(saved.mixer.addSend(1, 2, 0.8, true, true));
+
+    saved.project.setChannelInstrument(0, plugin(PluginFormat::Clap, "DrumSampler"));
+    saved.project.setChannelPluginOutputs(0, {2, 3});
+    PluginSlot arp = plugin(PluginFormat::Clap, "ChordArp");
+    arp.bypassed = true;
+    REQUIRE(saved.project.addChannelNoteEffect(0, arp));
+    saved.project.setChannelInstrument(1, plugin(PluginFormat::Vst3, "LeadPad"));
+    saved.project.setChannelNotesFrom(1, 0);
+
+    saved.states.instruments = {{1, 2, 3}, {4, 5}, {}, {}};
+    saved.states.noteEffects = {{{9, 8, 7}}, {}, {}, {}};
+
+    saved.project.setControls(0, 0,
+        {
+            ControlPoint{0, ControlKind::PitchBend, 0, 0.5, 0},
+            ControlPoint{240, ControlKind::Controller, 1, 0.75, 2},
+            ControlPoint{480, ControlKind::Pressure, 0, 0.25, 0},
+        });
+
+    const ProjectSummary summary = ProjectFile::summarize(saved);
+    CHECK(summary.plugins == 3); // DrumSampler + ChordArp + LeadPad
+
+    const std::string json = ProjectFile::write(saved, kFolder);
+    const auto read = ProjectFile::read(json, kFolder);
+    REQUIRE(read.data);
+    CHECK(read.warnings.empty());
+
+    REQUIRE(read.data->mixer.track(1).sends.size() == 1);
+    CHECK(read.data->mixer.track(1).sends[0].sidechain);
+    CHECK(read.data->mixer.track(1).sends[0].preFader);
+
+    const Channel& ch0 = read.data->project.channels()[0];
+    CHECK(ch0.pluginOutputs == std::vector<int>{2, 3});
+    REQUIRE(ch0.noteEffects.size() == 1);
+    CHECK(ch0.noteEffects[0].name == "ChordArp");
+    CHECK(ch0.noteEffects[0].bypassed);
+    REQUIRE(read.data->states.noteEffects.size() == 4);
+    REQUIRE(read.data->states.noteEffects[0].size() == 1);
+    CHECK(read.data->states.noteEffects[0][0] == std::vector<std::uint8_t>{9, 8, 7});
+
+    CHECK(read.data->project.channels()[1].notesFrom == 0);
+
+    const auto* ctrls = read.data->project.controls(0, 0);
+    REQUIRE(ctrls != nullptr);
+    REQUIRE(ctrls->size() == 3);
+    CHECK((*ctrls)[0] == ControlPoint{0, ControlKind::PitchBend, 0, 0.5, 0});
+    CHECK((*ctrls)[1] == ControlPoint{240, ControlKind::Controller, 1, 0.75, 2});
+    CHECK((*ctrls)[2] == ControlPoint{480, ControlKind::Pressure, 0, 0.25, 0});
+}

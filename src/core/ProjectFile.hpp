@@ -32,6 +32,7 @@ struct SongSettings {
 /// plugin starts at its defaults).
 struct PluginStates {
     std::vector<std::vector<std::uint8_t>> instruments; ///< per channel
+    std::vector<std::vector<std::vector<std::uint8_t>>> noteEffects; ///< per channel, per note-effect slot
     std::vector<std::vector<std::vector<std::uint8_t>>> effects; ///< per mixer track (master first), per slot
 };
 

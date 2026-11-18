@@ -9,13 +9,17 @@
 #include "ui/dialogs/SettingsDialog/ThemeSettingsPage.hpp"
 
 #include <QDialogButtonBox>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
+#include <QScreen>
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace vloomdaw {
 
@@ -30,7 +34,14 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     setObjectName(QStringLiteral("settingsDialog"));
     setWindowTitle(tr("Settings"));
     setMinimumSize(760, 520);
-    resize(900, 780);
+    int initW = 920;
+    int initH = 840;
+    if (const QScreen* scr = QGuiApplication::primaryScreen()) {
+        const QRect avail = scr->availableGeometry();
+        initW = std::min(initW, std::max(760, avail.width() - 60));
+        initH = std::min(initH, std::max(560, avail.height() - 60));
+    }
+    resize(initW, initH);
 
     // Navigation: a heading and one entry per page, with an icon.
     auto* navBox = new QWidget(this);

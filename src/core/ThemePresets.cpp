@@ -38,11 +38,11 @@ constexpr std::array kPalettes{
 };
 
 constexpr std::array kAccents{
+    AccentSpec{"pink", "Pink", hex(0xe8457c)},
     AccentSpec{"orange", "Orange", hex(0xff8a3d)},
     AccentSpec{"teal", "Teal", hex(0x2dd4bf)},
     AccentSpec{"violet", "Violet", hex(0xa78bfa)},
     AccentSpec{"blue", "Blue", hex(0x60a5fa)},
-    AccentSpec{"pink", "Pink", hex(0xf472b6)},
     AccentSpec{"green", "Green", hex(0x4ade80)},
     AccentSpec{"yellow", "Yellow", hex(0xfacc15)},
 };
@@ -70,6 +70,19 @@ const AccentSpec& accentById(std::string_view id)
     const auto it
         = std::find_if(kAccents.begin(), kAccents.end(), [id](const AccentSpec& a) { return a.id == id; });
     return it != kAccents.end() ? *it : kAccents.front();
+}
+
+std::string_view defaultAccentForPalette(std::string_view paletteId) noexcept
+{
+    if (paletteId == "slate")
+        return "blue";
+    if (paletteId == "forest")
+        return "green";
+    if (paletteId == "plum")
+        return "violet";
+    if (paletteId == "ember")
+        return "orange";
+    return "pink";
 }
 
 double relativeLuminance(Rgb color)

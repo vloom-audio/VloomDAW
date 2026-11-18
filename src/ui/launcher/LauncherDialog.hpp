@@ -25,11 +25,13 @@ class LauncherDialog : public QDialog {
     Q_OBJECT
 
 public:
-    /// What the status line says about the audio output.
+    /// What the status card says about the active audio output & input.
     struct AudioStatus {
-        QString device; ///< empty: no device open
+        QString device; ///< empty: no output device open
         int sampleRate = 0;
         int bufferFrames = 0;
+        QString inputDevice; ///< empty: input disabled or not open
+        int inputChannels = 0;
     };
 
     enum class Choice {
@@ -38,6 +40,7 @@ public:
         OpenFile, ///< path()
         BrowseOpen, ///< File > Open's dialog
         AudioSettings,
+        AudioIoSetup,
     };
 
     /// `tempo`: the new project's tempo until the user has chosen one (the

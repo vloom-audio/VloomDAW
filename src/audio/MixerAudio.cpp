@@ -84,11 +84,17 @@ std::unique_ptr<const vloom::MixerState> engineMixerState(
             engSend.target = send.target;
             engSend.gain = static_cast<float>(faderToGain(send.level));
             engSend.preFader = send.preFader;
+            engSend.sidechain = send.sidechain;
             insert.sends.push_back(engSend);
         }
         state->inserts.push_back(std::move(insert));
     }
     return state;
+}
+
+std::vector<vloom::MixerRoute> droppedMixerRoutes(const vloom::MixerState& state)
+{
+    return vloom::droppedRoutes(state);
 }
 
 } // namespace vloomdaw

@@ -96,3 +96,32 @@ TEST_CASE("Replacing all notes clamps them and keeps their order", "[project]")
     CHECK(project.notes(0, 0)->at(1) == Note{60, 480, 240, kMinVelocity});
     project.setNotes(9, 0, {Note{}}); // no such pattern: ignored
 }
+
+TEST_CASE("NoteHistory records and undoes/redoes MIDI control curve edits alongside notes", "[history]")
+{
+    Project project;
+    NoteHistory history;
+    const std::vector<ControlPoint> c1{ControlPoint{0, ControlKind::PitchBend, 0, -0.5, 0}};
+    const std::vector<ControlPoint> c2{
+        ControlPoint{0, ControlKind::PitchBend, 0, -0.5, 0},
+        ControlPoint{240, ControlKind::Controller, 1, 0.75, 0},
+    };
+
+    const auto before1 = *project.controls(0, 0);
+    project.setControls(0, 0, c1);
+    history.recordControls({0, 0}, before1, *project.controls(0, 0));
+
+    const auto before2 = *project.controls(0, 0);
+    project.setControls(0, 0, c2);
+    history.recordControls({0, 0}, before2, *project.controls(0, 0));
+
+    REQUIRE(history.canUndo());
+    CHECK(history.undo(project) == NoteHistory::Target{0, 0});
+    CHECK(*project.controls(0, 0) == c1);
+    CHECK(history.undo(project) == NoteHistory::Target{0, 0});
+    CHECK(project.controls(0, 0)->empty());
+    CHECK(history.redo(project) == NoteHistory::Target{0, 0});
+    CHECK(*project.controls(0, 0) == c1);
+    CHECK(history.redo(project) == NoteHistory::Target{0, 0});
+    CHECK(*project.controls(0, 0) == c2);
+}

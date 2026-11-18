@@ -98,6 +98,34 @@ std::vector<vloom::Note> engineNotes(const std::vector<Note>& notes)
     return out;
 }
 
+std::vector<vloom::ControlPoint> engineControls(const std::vector<ControlPoint>& controls)
+{
+    std::vector<vloom::ControlPoint> out;
+    out.reserve(controls.size());
+    for (const ControlPoint& ctrl : controls) {
+        vloom::ControlEvent::Type type = vloom::ControlEvent::Type::Controller;
+        switch (ctrl.kind) {
+        case ControlKind::PitchBend:
+            type = vloom::ControlEvent::Type::PitchBend;
+            break;
+        case ControlKind::Controller:
+            type = vloom::ControlEvent::Type::Controller;
+            break;
+        case ControlKind::Pressure:
+            type = vloom::ControlEvent::Type::Pressure;
+            break;
+        }
+        out.push_back(vloom::ControlPoint{
+            .start = ctrl.start,
+            .type = type,
+            .number = static_cast<std::int16_t>(std::clamp(ctrl.number, 0, 127)),
+            .value = static_cast<float>(ctrl.value),
+            .channel = static_cast<std::int16_t>(std::clamp(ctrl.midiChannel, 0, 15)),
+        });
+    }
+    return out;
+}
+
 } // namespace
 
 std::vector<ChannelRackAudio::LoadError> ChannelRackAudio::sync(
@@ -140,17 +168,31 @@ std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
         out.gain = static_cast<float>(faderToGain(channel.volume));
         out.pan = static_cast<float>(channel.pan);
         out.insert = channel.insert;
+        out.pluginOutputs = channel.pluginOutputs;
+        out.notesFrom = channel.notesFrom;
         if (c < p.channels.size()) {
             for (const bool on : p.channels[c].steps)
                 out.steps.push_back(on ? 1 : 0);
             out.notes = engineNotes(p.channels[c].notes);
+            out.controls = engineControls(p.channels[c].controls);
         }
         out.sample = load(channel.samplePath, c, &errors);
-        if (channel.instrument && plugins_) {
-            if (auto plugin = plugins_(channel.instrument->instance)) {
-                plugin->setBypassed(channel.instrument->bypassed);
-                out.instrument = vloom::Instrument::Plugin;
-                out.plugin = std::move(plugin);
+        if (plugins_) {
+            for (const PluginSlot& neSlot : channel.noteEffects) {
+                if (auto ne = plugins_(neSlot.instance)) {
+                    ne->setBypassed(neSlot.bypassed);
+                    if (!out.noteEffect)
+                        out.noteEffect = std::move(ne);
+                    else
+                        out.noteEffects.push_back(std::move(ne));
+                }
+            }
+            if (channel.instrument) {
+                if (auto plugin = plugins_(channel.instrument->instance)) {
+                    plugin->setBypassed(channel.instrument->bypassed);
+                    out.instrument = vloom::Instrument::Plugin;
+                    out.plugin = std::move(plugin);
+                }
             }
         }
         state->channels.push_back(std::move(out));
@@ -168,12 +210,14 @@ std::unique_ptr<vloom::SequencerState> ChannelRackAudio::build(
                 = project.patternLength(index) / kTicksPerStep; // a longer clip repeats the pattern
             rows.steps.reserve(each.channels.size());
             rows.notes.reserve(each.channels.size());
+            rows.controls.reserve(each.channels.size());
             for (const ChannelPattern& cp : each.channels) {
                 auto& row = rows.steps.emplace_back();
                 row.reserve(cp.steps.size());
                 for (const bool on : cp.steps)
                     row.push_back(on ? 1 : 0);
                 rows.notes.push_back(engineNotes(cp.notes));
+                rows.controls.push_back(engineControls(cp.controls));
             }
             state->patterns.push_back(std::move(rows));
         }

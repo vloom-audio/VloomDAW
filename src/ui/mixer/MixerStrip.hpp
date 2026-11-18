@@ -38,6 +38,7 @@ struct MixerSendDisplay {
     double level = 0.8;
     bool muted = false;
     bool preFader = false;
+    bool sidechain = false;
 };
 
 /// One Studio One-style console strip:
@@ -89,6 +90,10 @@ public:
     void setValues(double fader, double pan, bool muted, bool soloed);
     void setMono(bool mono);
     [[nodiscard]] bool isMono() const { return mono_; }
+    void setRecordArmed(bool armed);
+    [[nodiscard]] bool isRecordArmed() const { return recordArmed_; }
+    void setInputMonitored(bool monitored);
+    [[nodiscard]] bool isInputMonitored() const { return inputMonitored_; }
     void startInlineRename();
     [[nodiscard]] std::optional<std::uint32_t> color() const { return color_; }
     [[nodiscard]] QSize minimumSizeHint() const override;
@@ -104,6 +109,8 @@ signals:
     void muteToggled(bool muted);
     void soloToggled(bool soloed);
     void monoToggled(bool mono);
+    void recordArmToggled(bool armed);
+    void monitorToggled(bool monitored);
     void userFxSlotRowsChanged(int rows);
     void renameRequested();
     void nameEdited(const QString& name);
@@ -126,6 +133,7 @@ signals:
     void sendLevelChanged(std::size_t sendSlot, double level);
     void sendMuteToggled(std::size_t sendSlot, bool muted);
     void sendPreFaderToggled(std::size_t sendSlot, bool preFader);
+    void sendSidechainToggled(std::size_t sendSlot, bool sidechain);
     void sendMenuRequested(std::size_t sendSlot, const QPoint& globalPos);
 
 protected:
@@ -159,6 +167,8 @@ private:
 
     QToolButton* mute_ = nullptr;
     QToolButton* solo_ = nullptr;
+    QToolButton* arm_ = nullptr;
+    QToolButton* monitor_ = nullptr;
     StripStereoButton* monoBtn_ = nullptr;
     QLabel* db_ = nullptr;
 
@@ -186,6 +196,8 @@ private:
     bool fxRackVisible_ = true;
     bool wideMode_ = false;
     bool mono_ = false;
+    bool recordArmed_ = false;
+    bool inputMonitored_ = false;
     bool hasAudioSource_ = false;
     bool hasInstrumentSource_ = false;
     QString instrumentName_;

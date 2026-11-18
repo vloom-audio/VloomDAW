@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QHelpEvent>
 #include <QMenu>
+#include <QMetaMethod>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
@@ -236,8 +237,8 @@ void ChannelRackView::paintEvent(QPaintEvent* /*event*/)
                 QRectF(nameRect.left() + 2.5, nameRect.top() + 3.5, 3, nameRect.height() - 7), 1.5, 1.5);
             p.restore();
         }
-        // Dim names without a sample: they make no sound until one is dropped.
-        p.setPen(channel.muted || channel.samplePath.empty() ? c.textDim : c.text);
+        // Dim names without a sample or instrument: they make no sound until one is loaded.
+        p.setPen(channel.muted || (channel.samplePath.empty() && !channel.instrument) ? c.textDim : c.text);
         p.drawText(nameRect.adjusted(8, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft,
             QFontMetrics(font()).elidedText(
                 QString::fromStdString(channel.name), Qt::ElideRight, nameRect.width() - 14));
@@ -411,6 +412,10 @@ void ChannelRackView::mousePressEvent(QMouseEvent* event)
         return;
     }
     if (event->button() == Qt::RightButton && hit.part == Part::Name) {
+        if (isSignalConnected(QMetaMethod::fromSignal(&ChannelRackView::channelMenuRequested))) {
+            emit channelMenuRequested(hit.channel, event->globalPosition().toPoint());
+            return;
+        }
         QMenu menu(this);
         const std::size_t channel = hit.channel;
         addColorMenu(

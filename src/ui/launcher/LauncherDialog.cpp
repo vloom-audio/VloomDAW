@@ -470,12 +470,23 @@ QWidget* LauncherDialog::createSidePanel(double tempo, const AudioStatus& audio)
 
     setupLay->addWidget(caption(tr("AUDIO SETUP"), setupCard));
 
-    const QString rawDevice = audio.device.isEmpty() ? tr("No active output device") : audio.device;
+    const QString rawDevice
+        = audio.device.isEmpty() ? tr("Out: No active output device") : tr("Out: %1").arg(audio.device);
     auto* devLabel = new QLabel(setupCard);
     devLabel->setToolTip(rawDevice);
     devLabel->setStyleSheet(QStringLiteral("color: %1; font-weight: 600;").arg(c.text.name()));
     devLabel->setText(devLabel->fontMetrics().elidedText(rawDevice, Qt::ElideRight, 264));
     setupLay->addWidget(devLabel);
+
+    const bool micActive = !audio.inputDevice.isEmpty();
+    const QString rawInput = micActive ? tr("Mic: %1 (%2 ch)").arg(audio.inputDevice).arg(audio.inputChannels)
+                                       : tr("Mic: Input disabled (set in Audio Settings)");
+    auto* micLabel = new QLabel(setupCard);
+    micLabel->setToolTip(rawInput);
+    micLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 8.5pt; font-weight: 600;")
+            .arg(micActive ? c.playing.name() : c.textDim.name()));
+    micLabel->setText(micLabel->fontMetrics().elidedText(rawInput, Qt::ElideRight, 264));
+    setupLay->addWidget(micLabel);
 
     auto* specsRow = new QHBoxLayout;
     specsRow->setSpacing(6);
@@ -501,12 +512,23 @@ QWidget* LauncherDialog::createSidePanel(double tempo, const AudioStatus& audio)
     }
     setupLay->addLayout(specsRow);
 
+    auto* audioBtnRow = new QHBoxLayout;
+    audioBtnRow->setSpacing(6);
     auto* cfgAudioBtn
-        = new QPushButton(Theme::icon(QStringLiteral("sliders")), tr("Configure &Audio Device…"), setupCard);
+        = new QPushButton(Theme::icon(QStringLiteral("sliders")), tr("&Audio Settings…"), setupCard);
     cfgAudioBtn->setMinimumHeight(34);
     cfgAudioBtn->setCursor(Qt::PointingHandCursor);
     connect(cfgAudioBtn, &QPushButton::clicked, this, [this] { choose(Choice::AudioSettings); });
-    setupLay->addWidget(cfgAudioBtn);
+
+    auto* ioAudioBtn = new QPushButton(Theme::icon(QStringLiteral("audio-io")), tr("&I/O…"), setupCard);
+    ioAudioBtn->setMinimumHeight(34);
+    ioAudioBtn->setCursor(Qt::PointingHandCursor);
+    ioAudioBtn->setToolTip(tr("Open Audio I/O Setup matrix (Inputs & Outputs channel routing)"));
+    connect(ioAudioBtn, &QPushButton::clicked, this, [this] { choose(Choice::AudioIoSetup); });
+
+    audioBtnRow->addWidget(cfgAudioBtn, 1);
+    audioBtnRow->addWidget(ioAudioBtn);
+    setupLay->addLayout(audioBtnRow);
 
     layout->addWidget(setupCard);
     layout->addStretch(1);

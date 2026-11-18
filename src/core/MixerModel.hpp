@@ -20,12 +20,14 @@ enum class MixerRole : std::uint8_t {
     Aux = 3, ///< Auxiliary routing / stem channel
 };
 
-/// One post-FX send from a mixer channel to another mixer channel (typically FX / Bus / Aux).
+/// One post-FX send from a mixer channel to another mixer channel (typically FX / Bus / Aux,
+/// or a compressor/gate sidechain input when `sidechain` is true).
 struct MixerSend {
     int target = 0; ///< target mixer track `1 .. kMaxInserts`
     double level = 0.8; ///< fader-taper position `0..1` (`0.8` = `0.0 dB` unity via `faderToGain()`)
     bool muted = false;
     bool preFader = false;
+    bool sidechain = false; ///< routes to the target insert's sidechain bus rather than its main audio
 
     friend bool operator==(const MixerSend&, const MixerSend&) = default;
 };
@@ -110,13 +112,15 @@ public:
     bool setOutput(std::size_t index, int target);
 
     /// True when adding a send from `index` (`>= 1`) to `target` (`1..insertCount()`)
-    /// is valid, within `kMaxSends`, non-duplicate, and cycle-free.
-    [[nodiscard]] bool canAddSend(std::size_t index, int target) const;
-    bool addSend(std::size_t index, int target, double level = 0.8, bool preFader = false);
+    /// is valid, within `kMaxSends`, non-duplicate (for the same `sidechain` mode), and cycle-free.
+    [[nodiscard]] bool canAddSend(std::size_t index, int target, bool sidechain = false) const;
+    bool addSend(
+        std::size_t index, int target, double level = 0.8, bool preFader = false, bool sidechain = false);
     bool removeSend(std::size_t index, std::size_t sendSlot);
     void setSendLevel(std::size_t index, std::size_t sendSlot, double level);
     void setSendMuted(std::size_t index, std::size_t sendSlot, bool muted);
     void setSendPreFader(std::size_t index, std::size_t sendSlot, bool preFader);
+    void setSendSidechain(std::size_t index, std::size_t sendSlot, bool sidechain);
 
     /// Appends `effect` to track `index`'s chain (the master's too). False
     /// for an index out of range or a full chain (kMaxEffects).

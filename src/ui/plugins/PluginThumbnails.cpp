@@ -6,6 +6,7 @@
 #include "ui/Theme.hpp"
 
 #include <QAction>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -17,6 +18,7 @@
 #include <QPushButton>
 #include <QScreen>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QToolButton>
@@ -237,6 +239,22 @@ PluginEditorHeader::PluginEditorHeader(
     connect(slotMenuBtn_, &QPushButton::clicked, this, &PluginEditorHeader::openSlotMenu);
     row->addWidget(slotMenuBtn_);
 
+    programCombo_ = new QComboBox(this);
+    programCombo_->setObjectName(QStringLiteral("pluginProgramCombo"));
+    programCombo_->setFixedHeight(24);
+    programCombo_->setMinimumWidth(110);
+    programCombo_->setMaximumWidth(210);
+    programCombo_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    programCombo_->setToolTip(tr("Factory Preset / Program"));
+    connect(programCombo_, &QComboBox::activated, this, [this](int idx) {
+        if (idx < 0 || idx >= context_.programs.size())
+            return;
+        context_.currentProgram = idx;
+        if (context_.onSelectProgram)
+            context_.onSelectProgram(idx);
+    });
+    row->addWidget(programCombo_);
+
     row->addStretch(1);
 
     captureBtn_ = new QPushButton(tr("Update Thumbnail"), this);
@@ -266,6 +284,20 @@ void PluginEditorHeader::refreshUi()
 
     const QString title = context_.slotTitle.isEmpty() ? tr("Plug-in") : context_.slotTitle;
     slotMenuBtn_->setText(title + QStringLiteral(" "));
+
+    if (programCombo_ != nullptr) {
+        const QSignalBlocker block(programCombo_);
+        programCombo_->clear();
+        if (!context_.programs.isEmpty()) {
+            programCombo_->addItems(context_.programs);
+            if (context_.currentProgram >= 0 && context_.currentProgram < context_.programs.size())
+                programCombo_->setCurrentIndex(context_.currentProgram);
+            programCombo_->setEnabled(static_cast<bool>(context_.onSelectProgram));
+            programCombo_->setVisible(true);
+        } else {
+            programCombo_->setVisible(false);
+        }
+    }
 
     const bool canThumb = !context_.thumbnailId.empty();
     captureBtn_->setVisible(canThumb);

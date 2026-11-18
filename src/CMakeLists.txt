@@ -11,6 +11,7 @@ add_library(vloomdaw_core STATIC)
 target_sources(vloomdaw_core PRIVATE
     # core — pure logic: formatting, (later) project model, commands, undo
     core/AudioFormat.cpp
+    core/AudioIoSetup.cpp
     core/BrowserFilter.cpp
     core/Decibels.cpp
     core/EqResponse.cpp
@@ -136,6 +137,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/dialogs/AboutDialog/AboutDialog.hpp
     ui/dialogs/AddTracksDialog/AddTracksDialog.cpp
     ui/dialogs/AddTracksDialog/AddTracksDialog.hpp
+    ui/dialogs/AudioIoDialog/AudioIoDialog.cpp
+    ui/dialogs/AudioIoDialog/AudioIoDialog.hpp
     ui/dialogs/ExportDialog.cpp
     ui/dialogs/ExportDialog.hpp
     ui/dialogs/ProjectLoadDialog/ProjectLoadDialog.cpp
@@ -276,6 +279,7 @@ qt_add_resources(vloomdaw_ui "icons"
     PREFIX "/icons"
     BASE "${PROJECT_SOURCE_DIR}/resources/icons"
     FILES
+        ${PROJECT_SOURCE_DIR}/resources/icons/audio-io.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/browser-file.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/browser-folder.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/channel-rack.svg
@@ -288,6 +292,8 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/follow-playhead.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/folder.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/home.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/input-monitor.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/input-monitor-active.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/loop.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/metronome.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/minus.svg
@@ -321,6 +327,8 @@ qt_add_resources(vloomdaw_ui "icons"
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-select.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-slice.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/tool-zoom.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/track-arm.svg
+        ${PROJECT_SOURCE_DIR}/resources/icons/track-arm-active.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/track-audio.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/track-instrument.svg
         ${PROJECT_SOURCE_DIR}/resources/icons/track-mute.svg

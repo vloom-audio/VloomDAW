@@ -20,6 +20,8 @@
 #include "ui/widgets/ViewButtons/ViewButtons.hpp"
 
 #include <vloom/engine/io/AudioDevice.hpp>
+#include <vloom/engine/record/AudioTake.hpp>
+#include <vloom/engine/sequencer/MidiTake.hpp>
 
 #include <QElapsedTimer>
 #include <QList>
@@ -60,6 +62,7 @@ namespace vloomdaw {
 class DeviceScanner;
 
 class AudioController;
+class AudioIoDialog;
 class ActivityBar;
 class BrowserPanel;
 class SamplePreviewer;
@@ -267,16 +270,31 @@ private:
     [[nodiscard]] DeviceRef selectedDevice() const;
     /// Re-lists the output devices; returns the selected one's index (-1 = default).
     int listDevices();
+    void syncInputAndMidiDevices();
     void openSelectedDevice();
+    void openPreferredInputDevice();
+    void openPreferredMidiDevice();
+    void selectInputDevice(int code);
+    void selectMidiDevice(const QString& portName);
+    void setArmedTrack(int track, bool syncTransport = true);
+    void setArmedInsert(int insert);
+    void setMonitoredInsert(int insert);
+    void syncRecordingState();
+    void commitActiveRecordings();
+    [[nodiscard]] QString nextRecordingFilePath(const QString& baseLabel) const;
     /// Opens output device `index` of deviceNames_ (-1 = system default);
     /// `fallback`: standing in for a lost device. Returns whether it runs.
     bool startDevice(int index, bool fallback = false);
+    void updateDeviceStatusText();
     /// Follows DeviceWatch: falls back to the default when the device is
     /// lost, back to the user's device when it returns.
     void watchDevice();
     /// Opens output device `index` of deviceNames_ and remembers it.
     void selectOutputDevice(int index);
     void showSettings(SettingsDialog::Page page);
+    void showAudioIoDialog(bool outputsTab = false);
+    void applyAudioIoConfig(const AudioIoConfig& cfg, bool persist = true);
+    void syncAudioIoDialogState();
     /// Sends the channel rack of the current pattern to the engine and
     /// reports samples that could not be loaded.
     void syncChannelRack();
@@ -329,6 +347,13 @@ private:
     void showEffectChooserMenu(std::size_t track, std::size_t slot, const QPoint& globalPos);
     /// Menu of instrument plugins to load into `channel` on the channel rack.
     void showInstrumentChooserMenu(std::size_t channel, const QPoint& globalPos);
+    /// Context menu for a channel row in the Channel Rack.
+    void showChannelRackContextMenu(std::size_t channel, const QPoint& globalPos);
+    /// Populates Note Effects, Multi-Output Routing, and Receive Notes From submenus for `channel`.
+    void populateChannelAdvancedMenus(QMenu& menu, std::size_t channel, const QPoint& globalPos);
+    /// Menu of note-effect (MIDI FX) plugins for `channel` at `slot`.
+    void showNoteEffectChooserMenu(std::size_t channel, std::size_t slot, const QPoint& globalPos);
+    void addNoteEffectToChannel(std::size_t plugin, std::size_t channel, std::size_t slot);
     /// Handles a plugin dropped onto slot `slot` of insert `track`.
     void handlePluginDroppedOnSlot(std::size_t track, std::size_t slot, std::size_t plugin);
     /// Opens (or raises) the editor of loaded plugin `handle`.
@@ -498,6 +523,7 @@ private:
 
     TransportBar* transport_ = nullptr;
     SettingsDialog* settingsDialog_ = nullptr;
+    QPointer<AudioIoDialog> audioIoDialog_;
     UpdateService* updates_ = nullptr;
     QPointer<UpdateDialog> updateDialog_;
     QTimer* updateTimer_ = nullptr; ///< hourly: checks once a day has passed since the last check
@@ -538,6 +564,8 @@ private:
     /// The notes before the piano roll edit under way (a drag sends many changes: one step to undo).
     std::optional<std::vector<Note>> noteEditBefore_;
     NoteHistory::Target noteEditTarget_; ///< and whose notes they are
+    std::optional<std::vector<ControlPoint>> controlEditBefore_;
+    NoteHistory::Target controlEditTarget_;
     std::shared_ptr<vloom::PluginInstance> previewInstrument_; ///< sounding a key of the piano roll
     PlaylistView* playlist_ = nullptr;
     PanelFrame* channelRackFrame_ = nullptr;
@@ -576,6 +604,26 @@ private:
     bool scrubPlaySent_ = false; ///< the engine took this scrub's play
     bool scrubStopPending_ = false; ///< a scrub's stop the engine has not acted on yet
     bool scrubStopSent_ = false; ///< the engine took that stop
+
+    // Audio / MIDI input, live monitoring, master pitch & recording state
+    std::vector<std::string> inputDeviceNames_;
+    double masterPitchSemitones_ = 0.0;
+    int armedTrack_ = -1;
+    int armedInsert_ = -1;
+    int monitoredInsert_ = -1;
+    std::size_t lastReportedDroppedRoutes_ = 0;
+    bool recordArmed_ = false;
+    bool midiRecordingActive_ = false;
+    bool audioRecordingActive_ = false;
+    bool recordingSawRolling_ = false;
+    double recordStartTick_ = 0.0;
+    int audioRecordTrack_ = -1;
+    QString audioRecordPath_;
+    vloom::MidiTake midiTake_;
+    std::unique_ptr<vloom::AudioTake> audioTake_;
+    std::array<vloom::RecordedMidi, 256> midiRecordScratch_{};
+    std::vector<float> liveRecordPeaks_;
+    double liveRecordPeakSeconds_ = 0.005;
 
     // Undo / redo history and shared window actions
     struct CopiedChannelSettings {

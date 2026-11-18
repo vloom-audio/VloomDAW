@@ -3,17 +3,18 @@
 ## Layers
 
 ```
-app/      VloomDAW (executable)      main(), object wiring
+app/      VloomDAW (executable)      main(), Start Hub & Settings lifecycle, object wiring
   │
-ui/       vloomdaw_ui   (Qt)          windows, widgets — no audio or business logic
+ui/       vloomdaw_ui   (Qt)          windows, editors, mixer, dialogs — no audio or business logic
   │
-audio/    vloomdaw_core (no Qt)       AudioController: vloom::Engine + audio device;
-                                      project and mixer turned into engine state
-core/     vloomdaw_core (no Qt)       pure logic: project and mixer models, plugin scan,
-                                      device watch, formatting; later undo
-probe/    vloomdaw-plugin-probe       child process that loads one plugin for its metadata
+audio/    vloomdaw_core (no Qt)       AudioController: vloom::Engine + audio/MIDI devices,
+                                      lock-free Audio I/O matrix routing & engine state builders
+core/     vloomdaw_core (no Qt)       pure logic: Project, MixerModel, AudioIoSetup, UndoHistory,
+                                      NoteHistory, MidiFile, PluginCatalog, StemModels, UpdateFeed
+probe/    vloomdaw-plugin-probe       child process that loads one VST3/CLAP/VST2 plugin for metadata
+stems/    vloomdaw-stems              child process running ONNX stem separation out of process
   │
-vloom-engine                          real-time audio (separate repo)
+vloom-engine (+ vloom-plugin-bridge)  real-time audio, recording, VST3/CLAP & bridged VST2 hosting
 ```
 
 Rules:
@@ -30,14 +31,16 @@ Rules:
 ## Data flow
 
 ```
-TransportBar ──playToggled/tempoChanged──▶ MainWindow ──▶ Engine control API (queued)
+TransportBar ──play/record/tempo/loop──▶ MainWindow ──▶ Engine control API (queued)
      ▲                                                              │
-     └──── setPosition/setPlaying ◀── screen-rate timer ◀── Engine atomics (play state, playhead)
+     └──── setPosition/setPlaying/setRecording ◀── screen-rate timer ◀── Engine atomics
 
-ChannelRackView ──step/volume/insert──▶ Project ──ChannelRackAudio──▶ SequencerState snapshot
-MixerPanel ──fader/pan/mute/solo──▶ MixerModel ──MixerAudio──▶ MixerState snapshot
+ChannelRackView / PianoRollView ──notes/controls/routing──▶ Project ──ChannelRackAudio──▶ SequencerState
+PlaylistView ──clips/automation/record-arm──▶ Project ──PlaylistAudio──▶ SongState
+MixerPanel ──fader/pan/mute/solo/sends/sidechain──▶ MixerModel ──MixerAudio──▶ MixerState
+AudioIoDialog ──Mono/Stereo bus matrix──▶ AudioIoSetup ──AudioController──▶ lock-free atomic channel map
      ▲                                                              │
-     └──── meters ◀── screen-rate timer ◀── Engine peaks (output, per insert)
+     └──── meters & live waveform ◀── screen-rate timer ◀── Engine peaks (output, input, per insert)
 ```
 
 Edits never wait for the audio thread: `ChannelRackAudio` and `MixerAudio`
@@ -68,5 +71,5 @@ Add new files to `src/CMakeLists.txt` under the right block and tests to
 
 ## Planned
 
-- `core/commands/`: every user edit as a Command, for undo / redo.
-- Per-feature controllers that take the wiring out of `MainWindow`.
+- Per-feature controllers that decompose wiring out of `MainWindow`.
+- Autosave & crash recovery journal on top of `UndoHistory` and `.vloom` snapshots.

@@ -24,7 +24,9 @@ inline constexpr int kHighestKey = 127;
 inline constexpr int kMinVelocity = 1; ///< how hard a note is played, as in MIDI
 inline constexpr int kMaxVelocity = 127;
 inline constexpr int kDefaultVelocity = 100;
+inline constexpr int kMaxMidiControlNumber = 127;
 inline constexpr std::size_t kMaxPatternNotes = 100000; ///< per channel and pattern
+inline constexpr std::size_t kMaxPatternControls = 100000; ///< per channel and pattern
 
 /// A note in the piano roll; positions in ticks from the pattern start.
 struct Note {
@@ -37,10 +39,25 @@ struct Note {
     friend bool operator==(const Note&, const Note&) = default;
 };
 
-/// What one channel plays in one pattern: step sequencer and piano roll.
+/// Continuous MIDI control kind written into a pattern (ADR 0012 / 0013).
+enum class ControlKind : std::uint8_t { PitchBend = 0, Controller = 1, Pressure = 2 };
+
+/// A pitch bend, CC controller, or channel pressure point in a pattern.
+struct ControlPoint {
+    int start = 0; ///< ticks from pattern start (>= 0)
+    ControlKind kind = ControlKind::Controller;
+    int number = 1; ///< CC number 0..127 when `kind == Controller` (1 = Mod Wheel)
+    double value = 0.0; ///< PitchBend: -1..+1; Controller & Pressure: 0..1
+    int midiChannel = 0; ///< MIDI channel 0..15 (MPE per-note channel or 0)
+
+    friend bool operator==(const ControlPoint&, const ControlPoint&) = default;
+};
+
+/// What one channel plays in one pattern: step sequencer, piano roll, and MIDI controls.
 struct ChannelPattern {
     std::vector<bool> steps = std::vector<bool>(kStepsPerBar, false);
     std::vector<Note> notes;
+    std::vector<ControlPoint> controls{};
 };
 
 struct Pattern {
@@ -61,6 +78,13 @@ struct Channel {
     std::optional<std::uint32_t> color{};
     /// A hosted instrument plugin; when loaded it plays instead of the sample.
     std::optional<PluginSlot> instrument{};
+    /// Note-effect plugins (arpeggiator, chord generator) chained before `instrument` (ADR 0012).
+    std::vector<PluginSlot> noteEffects{};
+    /// Mixer inserts for extra stereo outputs `2 .. N+1` (`0` = Master, `1..kMaxInserts` = Insert, `-1` =
+    /// off).
+    std::vector<int> pluginOutputs{};
+    /// Optional source channel index (`0..N-1`) whose notes `instrument` also plays (`-1` = none).
+    int notesFrom = -1;
 };
 
 /// A playlist track: a lane for clips.
@@ -150,6 +174,10 @@ public:
     static constexpr std::size_t kMaxPatterns = 999;
     /// Most step pads a pattern can have: 16 bars.
     static constexpr int kMaxSteps = 16 * kStepsPerBar;
+    /// Most note-effect plugins chained on one channel (`noteEffect` + 7 `noteEffects` in vloom-engine).
+    static constexpr std::size_t kMaxNoteEffects = 8;
+    /// Most extra stereo output pairs routed from one instrument (`vloom::PluginInstance::kMaxExtraOutputs`).
+    static constexpr std::size_t kMaxExtraOutputs = 16;
 
     /// A new song: four channels (Kick, Clap, Hat, Snare) and one pattern.
     Project();
@@ -185,6 +213,18 @@ public:
     void setChannelSample(std::size_t channel, const std::string& path);
     /// The instrument plugin the channel plays; nullopt: its sample again.
     void setChannelInstrument(std::size_t channel, std::optional<PluginSlot> instrument);
+    /// Note-effect plugins chained before `instrument` (up to `kMaxNoteEffects`).
+    void setChannelNoteEffects(std::size_t channel, std::vector<PluginSlot> effects);
+    bool addChannelNoteEffect(std::size_t channel, PluginSlot effect);
+    bool replaceChannelNoteEffect(std::size_t channel, std::size_t slot, PluginSlot effect);
+    bool removeChannelNoteEffect(std::size_t channel, std::size_t slot);
+    void setChannelNoteEffectBypassed(std::size_t channel, std::size_t slot, bool bypassed);
+    /// Extra stereo output routing (`-1` = off, `0` = Master, `1..kMaxInserts` = Insert).
+    void setChannelPluginOutputs(std::size_t channel, std::vector<int> outputs);
+    void setChannelPluginOutput(std::size_t channel, std::size_t outputIndex, int insert);
+    /// Another channel (`0..channels().size()-1`, not itself) whose notes this channel also plays; `-1` =
+    /// none.
+    void setChannelNotesFrom(std::size_t channel, int sourceChannel);
     /// Fader position 0..1 (clamped; NaN ignored).
     void setChannelVolume(std::size_t channel, double volume);
     /// -1 .. +1 (clamped; NaN ignored).
@@ -260,6 +300,8 @@ public:
     /// Replaces all the notes (each clamped, in the order given; what is past
     /// kMaxPatternNotes is left out): an edit of several notes, or an undo.
     void setNotes(std::size_t pattern, std::size_t channel, std::vector<Note> notes);
+    [[nodiscard]] const std::vector<ControlPoint>* controls(std::size_t pattern, std::size_t channel) const;
+    void setControls(std::size_t pattern, std::size_t channel, std::vector<ControlPoint> controls);
 
     // ---- playlist
     /// Appends a track named "Track N"; its index, or nullopt at kMaxPlaylistTracks.
@@ -345,6 +387,8 @@ public:
 
     /// Clamps a note to the valid key range, start >= 0 and length >= kMinNoteLength.
     [[nodiscard]] static Note clamped(Note note);
+    /// Clamps a control point to valid start, controller number, value, and MIDI channel.
+    [[nodiscard]] static ControlPoint clamped(ControlPoint point);
 
 private:
     [[nodiscard]] ChannelPattern* channelPattern(std::size_t pattern, std::size_t channel);

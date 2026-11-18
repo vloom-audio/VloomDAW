@@ -13,7 +13,9 @@
 - Every user-visible string goes through `tr()` so it can be translated.
 - Prefer layouts over fixed sizes; the UI must work from 1280×720 up to 4K and
   with system font scaling.
-- Never update the UI faster than ~60 Hz; poll engine state from one `QTimer`.
+- Pace UI repaints to the display's refresh rate (`30–240 Hz`) from one central
+  `QTimer` (`MainWindow::refreshFromEngine()`); never poll the engine from
+  individual child widgets.
 - Never do slow work (file loading, plugin scanning) on the UI thread — use a
   background thread and report back with a queued signal.
 
@@ -27,13 +29,15 @@
 
 ## Visual
 
-- Dark theme is the default. Every colour lives in `ui/Theme` (palette +
-  style sheet); widgets never hard-code colours. To style a widget, give it an
-  object name (`setObjectName("positionDisplay")`) and add a rule for that name
-  in `Theme.cpp`.
+- Dark theme is the default (neutral dark presets `Midnight`, `Graphite` and
+  `Deep Black` default to Vloom signature rose-pink `#e8457c`, while tinted
+  presets match their own palette hue). Every colour lives in `ui/Theme`
+  (palette + style sheet); widgets never hard-code colours. To style a widget,
+  give it an object name (`setObjectName("positionDisplay")`) and add a rule
+  for that name in `Theme.cpp`.
 - Icons: SVG only, in `resources/icons/`, listed in `qt_add_resources` in
-  `src/CMakeLists.txt` and loaded as `QIcon(":/icons/<name>.svg")`. Draw them on
-  a 24×24 view box in the theme's text colour, or take one from
-  [Lucide](https://lucide.dev) (ISC) and recolour it — record its origin in
-  `resources/icons/README.md`.
+  `src/CMakeLists.txt` and loaded via `Theme::icon("<name>")`. Draw them on a
+  24×24 view box using only the four placeholder hexes (`#e6e9ee` text,
+  `#8b95a3` dim text, `#ff8a3d` accent, `#e81123` danger/record) so icons
+  recolour live when the theme changes — see `resources/icons/README.md`.
 - Tool tips name the shortcut: "Play / stop (Space)".

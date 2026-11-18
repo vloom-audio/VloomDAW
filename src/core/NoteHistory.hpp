@@ -33,6 +33,7 @@ public:
     /// Records that the notes of `target` went from `before` to `after`.
     /// Nothing is recorded when they are the same. Clears what could be redone.
     void record(Target target, std::vector<Note> before, std::vector<Note> after);
+    void recordControls(Target target, std::vector<ControlPoint> before, std::vector<ControlPoint> after);
 
     [[nodiscard]] bool canUndo() const { return !done_.empty(); }
     [[nodiscard]] bool canRedo() const { return !undone_.empty(); }
@@ -48,8 +49,11 @@ public:
 private:
     struct Edit {
         Target target;
-        std::vector<Note> before;
-        std::vector<Note> after;
+        bool isControls = false;
+        std::vector<Note> before{};
+        std::vector<Note> after{};
+        std::vector<ControlPoint> controlsBefore{};
+        std::vector<ControlPoint> controlsAfter{};
     };
 
     /// Moves the newest edit of `from` to `to`: the notes must be as the edit

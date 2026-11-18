@@ -298,3 +298,29 @@ TEST_CASE("Bus, FX and Aux channels support cycle-free routing, sends and solo-s
     CHECK(mixer.track(2).mono);
     CHECK_FALSE(mixer.track(1).mono);
 }
+
+TEST_CASE(
+    "Sidechain sends coexist with regular sends and do not unmute targets when soloing source", "[mixer]")
+{
+    MixerModel mixer(3); // 1 = Kick, 2 = Bass, 3 = Reverb FX
+    REQUIRE(mixer.addSend(1, 2, 0.8, true, true)); // Kick -> Bass sidechain (pre-fader)
+    CHECK_FALSE(mixer.addSend(1, 2, 0.8, true, true)); // duplicate sidechain send rejected
+    CHECK(mixer.addSend(1, 2, 0.5, false, false)); // regular audio send to same target IS allowed
+    REQUIRE(mixer.track(1).sends.size() == 2);
+    CHECK(mixer.track(1).sends[0].sidechain);
+    CHECK_FALSE(mixer.track(1).sends[1].sidechain);
+
+    mixer.removeSend(1, 1); // keep only the sidechain send
+    REQUIRE(mixer.track(1).sends.size() == 1);
+    REQUIRE(mixer.track(1).sends[0].sidechain);
+
+    // Soloing Kick (1) must NOT unmute Bass (2) merely because Kick triggers Bass's sidechain!
+    mixer.setSoloed(1, true);
+    CHECK(mixer.isTrackAudible(1));
+    CHECK_FALSE(mixer.isTrackAudible(2));
+
+    // Converting the send into a regular audio send DOES make downstream target 2 audible.
+    mixer.setSendSidechain(1, 0, false);
+    CHECK_FALSE(mixer.track(1).sends[0].sidechain);
+    CHECK(mixer.isTrackAudible(2));
+}
