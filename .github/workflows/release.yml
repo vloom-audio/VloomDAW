@@ -91,7 +91,9 @@ jobs:
           else
             version="${base}-dev.${GITHUB_SHA::7}"
           fi
-          [[ "$version" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || { echo "::error::unusable version '$version'"; exit 1; }
+          # The same rule as CMake's VLOOMDAW_VERSION_LABEL and sign-release.sh:
+          # x.y.z with an optional pre-release, no build metadata (+...).
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::unusable version '$version'"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           # Numbers only, for the Windows file version resource.
           echo "numeric=$(grep -oE '^[0-9]+([.][0-9]+){0,3}' <<< "$version")" >> "$GITHUB_OUTPUT"
@@ -303,6 +305,12 @@ jobs:
           work="$RUNNER_TEMP/sign"
           mkdir -p "$work/dist"
           trap 'rm -rf "$work"' EXIT
+          # Sign only a release tag (the same rule as scripts/sign-release.sh):
+          # the trigger is just v*, and "vfoo" must not get the update key.
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$GITHUB_REF_NAME is not a release tag (v<major>.<minor>.<patch>[-<pre-release>])"
+            exit 1
+          fi
           if [ -z "$MINISIGN_SECRET_KEY" ] || [ -z "$MINISIGN_PASSWORD" ]; then
             echo "::error::MINISIGN_SECRET_KEY and MINISIGN_PASSWORD must be set in the release-signing environment"
             exit 1
