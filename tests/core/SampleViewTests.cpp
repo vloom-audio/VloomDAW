@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vloom Audio contributors
 #include "core/SampleView.hpp"
+#include "core/TimeEffects.hpp"
 
 #include <vloom/dsp/Envelope.hpp>
 

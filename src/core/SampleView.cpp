@@ -92,20 +92,6 @@ double playbackSpeed(double semitones, double cents) noexcept
     return std::exp2((semitones + cents / 100.0) / 12.0);
 }
 
-double tickStep(double seconds, int maxTicks) noexcept
-{
-    if (!(seconds > 0.0) || !std::isfinite(seconds) || maxTicks < 1)
-        return 1.0;
-    const double least = seconds / maxTicks;
-    double decade = std::pow(10.0, std::floor(std::log10(least)));
-    for (;;) {
-        for (const double each : {1.0, 2.0, 5.0})
-            if (each * decade >= least * (1.0 - 1e-9))
-                return each * decade;
-        decade *= 10.0;
-    }
-}
-
 std::string tickLabel(double seconds, double step)
 {
     if (step < 0.1 - 1e-12)

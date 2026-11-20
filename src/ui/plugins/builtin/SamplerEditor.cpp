@@ -3,6 +3,7 @@
 #include "ui/plugins/builtin/SamplerEditor.hpp"
 
 #include "core/SampleView.hpp"
+#include "core/TimeEffects.hpp"
 #include "ui/DroppedFiles.hpp"
 #include "ui/plugins/SampleFiles.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"

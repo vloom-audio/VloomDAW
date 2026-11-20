@@ -46,10 +46,6 @@ struct PeakColumn {
 /// (slower for down).
 [[nodiscard]] double playbackSpeed(double semitones, double cents) noexcept;
 
-/// The distance between the labels of a time line `seconds` long so that
-/// at most `maxTicks` fit: 1, 2 or 5 times a power of ten, in seconds.
-[[nodiscard]] double tickStep(double seconds, int maxTicks) noexcept;
-
 /// A label of that time line: "0.5 s", "2.0 s", "250 ms", "12 s".
 [[nodiscard]] std::string tickLabel(double seconds, double step);
 
