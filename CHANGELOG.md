@@ -6,6 +6,24 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- All 20 built-in processors of vloom-engine in the Plugins panel, each in
+  its category (`PluginHost::builtinCategory`, `builtinPlugins`): compressor,
+  limiter, gate, de-esser and transient shaper (Dynamics), EQ, Filter,
+  Delay, Reverb, chorus, flanger, phaser and tremolo (Modulation), saturator
+  and bitcrusher (Distortion), gain and utility (Utility); the synth,
+  sampler and drum sampler as instruments for the channel rack.
+- The generic plugin editor (`ParameterEditorWindow`) shows a stepped choice
+  as a list of its names (modes, curves, filter types, tempo-synced note
+  lengths such as "1/8 D", keys), shows the gain reduction of the dynamics,
+  and gives the sampler and each drum pad a "Load sample…" button (audio
+  files also drop onto it from the browser). MP3, FLAC, Ogg, AIFF and M4A
+  are decoded as for channel samples; network paths are refused.
+- The built-in compressor and gate are sidechain targets of a mixer send.
+- Projects keep the built-in sampler's and drum pads' sample paths; a missing
+  sample is listed with the project's other problems when it opens
+  (`sampleProblems`).
+
 ## [0.1.0-rc.1] - 2026-11-19
 
 ### Security

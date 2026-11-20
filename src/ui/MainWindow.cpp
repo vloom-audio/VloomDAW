@@ -272,6 +272,30 @@ MainWindow::MainWindow(AudioController& audio, QWidget* parent)
         if (pluginIdleTimer_->interval() != interval)
             pluginIdleTimer_->setInterval(interval);
     });
+    // The built-in sampler and drum sampler read them the same way, at the
+    // file's own rate (they resample as they play); the project keeps the
+    // original path.
+    pluginHost_.setSampleFileResolver([this](const std::string& path, std::string* error) -> std::string {
+        // A project may name any path: a network one would make Windows
+        // connect to that host (and send the user's NTLM hash), so none is read.
+        if (isNetworkPath(path)) {
+            if (error != nullptr)
+                *error = "samples on network paths are not loaded";
+            return {};
+        }
+        const QString file = QString::fromStdString(path);
+        if (needsDecoding(file)) {
+            statusBar()->showMessage(tr("Decoding %1…").arg(QFileInfo(file).fileName()));
+            statusBar()->repaint(); // shown while the decoding blocks
+        }
+        QString why;
+        const QString wav = playableWav(file, 0.0, &why);
+        if (needsDecoding(file))
+            statusBar()->clearMessage();
+        if (wav.isEmpty() && error != nullptr)
+            *error = why.toStdString();
+        return wav.toStdString();
+    });
     // MP3, FLAC, Ogg and AIFF reach the engine as WAV copies decoded once.
     rackAudio_.setSourceResolver([this](const std::string& path, double sampleRate, std::string* error) {
         const QString file = QString::fromStdString(path);
@@ -8115,6 +8139,10 @@ bool MainWindow::applyProject(ProjectData incoming, QStringList& problems, Proje
         }
         if (!loaded.error.empty())
             problems << tr("%1: %2").arg(name, QString::fromStdString(loaded.error));
+        // A built-in sampler's files that are gone, listed like missing plugins.
+        if (const auto instance = pluginHost_.instance(loaded.handle); instance != nullptr)
+            for (const std::string& missing : sampleProblems(instance->processor()))
+                problems << tr("%1: %2").arg(name, QString::fromStdString(missing));
         slot.instance = loaded.handle;
         slot.savedState.clear(); // the instance holds them now
     };

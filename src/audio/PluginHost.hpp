@@ -43,9 +43,27 @@ struct PluginPick {
 [[nodiscard]] PluginPick pickPlugin(
     const std::vector<vloom::PluginInfo>& plugins, std::string_view id, std::string_view name);
 
-/// The effects that come with VloomDAW (vloom-engine's built-in processors),
-/// as the plugin lists show them: format Builtin, the id as path, a category.
+/// Where a built-in goes in the app's plugin lists: one of the app's
+/// categories (core/PluginMetadata: "Dynamics", "EQ", "Filter", "Delay",
+/// "Reverb", "Modulation", "Distortion", "Utility", or "Instrument") and the
+/// tags that give an instrument its type ("Instrument|Drum", ...).
+struct BuiltinCategory {
+    std::string category;
+    std::string tags;
+};
+/// From the category vloom-engine gives a built-in (PluginInfo::category).
+[[nodiscard]] BuiltinCategory builtinCategory(const vloom::PluginInfo& builtin);
+
+/// The effects and instruments that come with VloomDAW (vloom-engine's
+/// built-in processors), as the plugin lists show them: format Builtin, the
+/// id as path, a category.
 [[nodiscard]] std::vector<PluginInfo> builtinPlugins();
+
+/// What is wrong with the samples of `processor` (the built-in sampler and
+/// drum sampler), one line per slot whose file could not be loaded, e.g.
+/// "Pad 3: 'C:/kit/snare.wav' not found": for the list of problems a
+/// project shows when it opens. Empty when all is well.
+[[nodiscard]] std::vector<std::string> sampleProblems(const vloom::AudioProcessor& processor);
 
 /// The CLAP, VST 3 and built-in plugins the project uses, loaded in-process (ADR 0006
 /// of vloom-engine: a crashing plugin takes the app down). Each instance has
@@ -80,6 +98,11 @@ public:
     /// the plugin refuses leaves it loaded at its defaults, with `error` set.
     [[nodiscard]] Loaded loadWithState(PluginFormat format, const std::filesystem::path& path,
         std::string_view id, std::string_view name, double sampleRate, std::span<const std::uint8_t> state);
+
+    /// How the built-ins that play samples read a file (vloom::
+    /// SampleFileResolver): given to every such instance loaded from now on
+    /// and to those loaded already. Set it before loading a project.
+    void setSampleFileResolver(vloom::SampleFileResolver resolver);
 
     [[nodiscard]] std::shared_ptr<vloom::PluginInstance> instance(std::uint64_t handle) const;
     /// The rate instance `handle` was last activated at; 0 if there is none.
@@ -117,6 +140,7 @@ private:
         lastStates_; ///< kept if a bridged plugin fails
     std::set<std::uint64_t> failed_; ///< handles whose `hasFailed()` was already reported
     std::uint64_t next_ = 1;
+    vloom::SampleFileResolver sampleResolver_; ///< for built-ins with sample slots
 };
 
 } // namespace vloomdaw
