@@ -131,10 +131,9 @@ void BuiltinEditorWindow::buildHeader(std::vector<Preset> presets)
     power_->setCheckable(true);
     power_->setChecked(true);
     power_->setFocusPolicy(Qt::NoFocus);
-    power_->setToolTip(tr("Effect on (click to bypass)"));
-    power_->setAccessibleName(tr("Effect on"));
     connect(power_, &QToolButton::clicked, this, [this](bool on) { emit bypassToggled(!on); });
     row->addWidget(power_);
+    setBypassed(false); // its tooltip
 
     const vloom::PluginInfo info = instance_->processor().info();
     auto* name = new QLabel(QString::fromStdString(info.name), header);
@@ -326,9 +325,16 @@ void BuiltinEditorWindow::setBypassed(bool bypassed)
 {
     bypassed_ = bypassed;
     power_->setChecked(!bypassed);
-    power_->setToolTip(
-        bypassed ? tr("Effect bypassed (click to turn on)") : tr("Effect on (click to bypass)"));
-    power_->setAccessibleName(bypassed ? tr("Effect bypassed") : tr("Effect on"));
+    // An instrument (the sampler, the drum sampler) is switched off, as SynthEditorWindow says.
+    if (instance_->processor().info().kind == vloom::PluginInfo::Kind::Instrument) {
+        power_->setToolTip(
+            bypassed ? tr("Instrument off (click to turn on)") : tr("Instrument on (click to turn off)"));
+        power_->setAccessibleName(bypassed ? tr("Instrument off") : tr("Instrument on"));
+    } else {
+        power_->setToolTip(
+            bypassed ? tr("Effect bypassed (click to turn on)") : tr("Effect on (click to bypass)"));
+        power_->setAccessibleName(bypassed ? tr("Effect bypassed") : tr("Effect on"));
+    }
     power_->update();
 }
 

@@ -100,8 +100,9 @@ protected:
     };
 
     /// `presets` follow "Default" (every parameter at its default value).
-    /// `sampleRate`: the engine's. The plugin's parameter ids must run 0 .. n - 1
-    /// (as every built-in's do). Sized 900 x 480 unless the subclass resizes it.
+    /// `sampleRate`: the engine's. The plugin's parameter ids must be small
+    /// (below 4096, as every built-in's are); gaps are fine (the drum
+    /// sampler's run 0, 16 .. 271). Sized 900 x 480 unless the subclass resizes it.
     BuiltinEditorWindow(std::shared_ptr<vloom::PluginInstance> instance, const QString& title,
         double sampleRate, std::vector<Preset> presets, QWidget* parent);
 

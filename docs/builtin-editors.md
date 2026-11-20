@@ -120,3 +120,29 @@ in the same style, and note the difference in the class comment.
   attack, hold, release, hysteresis; footer: detector low cut and its
   frequency, Listen, open or closed (from the gain reduction: the engine
   does not report `dsp::Gate::isOpen()`).
+
+## Instruments
+
+The shell serves the built-in instruments too (`MainWindow` wires the power
+button to the channel's instrument, and it reads "Instrument on/off").
+`SynthEditorWindow` keeps its own window.
+
+- `SamplerEditor` (`vloom.sampler`): the sample's waveform with Start and the
+  loop (Loop Start, Loop End) as markers to drag, the sample's end, the time
+  along it and the amp envelope over it at the root key. The panel has three
+  pages: Amp (the design's row), Filter and Play. Footer: the sample (click
+  to replace it, × to remove it), root key, key range, loop mode, voices.
+- `DrumSamplerEditor` (`vloom.drums`): the 16 pads (key and sample name;
+  click to choose, drop files to load), and the chosen pad's waveform with
+  its decay point to drag, knobs and readouts, made the first time a pad is
+  chosen. The floating panel is hidden. Footer: the pad's file, pads loaded,
+  master gain.
+
+Samples load through `ui/plugins/SampleFiles.hpp` (as in
+`ParameterEditorWindow`): `AudioProcessor::loadSample()`, with the host's
+resolver decoding the other types and refusing network paths. The engine does
+not hand its sample data to the UI, so `SampleWaveforms`
+(`SampleParts.hpp`) reads the file each slot reports again on a worker
+thread (the same WAV the engine plays, never a network path) and keeps its
+peaks. The pictures' maths (peaks, the dsp's envelope, the time line) is in
+`core/SampleView.hpp`, tested in `tests/core/SampleViewTests.cpp`.

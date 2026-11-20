@@ -192,6 +192,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/CompressorEditor.hpp
     ui/plugins/builtin/ControlPanel.cpp
     ui/plugins/builtin/ControlPanel.hpp
+    ui/plugins/builtin/DrumSamplerEditor.cpp
+    ui/plugins/builtin/DrumSamplerEditor.hpp
     ui/plugins/builtin/EditorStyle.cpp
     ui/plugins/builtin/EditorStyle.hpp
     ui/plugins/builtin/GateEditor.cpp
@@ -208,6 +210,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/PillToggle.hpp
     ui/plugins/builtin/Readout.cpp
     ui/plugins/builtin/Readout.hpp
+    ui/plugins/builtin/SampleParts.cpp
+    ui/plugins/builtin/SampleParts.hpp
+    ui/plugins/builtin/SamplerEditor.cpp
+    ui/plugins/builtin/SamplerEditor.hpp
     ui/plugins/builtin/TransferCurve.cpp
     ui/plugins/builtin/TransferCurve.hpp
     ui/plugins/PresetBar.cpp
