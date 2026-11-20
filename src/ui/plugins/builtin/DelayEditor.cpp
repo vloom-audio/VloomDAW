@@ -4,6 +4,7 @@
 
 #include "core/ParameterScale.hpp"
 #include "core/TimeEffects.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
 #include "ui/plugins/builtin/EditorStyle.hpp"
@@ -16,6 +17,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -34,12 +36,20 @@ constexpr double kTop = 24.0;
 constexpr double kLabelRoom = 26.0; ///< under the echoes, for their numbers
 constexpr double kEchoesShown = 8.6; ///< echo intervals the display spans
 constexpr double kRangeDb = 42.0; ///< from a full bar down to none
+constexpr double kFlashSeconds = 0.45; ///< an echo's glow as its pulse reaches it
+constexpr double kTrailSeconds = 0.7; ///< a pulse's trail falls 60 dB in this
 
 } // namespace
 
 /// DelayEditor's display: the dry hit and its echoes, left above the line
 /// and right below it, the decay dashed, and a handle on the second echo.
-class EchoDisplay : public HandleDisplay {
+///
+/// Animated: each hit in the sound (an onset) sends a glowing pulse along
+/// the time axis at real time, as tall as the feedback's decay lets the
+/// echoes be by then, leaving a fading trail; each echo flashes (above, on
+/// the left; below, on the right; ping-pong bouncing) as the pulse reaches
+/// it, as bright as the hit and that echo's level.
+class EchoDisplay : public HandleDisplay, public Animated {
 public:
     EchoDisplay()
     {
@@ -47,6 +57,8 @@ public:
         setHandleCursor(Qt::SizeAllCursor);
         onDragFinished = [this] {
             fit();
+            taps_ = echoTaps(echo_, span_);
+            ++key_;
             update();
         };
     }
@@ -57,8 +69,67 @@ public:
         mix_ = std::clamp(mix, 0.0, 1.0);
         if (!isDragging())
             fit();
+        taps_ = echoTaps(echo_, span_);
+        ++key_;
         update();
     }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        if (audio.onset() && wet() > 0.0) {
+            const double strength = std::clamp(audio.onsetStrength(), 0.25, 1.0);
+            pulses_.spawn(Pulse{.strength = strength, .previousAge = 0.0}, span_ + 0.05);
+            flashes_.spawn(Flash{.x = kDryX,
+                               .top = base() - heightOf((1.0 - mix_) / scale()),
+                               .bottom = base() + heightOf((1.0 - mix_) / scale()),
+                               .intensity = strength},
+                kFlashSeconds);
+        }
+        flashes_.advance(dt);
+        trail_.setArea(QRectF(0.0, 0.0, width(), height()));
+        trail_.advance(motion::decayFactor(dt, kTrailSeconds, 60.0), QTransform(), 0.35);
+        const double mid = base();
+        pulses_.advance(dt, [&](auto& pulse, double /*step*/) {
+            Pulse& state = pulse.state;
+            // The echoes the pulse reached since the last frame flash.
+            for (const EchoTap& tap : taps_) {
+                if (tap.seconds > state.previousAge && tap.seconds <= pulse.age) {
+                    const double up = heightOf(tap.left * wet());
+                    const double down = heightOf(tap.right * wet());
+                    const double level = std::max(up, down) / halfHeight();
+                    if (level > 0.0)
+                        flashes_.spawn(Flash{.x = xOf(tap.seconds),
+                                           .top = up >= 0.5 ? mid - up : mid,
+                                           .bottom = down >= 0.5 ? mid + down : mid,
+                                           .intensity = state.strength * (0.4 + 0.6 * level)},
+                            kFlashSeconds);
+                }
+            }
+            // Its front: from where it was to where it is, as tall as the
+            // echoes may be by then (the feedback's decay).
+            const double from = xOf(state.previousAge);
+            const double to = xOf(pulse.age);
+            const double h = heightOf(echoLevelAt(pulse.age));
+            if (h >= 0.5 && to > from) {
+                QColor ink = style::accent();
+                ink.setAlphaF(static_cast<float>(0.16 * state.strength));
+                trail_.ink([&](QPainter& p) { p.fillRect(QRectF(from, mid - h, to - from, 2.0 * h), ink); });
+            }
+            state.previousAge = pulse.age;
+        });
+        update();
+        return pulses_.alive() > 0 || flashes_.alive() > 0 || trail_.isVisible();
+    }
+
+    void rest() override
+    {
+        pulses_ = motion::ParticlePool<Pulse, 8>{};
+        flashes_ = motion::ParticlePool<Flash, 48>{};
+        trail_.clear();
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
 
     /// When the second echo comes for these settings.
     [[nodiscard]] double secondEcho() const
@@ -84,7 +155,37 @@ protected:
 
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        if (!animationOn()) {
+            paintStatic(p);
+            return;
+        }
+        back_.draw(p, *this, key_, [this](QPainter& layer) { paintStatic(layer); });
+        trail_.paint(p, 1.0);
+        const double mid = base();
+        // Each pulse's front: a glowing edge where it is now.
+        pulses_.forEach([&](const auto& pulse) {
+            const double h = heightOf(echoLevelAt(pulse.age));
+            if (h < 0.5)
+                return;
+            const double x = std::round(xOf(pulse.age)) + 0.5;
+            motion_paint::glowLine(p, QLineF(x, mid - h, x, mid + h), style::accent(),
+                0.6 * pulse.state.strength * (1.0 - pulse.progress()), 7.0);
+        });
+        motion_paint::GlowBatch glow(p, style::accent());
+        flashes_.forEach([&](const auto& flash) {
+            const double fade = 1.0 - flash.progress();
+            const double intensity = flash.state.intensity * fade * fade;
+            const double radius = 10.0 + 10.0 * flash.state.intensity;
+            glow.dot(QPointF(flash.state.x, flash.state.top), radius, intensity);
+            if (flash.state.bottom > flash.state.top + 1.0)
+                glow.dot(QPointF(flash.state.x, flash.state.bottom), radius, intensity);
+        });
+    }
+
+    void paintStatic(QPainter& p) const
+    {
         p.fillRect(rect(), style::background());
         const double mid = base();
         const double half = halfHeight();
@@ -108,7 +209,7 @@ protected:
         p.drawText(QPointF(kDryX + kBarWidth / 2 + 8, mid - half + 12), QObject::tr("Dry"));
 
         // The echoes.
-        const std::vector<EchoTap> taps = echoTaps(echo_, span_);
+        const std::vector<EchoTap>& taps = taps_;
         const QColor accent = style::accent();
         const double numberY = mid + half + kLabelRoom - 6;
         double lastNumberX = -100.0;
@@ -202,6 +303,18 @@ private:
         return fraction <= 0.0 ? 0.0 : std::pow(10.0, (fraction - 1.0) * kRangeDb / 20.0);
     }
 
+    /// How loud an echo can be `seconds` after the hit: the first echo's
+    /// level until it comes, then one step of the feedback per interval.
+    [[nodiscard]] double echoLevelAt(double seconds) const
+    {
+        const double start = echo_.leftSeconds;
+        if (seconds <= start)
+            return wet();
+        const double interval
+            = echo_.pingPong ? 0.5 * (echo_.leftSeconds + echo_.rightSeconds) : echo_.leftSeconds;
+        return wet() * std::pow(echo_.feedback, (seconds - start) / std::max(interval, 1e-6));
+    }
+
     /// Spans enough time for about eight echo intervals.
     void fit()
     {
@@ -210,9 +323,28 @@ private:
         span_ = std::max(0.01, kEchoesShown * interval);
     }
 
+    /// A hit's pulse travelling along the echoes.
+    struct Pulse {
+        double strength = 0.0; ///< of the onset, 0 .. 1
+        double previousAge = 0.0; ///< where it was last frame, s
+    };
+    /// An echo glowing as a pulse reaches it.
+    struct Flash {
+        double x = 0.0;
+        double top = 0.0; ///< the left bar's top (the line if none)
+        double bottom = 0.0; ///< the right bar's bottom
+        double intensity = 0.0;
+    };
+
     EchoSettings echo_;
     double mix_ = 0.3;
     double span_ = 3.0; ///< seconds from the dry sound to the right end
+    std::vector<EchoTap> taps_; ///< for these settings over span_
+    std::uint64_t key_ = 1; ///< changes with the settings (the cached picture)
+    motion_paint::LayerCache back_;
+    motion_paint::TrailBuffer trail_{0.34};
+    motion::ParticlePool<Pulse, 8> pulses_;
+    motion::ParticlePool<Flash, 48> flashes_;
 };
 
 DelayEditor::DelayEditor(
@@ -292,7 +424,7 @@ DelayEditor::DelayEditor(
     footer()->addRight(output);
 
     refresh();
-    startMetering();
+    animate(display_);
 }
 
 double DelayEditor::delaySeconds(bool right) const

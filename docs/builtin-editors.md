@@ -167,14 +167,18 @@ display with one round handle to drag), `ResponseDisplay` (a frequency
 response, filled, with its sweep dashed and a handle on the 0 dB line),
 `SegmentedChoice` (Tremolo | Pan), `OutputLevel` (the footer's held output
 peak) and a time axis. The maths is in `core/TimeEffects` and its tests
-check it against the effects themselves.
+check it against the effects themselves. The plugins do not report their
+LFO's phase: an animated display runs its own at the real rate (the
+plugins' LFOs run free too, so only where in the cycle it is can differ).
 
 - `DelayEditor` (`vloom.delay`): a centred hit and its echoes, left above
   the line and right below, in dB, the feedback's decay dashed; the handle
   on the second echo drags the time (sideways; to the nearest note while
   synced) and the feedback (up and down). Sync, Ping-pong, time (or note),
   feedback, low cut, high cut, width, mix; footer: tempo, the delay of each
-  side, stereo offset, output.
+  side, stereo offset, output. Animated: each hit sends a pulse along the
+  echoes at real time, as tall as the feedback's decay, leaving a fading
+  trail; each echo flashes as it is reached.
 - `ReverbEditor` (`vloom.reverb`): the dry hit, the pre-delay, the first
   trips round the lines and the tail falling 60 dB in the decay time, to
   scale, with the highs (8 kHz, shortened by damping) dashed; the handle on
@@ -182,18 +186,23 @@ check it against the effects themselves.
   width, mix, Freeze; footer: low cut, high cut, output.
 - `ChorusEditor` (`vloom.chorus`): each voice's delay over a few LFO cycles.
   Rate (or note), depth, delay, feedback, width, mix; footer: voices,
-  spread, LFO sync, output.
+  spread, LFO sync, output. Animated: the sweeps scroll at the LFO's rate,
+  and each voice's ribbon is the newest output read at its delay now.
 - `FlangerEditor` (`vloom.flanger`): the comb up to 8 kHz at Delay, and at
   the end of the sweep dashed; the handle at the lowest notch drags the
   delay. Rate (or note), depth, delay, feedback, stereo phase, mix; footer:
-  LFO sync, output.
+  LFO sync, output. Animated (with the phaser, `ResponseDisplay::setMotion()`):
+  the response sweeps between its dashed ends at the LFO's rate, glowing
+  with the level, a glow in each notch.
 - `PhaserEditor` (`vloom.phaser`): the notches at the centre, and at both
   ends of the sweep dashed; the handle drags the centre. Rate (or note),
   depth, centre, feedback, stereo phase, mix; footer: stages, LFO sync,
   output.
 - `TremoloEditor` (`vloom.tremolo`): the gain of each side over a few LFO
   cycles. Mode (Tremolo | Pan), rate (or note), depth, shape, stereo phase
-  (dimmed for Pan); footer: Sync, output.
+  (dimmed for Pan); footer: Sync, output. Animated: the curves scroll past a
+  playhead at the LFO's rate, each side glowing as loud as its gain now, the
+  output's level trailing off behind it.
 
 ## Instruments
 

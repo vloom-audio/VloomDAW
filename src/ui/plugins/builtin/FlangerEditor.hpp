@@ -28,10 +28,13 @@ public:
 
 protected:
     void parameterChanged(std::uint32_t id, double value) override;
+    void tempoChanged(double bpm) override;
     void meter(const Meter& reading) override;
 
 private:
     void refresh();
+    /// The LFO's rate, Hz (the note at the song's tempo while synced).
+    [[nodiscard]] double lfoHz() const;
 
     ResponseDisplay* display_ = nullptr;
     std::optional<OutputLevel> output_;

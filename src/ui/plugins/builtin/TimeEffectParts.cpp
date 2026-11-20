@@ -173,8 +173,39 @@ void ResponseDisplay::setCurves(
     sweeps_ = std::move(sweeps);
     handleHz_ = handleHz;
     handleLabel_ = handleLabel;
+    ++key_;
     update();
 }
+
+void ResponseDisplay::setMotion(
+    MovingResponse response, std::function<double(double)> amountAt, double rateHz)
+{
+    moving_ = std::move(response);
+    amountAt_ = std::move(amountAt);
+    rateHz_ = std::isfinite(rateHz) ? std::max(rateHz, 0.0) : 0.0;
+    update();
+}
+
+bool ResponseDisplay::advance(const motion::AudioFeatures& audio, double dt)
+{
+    // The LFO turns at its real rate; how far the sweep shows eases with the
+    // sound, so it settles on the response the parameters give when it stops.
+    phase_ = std::fmod(phase_ + rateHz_ * dt, 1.0);
+    live_ = motion::approach(live_, audio.liveliness(), dt, 0.3);
+    glow_ = audio.level() * audio.liveliness();
+    if (moving_)
+        update();
+    return moving_ && (live_ > 0.002 || glow_ > 0.002);
+}
+
+void ResponseDisplay::rest()
+{
+    live_ = 0.0;
+    glow_ = 0.0;
+    update();
+}
+
+void ResponseDisplay::animationSwitched(bool /*on*/) { rest(); }
 
 double ResponseDisplay::xOf(double hz) const
 {
@@ -224,7 +255,20 @@ std::optional<QPointF> ResponseDisplay::handle() const
 
 void ResponseDisplay::paintEvent(QPaintEvent* /*event*/)
 {
+    const AnimationPaintTimer timer;
     QPainter p(this);
+    if (animationOn() && moving_) {
+        back_.draw(p, *this, key_, [this](QPainter& layer) { paintBack(layer); });
+        paintMoving(p);
+    } else {
+        paintBack(p);
+        paintStill(p);
+    }
+    paintHandleAndLabel(p);
+}
+
+void ResponseDisplay::paintBack(QPainter& p) const
+{
     p.fillRect(rect(), style::background());
     p.setFont(style::font(font(), 10));
     for (const auto& [hz, name] : axis_.grid) {
@@ -253,6 +297,14 @@ void ResponseDisplay::paintEvent(QPaintEvent* /*event*/)
         p.setPen(dashed);
         p.drawPath(trace(sweep));
     }
+    p.setRenderHint(QPainter::Antialiasing, false);
+}
+
+void ResponseDisplay::paintStill(QPainter& p) const
+{
+    if (!now_)
+        return;
+    p.setRenderHint(QPainter::Antialiasing);
     const QPainterPath curve = trace(now_);
     QPainterPath area = curve;
     area.lineTo(width(), height());
@@ -266,8 +318,70 @@ void ResponseDisplay::paintEvent(QPaintEvent* /*event*/)
     p.setBrush(Qt::NoBrush);
     p.setPen(QPen(style::accent(), 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     p.drawPath(curve);
+}
 
+void ResponseDisplay::paintMoving(QPainter& p)
+{
+    // Where the sweep is: the plugin's LFO (amountAt_) scaled by how far the
+    // sweep shows (none in silence: the response the parameters give).
+    const double amount = amountAt_ ? live_ * amountAt_(phase_) : 0.0;
+    const int step = std::max(3, width() / 300);
+    points_.clear();
+    for (int x = 0; x <= width() + step; x += step) {
+        const double hz = hzAt(static_cast<double>(x));
+        // Kept on the plot: a notch's depth below it is not seen and its
+        // edges would cost.
+        points_.emplace_back(static_cast<double>(x), std::min(yOf(moving_(hz, amount)), plotBottom()));
+    }
+    if (points_.size() < 2)
+        return;
+
+    // The area under it, brighter with the sound: one polygon, not
+    // antialiased, at a third of the resolution and smoothed up when drawn
+    // (at full size the comb's many steep edges cost over a millisecond).
+    QColor fill = style::accent();
+    fill.setAlphaF(static_cast<float>(0.14 + 0.22 * glow_));
+    const QSize small((width() + 2) / 3, (height() + 2) / 3);
+    if (area_.size() != small)
+        area_ = QImage(small, QImage::Format_ARGB32_Premultiplied);
+    area_.fill(Qt::transparent);
+    const std::size_t count = points_.size();
+    points_.emplace_back(points_.back().x(), static_cast<double>(height()));
+    points_.emplace_back(0.0, static_cast<double>(height()));
+    {
+        QPainter q(&area_);
+        q.scale(1.0 / 3.0, 1.0 / 3.0);
+        q.setPen(Qt::NoPen);
+        q.setBrush(fill);
+        q.drawPolygon(points_.data(), static_cast<int>(points_.size()));
+    }
+    points_.resize(count);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.drawImage(QRectF(0.0, 0.0, 3.0 * small.width(), 3.0 * small.height()), area_);
+    // The curve 1 px wide: Qt's fast path.
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(style::accent(), 1.0));
+    p.drawPolyline(points_.data(), static_cast<int>(points_.size()));
+
+    // A glow in each notch (a low point well under 0 dB) and on the peaks,
+    // as bright as the sound.
+    if (glow_ <= 0.01)
+        return;
+    const double notchY = yOf(-6.0);
+    motion_paint::GlowBatch glow(p, style::accent());
+    for (std::size_t i = 1; i + 1 < points_.size(); ++i) {
+        const double y = points_[i].y();
+        if (y > notchY && y >= points_[i - 1].y() && y > points_[i + 1].y())
+            glow.dot(points_[i], 14.0, 0.85 * glow_);
+        else if (y <= points_[i - 1].y() && y < points_[i + 1].y())
+            glow.dot(points_[i], 9.0, 0.45 * glow_);
+    }
+}
+
+void ResponseDisplay::paintHandleAndLabel(QPainter& p) const
+{
     if (const auto at = handle()) {
+        p.setRenderHint(QPainter::Antialiasing);
         paintHandle(p, *at);
         p.setFont(style::font(font(), 10, QFont::DemiBold, true));
         p.setPen(style::text());
