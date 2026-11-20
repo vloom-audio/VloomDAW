@@ -220,6 +220,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/ParameterEditorWindow.hpp
     ui/plugins/ParameterText.cpp
     ui/plugins/ParameterText.hpp
+    ui/plugins/SampleFiles.cpp
+    ui/plugins/SampleFiles.hpp
     ui/plugins/SynthEditorWindow.cpp
     ui/plugins/SynthEditorWindow.hpp
     ui/plugins/PluginEditorWindow.cpp
