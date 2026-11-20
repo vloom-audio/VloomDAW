@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Dedicated editors for the built-in compressor, limiter and gate, after the
+  approved designs: a scrolling level display with the threshold or ceiling
+  as a line to drag, a floating panel of knobs, presets, A/B and readouts
+  (`src/ui/plugins/builtin/`). They share one shell, `BuiltinEditorWindow`,
+  for the other built-ins to follow (docs/builtin-editors.md).
 - All 20 built-in processors of vloom-engine in the Plugins panel, each in
   its category (`PluginHost::builtinCategory`, `builtinPlugins`): compressor,
   limiter, gate, de-esser and transient shaper (Dynamics), EQ, Filter,

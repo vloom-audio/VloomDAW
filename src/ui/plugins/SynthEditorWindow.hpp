@@ -4,6 +4,7 @@
 
 #include <vloom/dsp/instruments/Synth.hpp>
 
+#include <QColor>
 #include <QString>
 #include <QStringList>
 #include <QWidget>
@@ -78,11 +79,14 @@ private:
     /// Ends the note the keyboard holds, if any.
     void releaseKey();
 
-    QWidget* knob(std::uint32_t id, const QString& caption, Scale scale, int dial, int cell);
+    /// `arc`: the lit arc's colour; invalid: the accent.
+    QWidget* knob(std::uint32_t id, const QString& caption, Scale scale, int dial, int cell,
+        const QColor& arc = QColor());
     QWidget* toggle(std::uint32_t id, const QString& what);
-    QWidget* flag(std::uint32_t id, const QString& text, const QString& what);
+    /// `colour`: its fill while on; invalid: the theme's.
+    QWidget* flag(
+        std::uint32_t id, const QString& text, const QString& what, const QColor& colour = QColor());
     QWidget* choice(std::uint32_t id, const QStringList& names, const QString& what);
-    QWidget* number(std::uint32_t id, const QString& what);
     /// A row of tabs over pages made by `page` (one per tab).
     QWidget* tabbed(const QStringList& names, const std::function<QWidget*(int)>& page);
 

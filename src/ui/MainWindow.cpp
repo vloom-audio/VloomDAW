@@ -48,6 +48,8 @@
 #include "ui/plugins/PluginPickerPopup.hpp"
 #include "ui/plugins/PluginsPanel.hpp"
 #include "ui/plugins/SynthEditorWindow.hpp"
+#include "ui/plugins/builtin/BuiltinEditorWindow.hpp"
+#include "ui/plugins/builtin/BuiltinEditors.hpp"
 #include "ui/stems/StemModelStore.hpp"
 #include "ui/stems/StemSeparator.hpp"
 #include "ui/update/UpdateDialog.hpp"
@@ -7136,22 +7138,23 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
     const auto instance = pluginHost_.instance(handle);
     if (instance == nullptr)
         return;
+    // The power button of a built-in effect's editor bypasses the insert
+    // effect this instance is.
+    const auto slotOf = [this, handle]() -> std::optional<std::pair<std::size_t, std::size_t>> {
+        for (std::size_t track = 0; track < mixer_.size(); ++track) {
+            const auto& effects = mixer_.track(track).effects;
+            for (std::size_t slot = 0; slot < effects.size(); ++slot)
+                if (effects[slot].instance == handle)
+                    return std::pair{track, slot};
+        }
+        return std::nullopt;
+    };
     if (!instance->processor().hasEditor() && EqEditorWindow::edits(*instance)) {
         auto* eq = new EqEditorWindow(instance, title, static_cast<double>(settings_.sampleRate), this);
         connect(eq, &EqEditorWindow::edited, this, [this] {
             pluginsEdited_ = true; // unsaved changes
             setWindowModified(true);
         });
-        // The power button bypasses the insert effect this instance is.
-        const auto slotOf = [this, handle]() -> std::optional<std::pair<std::size_t, std::size_t>> {
-            for (std::size_t track = 0; track < mixer_.size(); ++track) {
-                const auto& effects = mixer_.track(track).effects;
-                for (std::size_t slot = 0; slot < effects.size(); ++slot)
-                    if (effects[slot].instance == handle)
-                        return std::pair{track, slot};
-            }
-            return std::nullopt;
-        };
         if (const auto at = slotOf())
             eq->setBypassed(mixer_.track(at->first).effects[at->second].bypassed);
         connect(eq, &EqEditorWindow::bypassToggled, this, [this, slotOf](bool bypassed) {
@@ -7162,36 +7165,63 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
         eq->show();
         return;
     }
+    // The power button of an instrument's editor switches off the channel's
+    // instrument this instance is.
+    const auto channelOf = [this, handle]() -> std::optional<std::size_t> {
+        const auto& channels = project_.channels();
+        for (std::size_t channel = 0; channel < channels.size(); ++channel)
+            if (channels[channel].instrument && channels[channel].instrument->instance == handle)
+                return channel;
+        return std::nullopt;
+    };
+    const auto bypassInstrument = [this, channelOf](bool bypassed) {
+        const auto channel = channelOf();
+        if (!channel)
+            return;
+        recordUndo(tr("Bypass Instrument"));
+        PluginSlot slot = *project_.channels()[*channel].instrument;
+        slot.bypassed = bypassed;
+        project_.setChannelInstrument(*channel, std::move(slot));
+        syncChannelRack();
+        pluginsEdited_ = true; // unsaved changes
+        setWindowModified(true);
+    };
     if (!instance->processor().hasEditor() && SynthEditorWindow::edits(*instance)) {
         auto* synth = new SynthEditorWindow(instance, title, this);
         connect(synth, &SynthEditorWindow::edited, this, [this] {
             pluginsEdited_ = true; // unsaved changes
             setWindowModified(true);
         });
-        // The power button switches off the channel's instrument this instance is.
-        const auto channelOf = [this, handle]() -> std::optional<std::size_t> {
-            const auto& channels = project_.channels();
-            for (std::size_t channel = 0; channel < channels.size(); ++channel)
-                if (channels[channel].instrument && channels[channel].instrument->instance == handle)
-                    return channel;
-            return std::nullopt;
-        };
         if (const auto channel = channelOf())
             synth->setBypassed(project_.channels()[*channel].instrument->bypassed);
-        connect(synth, &SynthEditorWindow::bypassToggled, this, [this, channelOf](bool bypassed) {
-            const auto channel = channelOf();
-            if (!channel)
-                return;
-            recordUndo(tr("Bypass Instrument"));
-            PluginSlot slot = *project_.channels()[*channel].instrument;
-            slot.bypassed = bypassed;
-            project_.setChannelInstrument(*channel, std::move(slot));
-            syncChannelRack();
+        connect(synth, &SynthEditorWindow::bypassToggled, this, bypassInstrument);
+        pluginEditors_[handle] = synth;
+        synth->show();
+        return;
+    }
+    // A built-in with a dedicated editor (the compressor, the limiter, the
+    // gate, the sampler, the drum sampler...): ui/plugins/builtin/BuiltinEditors.cpp.
+    if (BuiltinEditorWindow* builtin
+        = createBuiltinEditor(instance, title, static_cast<double>(settings_.sampleRate), this)) {
+        connect(builtin, &BuiltinEditorWindow::edited, this, [this] {
             pluginsEdited_ = true; // unsaved changes
             setWindowModified(true);
         });
-        pluginEditors_[handle] = synth;
-        synth->show();
+        // An insert effect (the compressor...) or a channel's instrument (the sampler...).
+        if (const auto at = slotOf())
+            builtin->setBypassed(mixer_.track(at->first).effects[at->second].bypassed);
+        else if (const auto channel = channelOf())
+            builtin->setBypassed(project_.channels()[*channel].instrument->bypassed);
+        connect(builtin, &BuiltinEditorWindow::bypassToggled, this,
+            [this, slotOf, bypassInstrument](bool bypassed) {
+                if (const auto at = slotOf())
+                    setEffectBypassed(at->first, at->second, bypassed);
+                else
+                    bypassInstrument(bypassed);
+            });
+        builtin->setTempo(transport_->tempo()); // for times and rates in notes
+        pluginEditors_[handle] = builtin;
+        builtin->show();
         return;
     }
     PluginEditorContext context = buildPluginEditorContext(handle);
@@ -7237,6 +7267,8 @@ void MainWindow::setEffectBypassed(std::size_t track, std::size_t slot, bool byp
     if (editor != pluginEditors_.end())
         if (auto* eq = qobject_cast<EqEditorWindow*>(editor->second.data()))
             eq->setBypassed(bypassed);
+        else if (auto* builtin = qobject_cast<BuiltinEditorWindow*>(editor->second.data()))
+            builtin->setBypassed(bypassed);
 }
 
 std::vector<std::uint64_t> MainWindow::pluginsInUse() const
@@ -9535,6 +9567,10 @@ void MainWindow::refreshFromEngine()
         transport_->setTempo(engine.tempo());
         playlist_->setTempo(engine.tempo());
     }
+    // Editors of built-ins that time in notes (delay, LFOs) follow the shown tempo.
+    for (const auto& entry : pluginEditors_)
+        if (auto* builtin = qobject_cast<BuiltinEditorWindow*>(entry.second.data()))
+            builtin->setTempo(transport_->tempo());
 
     // Real time since the last tick: meters fall by it, and slower readouts
     // update on their own schedule whatever the refresh rate is.
