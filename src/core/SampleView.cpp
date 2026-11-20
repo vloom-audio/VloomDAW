@@ -60,7 +60,7 @@ PeakColumn peakBetween(std::span<const PeakColumn> peaks, double from, double to
         return {};
     const auto size = static_cast<double>(peaks.size());
     const auto first = static_cast<std::size_t>(std::clamp(std::floor(from * size), 0.0, size - 1.0));
-    const auto last = static_cast<std::size_t>(std::clamp(std::ceil(to * size), first + 1.0, size));
+    const auto last = static_cast<std::size_t>(std::clamp(std::ceil(to * size), static_cast<double>(first) + 1.0, size));
     PeakColumn column = peaks[first];
     for (std::size_t i = first + 1; i < last; ++i) {
         column.low = std::min(column.low, peaks[i].low);
