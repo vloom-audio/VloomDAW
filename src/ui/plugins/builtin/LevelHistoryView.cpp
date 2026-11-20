@@ -243,9 +243,9 @@ void LevelHistoryView::paintEvent(QPaintEvent* /*event*/)
         if (!look_.outputAccent)
             stroke.setAlphaF(0.7f);
         const QPainterPath trace = curve(output_, levelY, 0.0, false);
-        const double width = moving ? 1.0 : look_.outputAccent ? 2.0 : 1.5;
+        const double penWidth = moving ? 1.0 : look_.outputAccent ? 2.0 : 1.5;
         p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(QPen(stroke, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setPen(QPen(stroke, penWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
         p.drawPath(trace);
         if (moving && glow_ > 0.002) {

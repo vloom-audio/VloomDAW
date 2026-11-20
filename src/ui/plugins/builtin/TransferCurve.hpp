@@ -65,6 +65,7 @@ private:
     std::array<Trace, kTrail> trail_{};
     std::size_t trailNext_ = 0; ///< where the next goes
     double glow_ = 0.0;
+    bool ticking_ = false; ///< frames come: they repaint, setInput() need not
     motion_paint::LayerCache layer_;
 };
 

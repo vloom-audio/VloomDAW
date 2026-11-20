@@ -42,11 +42,13 @@ void TransferCurve::setInput(double input)
     if (input == input_ || (std::isnan(input) && std::isnan(input_)))
         return;
     input_ = input;
-    update();
+    if (!ticking_)
+        update(); // else the next frame shows it
 }
 
 bool TransferCurve::advance(const motion::AudioFeatures& audio, double dt)
 {
+    ticking_ = true;
     glow_ = audio.level() * audio.liveliness();
     bool alive = false;
     for (Trace& each : trail_) {
@@ -65,6 +67,7 @@ bool TransferCurve::advance(const motion::AudioFeatures& audio, double dt)
 
 void TransferCurve::rest()
 {
+    ticking_ = false;
     trail_.fill(Trace{});
     glow_ = 0.0;
     update();

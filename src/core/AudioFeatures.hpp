@@ -130,17 +130,17 @@ public:
     /// still alive. Returns how many are alive.
     template <typename Move> std::size_t advance(double dt, Move&& move)
     {
-        std::size_t alive = 0;
+        std::size_t living = 0;
         for (Particle& each : particles_) {
             if (!each.alive())
                 continue;
             each.age += dt;
             if (each.alive()) {
                 move(each, dt);
-                ++alive;
+                ++living;
             }
         }
-        return alive;
+        return living;
     }
     std::size_t advance(double dt)
     {
