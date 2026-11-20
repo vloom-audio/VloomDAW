@@ -14,6 +14,7 @@
 #include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QHideEvent>
 #include <QLabel>
 #include <QPainter>
 #include <QTimer>
@@ -33,6 +34,32 @@ namespace style = editor_style;
 
 constexpr int kMeterMs = 33; ///< between two meter readings
 constexpr std::size_t kTailFrames = 64; ///< compared between readings to tell whether audio runs
+/// Silent for this long after settling, the clock idles even if a display
+/// still says it moves (a long reverb trail): no CPU when nothing plays.
+constexpr double kSettleGrace = 1.0;
+/// A frame with no new audio within this long of one with some is still
+/// running: the engine's blocks can come further apart than the frames.
+constexpr double kAudioHoldSeconds = 0.1;
+
+/// Reads what `instance` put out in the last `seconds` into `buffer` (sized
+/// kScopeFrames) and returns those frames. `running`: new audio came since
+/// the last read (the end differs from `lastTail`, which it updates).
+std::span<const float> readNewest(const vloom::PluginInstance& instance, double seconds, double sampleRate,
+    std::vector<float>& buffer, std::vector<float>& lastTail, bool& running)
+{
+    const auto wanted = static_cast<std::size_t>(std::clamp(
+        std::lround(seconds * sampleRate), 1L, static_cast<long>(vloom::PluginInstance::kScopeFrames)));
+    const std::size_t count
+        = instance.readScope(std::span<float>(buffer.data(), std::max(wanted, kTailFrames)));
+    const std::span<const float> newest(buffer.data(), count);
+    // The same frames as last time: no audio is running (the scope keeps
+    // the last ones it got).
+    const std::span<const float> tail = newest.last(std::min(count, kTailFrames));
+    running = count > 0
+        && !(tail.size() == lastTail.size() && std::equal(tail.begin(), tail.end(), lastTail.begin()));
+    lastTail.assign(tail.begin(), tail.end());
+    return newest.last(std::min(count, wanted));
+}
 
 /// The bypass button: the power symbol in the accent while the effect is
 /// on, muted while it is bypassed.
@@ -112,6 +139,7 @@ BuiltinEditorWindow::BuiltinEditorWindow(std::shared_ptr<vloom::PluginInstance> 
 
 BuiltinEditorWindow::~BuiltinEditorWindow()
 {
+    FrameClock::leave(this);
     if (metering_)
         instance_->setScopeEnabled(false);
 }
@@ -356,6 +384,16 @@ void BuiltinEditorWindow::setTempo(double bpm)
 
 void BuiltinEditorWindow::tempoChanged(double /*bpm*/) { }
 
+void BuiltinEditorWindow::changeEvent(QEvent* event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange) {
+        if (!isMinimized())
+            awake_ = true;
+        updateAnimation(); // none while minimised
+    }
+}
+
 bool BuiltinEditorWindow::eventFilter(QObject* watched, QEvent* event)
 {
     if ((watched == body_ && event->type() == QEvent::Resize)
@@ -395,6 +433,11 @@ void BuiltinEditorWindow::showEvent(QShowEvent* event)
     QWidget::showEvent(event);
     placePanel();
     setFocus(Qt::OtherFocusReason);
+    if (!animated_.empty()) {
+        AnimationSettings::instance().refreshSystem(); // the user may have changed it meanwhile
+        awake_ = true;
+        updateAnimation();
+    }
     if (!metering_)
         return;
     // The plugin copies its output for the meters only while they are looked at.
@@ -407,6 +450,7 @@ void BuiltinEditorWindow::showEvent(QShowEvent* event)
 void BuiltinEditorWindow::hideEvent(QHideEvent* event)
 {
     QWidget::hideEvent(event);
+    updateAnimation(); // no frames while hidden
     if (!metering_)
         return;
     meterTimer_->stop();
@@ -418,26 +462,146 @@ void BuiltinEditorWindow::readMeters()
 {
     // What the plugin put out since the last reading.
     const double seconds = static_cast<double>(sinceReading_.restart()) / 1000.0;
-    const auto wanted = static_cast<std::size_t>(std::clamp(
-        std::lround(seconds * sampleRate_), 1L, static_cast<long>(vloom::PluginInstance::kScopeFrames)));
-    const std::size_t count
-        = instance_->readScope(std::span<float>(scope_.data(), std::max(wanted, kTailFrames)));
-    const std::span<const float> newest(scope_.data(), count);
-    // The same frames as last time: no audio is running (the scope keeps
-    // the last ones it got).
-    const std::span<const float> tail = newest.last(std::min(count, kTailFrames));
-    const bool running = count > 0
-        && !(tail.size() == lastTail_.size() && std::equal(tail.begin(), tail.end(), lastTail_.begin()));
-    lastTail_.assign(tail.begin(), tail.end());
+    bool running = false;
+    const std::span<const float> newest
+        = readNewest(*instance_, seconds, sampleRate_, scope_, lastTail_, running);
 
     Meter reading;
     reading.running = running;
     if (running) {
-        reading.outputDb = peakDb(newest.last(std::min(count, wanted)));
+        reading.outputDb = peakDb(newest);
         if (const auto reduction = instance_->processor().gainReductionDb())
             reading.reductionDb = bypassed_ ? 0.0 : std::max(0.0, static_cast<double>(*reduction));
     }
     meter(reading);
+    // Sound again: the animated displays wake up.
+    if (running && !awake_ && !animated_.empty()) {
+        awake_ = true;
+        updateAnimation();
+    }
+}
+
+// --- Animation -------------------------------------------------------------------
+
+bool BuiltinEditorWindow::isAnimating() const
+{
+    return !animated_.empty() && FrameClock::instance().contains(this);
+}
+
+void BuiltinEditorWindow::animate(Animated* display)
+{
+    Q_ASSERT(display != nullptr);
+    if (display == nullptr || std::find(animated_.begin(), animated_.end(), display) != animated_.end())
+        return;
+    animated_.push_back(display);
+    if (animated_.size() == 1) {
+        frameScope_.resize(vloom::PluginInstance::kScopeFrames);
+        connect(&AnimationSettings::instance(), &AnimationSettings::changed, this,
+            &BuiltinEditorWindow::animationSettingChanged);
+        if (qEnvironmentVariableIsSet("VLOOMDAW_ANIMATION_STATS"))
+            showAnimationStats();
+    }
+    display->setAnimationOn(AnimationSettings::instance().enabled());
+    startMetering();
+    awake_ = true;
+    updateAnimation();
+}
+
+void BuiltinEditorWindow::wakeAnimation()
+{
+    if (animated_.empty() || awake_)
+        return;
+    awake_ = true;
+    updateAnimation();
+}
+
+void BuiltinEditorWindow::updateAnimation()
+{
+    if (animated_.empty())
+        return;
+    const bool want = awake_ && AnimationSettings::instance().enabled() && isVisible() && !isMinimized();
+    FrameClock& clock = FrameClock::instance();
+    const bool joined = clock.contains(this);
+    if (want && !joined) {
+        // What the scope holds now is old sound: only what comes after it counts.
+        bool running = false;
+        frameTail_.clear();
+        (void)readNewest(*instance_, 0.0, sampleRate_, frameScope_, frameTail_, running);
+        sinceAudio_ = kAudioHoldSeconds;
+        clock.add(this);
+    } else if (!want && joined) {
+        clock.remove(this);
+        features_.reset();
+        for (Animated* each : animated_)
+            each->rest();
+    }
+}
+
+void BuiltinEditorWindow::frame(double dt)
+{
+    bool running = false;
+    const std::span<const float> newest
+        = readNewest(*instance_, std::max(dt, 0.001), sampleRate_, frameScope_, frameTail_, running);
+    sinceAudio_ = running ? 0.0 : sinceAudio_ + dt;
+    running = running || sinceAudio_ < kAudioHoldSeconds; // the newest frames are still the newest
+    motion::AudioInput input;
+    input.running = running;
+    if (running) {
+        input.mono = newest;
+        if (const auto reduction = instance_->processor().gainReductionDb())
+            input.reductionDb = bypassed_ ? 0.0 : std::max(0.0, static_cast<double>(*reduction));
+    }
+    features_.update(input, dt);
+
+    bool moving = false;
+    for (Animated* each : animated_)
+        moving = each->advance(features_, dt) || moving;
+    // Nothing plays and nothing moves (or it has been quiet long enough):
+    // the clock may idle until the sound comes back.
+    if (features_.settled()
+        && (!moving || features_.silentSeconds() >= motion::AudioFeatures::kSettleSeconds + kSettleGrace)) {
+        awake_ = false;
+        updateAnimation();
+    }
+}
+
+void BuiltinEditorWindow::animationSettingChanged(bool enabled)
+{
+    for (Animated* each : animated_)
+        each->setAnimationOn(enabled);
+    awake_ = enabled;
+    updateAnimation();
+}
+
+void BuiltinEditorWindow::showAnimationStats()
+{
+    // A debug overlay: what the animated displays cost, once a second.
+    statsLabel_ = new QLabel(body_);
+    statsLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    statsLabel_->setStyleSheet(
+        QStringLiteral("color: #9aa4b2; background: rgba(0,0,0,140); padding: 2px 6px;"));
+    statsLabel_->move(8, 8);
+    statsTimer_ = new QTimer(this);
+    statsTimer_->setInterval(1000);
+    connect(statsTimer_, &QTimer::timeout, this, [this, last = FrameClock::Stats{}]() mutable {
+        const FrameClock::Stats now = FrameClock::instance().stats();
+        const auto frames = static_cast<double>(now.ticks - last.ticks);
+        const auto paints = static_cast<double>(now.paints - last.paints);
+        const double paintMs = paints > 0.0 ? (now.paintSeconds - last.paintSeconds) * 1000.0 / paints : 0.0;
+        const double tickMs = frames > 0.0 ? (now.tickSeconds - last.tickSeconds) * 1000.0 / frames : 0.0;
+        // The share of one core over the last second: painting plus the frames' work.
+        const double load
+            = (now.paintSeconds - last.paintSeconds + now.tickSeconds - last.tickSeconds) * 100.0;
+        statsLabel_->setText(QStringLiteral("%1 fps · paint %2 ms · frame %3 ms · %4 % CPU")
+                .arg(frames, 0, 'f', 0)
+                .arg(paintMs, 0, 'f', 2)
+                .arg(tickMs, 0, 'f', 2)
+                .arg(load, 0, 'f', 1));
+        statsLabel_->adjustSize();
+        statsLabel_->raise();
+        last = now;
+    });
+    statsTimer_->start();
 }
 
 } // namespace vloomdaw

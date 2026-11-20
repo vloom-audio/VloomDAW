@@ -315,8 +315,8 @@ QRectF SegmentedChoice::segment(int index) const
 {
     const QFontMetrics label(style::font(font(), kSegmentLabelPixels));
     const QRectF frame(0.5, label.height() + kSegmentGap + 0.5, width() - 1.0, kSegmentHeight - 1.0);
-    const double each
-        = (frame.width() - 4.0 - 2.0 * (options_.size() - 1)) / std::max<qsizetype>(1, options_.size());
+    const auto count = static_cast<double>(std::max<qsizetype>(1, options_.size()));
+    const double each = (frame.width() - 4.0 - 2.0 * static_cast<double>(options_.size() - 1)) / count;
     return {frame.left() + 2.0 + index * (each + 2.0), frame.top() + 2.0, each, frame.height() - 4.0};
 }
 

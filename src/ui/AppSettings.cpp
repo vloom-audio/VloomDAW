@@ -24,6 +24,7 @@ constexpr QLatin1StringView kAudioIoConfig{"audio/ioSetupJson"};
 constexpr QLatin1StringView kStartPositionMode{"general/startPositionMode"};
 constexpr QLatin1StringView kMetronomeOnStartup{"general/startWithMetronome"};
 constexpr QLatin1StringView kAssociateProjectFiles{"general/associateProjectFiles"};
+constexpr QLatin1StringView kAnimatePluginDisplays{"general/animatePluginDisplays"};
 constexpr QLatin1StringView kCheckForUpdates{"updates/check"};
 constexpr QLatin1StringView kBetaUpdates{"updates/beta"};
 constexpr QLatin1StringView kSkippedUpdate{"updates/skipped"};
@@ -76,6 +77,7 @@ AppSettings AppSettings::load()
     a.startPositionMode
         = s.value(kStartPositionMode, 0).toInt() == 1 ? PositionMode::Time : PositionMode::BarsBeats;
     a.metronomeOnStartup = s.value(kMetronomeOnStartup, a.metronomeOnStartup).toBool();
+    a.animatePluginDisplays = s.value(kAnimatePluginDisplays, a.animatePluginDisplays).toBool();
     a.associateProjectFiles = s.value(kAssociateProjectFiles, a.associateProjectFiles).toBool();
     a.checkForUpdates = s.value(kCheckForUpdates, a.checkForUpdates).toBool();
     a.betaUpdates = s.value(kBetaUpdates, a.betaUpdates).toBool();
@@ -131,6 +133,7 @@ void AppSettings::save() const
     s.setValue(kAudioIoConfig, QString::fromStdString(serializeAudioIoConfig(ioConfig)));
     s.setValue(kStartPositionMode, static_cast<int>(startPositionMode));
     s.setValue(kMetronomeOnStartup, metronomeOnStartup);
+    s.setValue(kAnimatePluginDisplays, animatePluginDisplays);
     s.setValue(kAssociateProjectFiles, associateProjectFiles);
     s.setValue(kCheckForUpdates, checkForUpdates);
     s.setValue(kBetaUpdates, betaUpdates);

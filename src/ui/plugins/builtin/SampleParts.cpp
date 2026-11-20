@@ -96,15 +96,15 @@ void SampleWaveforms::update(int slot, const vloom::SampleSlotInfo& info)
         reader_,
         [this, slot, request, file] {
             // Worker thread. `this` outlives it: the destructor joins the thread.
-            std::shared_ptr<const Waveform> waveform = readWaveform(file);
+            std::shared_ptr<const Waveform> read = readWaveform(file);
             QMetaObject::invokeMethod(
                 this,
-                [this, slot, request, waveform = std::move(waveform)] {
-                    Slot& each = slots_[static_cast<std::size_t>(slot)];
-                    if (each.request != request)
+                [this, slot, request, waveform = std::move(read)] {
+                    Slot& current = slots_[static_cast<std::size_t>(slot)];
+                    if (current.request != request)
                         return; // the slot has another file by now
-                    each.request = 0;
-                    each.waveform = waveform;
+                    current.request = 0;
+                    current.waveform = waveform;
                     emit changed(slot);
                 },
                 Qt::QueuedConnection);

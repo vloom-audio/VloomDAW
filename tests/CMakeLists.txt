@@ -16,6 +16,7 @@ add_executable(vloomdaw_tests
     audio/MixerAudioTests.cpp
     audio/PluginHostTests.cpp
     audio/StemAudioTests.cpp
+    core/AudioFeaturesTests.cpp
     core/AudioFormatTests.cpp
     core/AudioIoSetupTests.cpp
     core/BrowserFilterTests.cpp

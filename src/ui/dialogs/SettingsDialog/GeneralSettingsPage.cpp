@@ -42,6 +42,16 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
         associateFiles_);
 #endif
 
+    animateDisplays_ = new ToggleSwitch;
+    animateDisplays_->setAccessibleName(tr("Animate plugin displays"));
+    connect(
+        animateDisplays_, &ToggleSwitch::toggled, this, &GeneralSettingsPage::animatePluginDisplaysChanged);
+    auto* display = new SettingsCard(tr("Display"), this);
+    display->addRow(tr("Animate plugin displays"),
+        tr("The built-in plugins' displays move with the sound: glow, trails, a reverb's mist. Off, they "
+           "keep still. They also keep still when the system asks for reduced motion."),
+        animateDisplays_);
+
     checkUpdates_ = new ToggleSwitch;
     checkUpdates_->setAccessibleName(tr("Check for updates automatically"));
     connect(checkUpdates_, &ToggleSwitch::toggled, this, &GeneralSettingsPage::checkForUpdatesChanged);
@@ -66,6 +76,7 @@ GeneralSettingsPage::GeneralSettingsPage(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(16);
     layout->addWidget(startup);
+    layout->addWidget(display);
     layout->addWidget(updates);
     layout->addStretch();
 }
@@ -88,6 +99,12 @@ void GeneralSettingsPage::setAssociateProjectFiles(bool on)
         return;
     const QSignalBlocker block(associateFiles_);
     associateFiles_->setChecked(on);
+}
+
+void GeneralSettingsPage::setAnimatePluginDisplays(bool on)
+{
+    const QSignalBlocker block(animateDisplays_);
+    animateDisplays_->setChecked(on);
 }
 
 void GeneralSettingsPage::setCheckForUpdates(bool on)

@@ -43,6 +43,7 @@ struct AppSettings {
     PositionMode startPositionMode = PositionMode::BarsBeats;
     bool metronomeOnStartup = false;
     bool associateProjectFiles = true; ///< Windows: register `.vloom` icon & double-click open
+    bool animatePluginDisplays = true; ///< built-in plugin editors' displays move with the sound
 
     // Updates (ui/update)
     bool checkForUpdates = true; ///< look for a new version once a day

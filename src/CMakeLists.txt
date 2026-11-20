@@ -10,6 +10,7 @@
 add_library(vloomdaw_core STATIC)
 target_sources(vloomdaw_core PRIVATE
     # core — pure logic: formatting, (later) project model, commands, undo
+    core/AudioFeatures.cpp
     core/AudioFormat.cpp
     core/AudioIoSetup.cpp
     core/BrowserFilter.cpp
@@ -186,6 +187,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/pianoroll/PianoRollView.hpp
     ui/playlist/PlaylistView.cpp
     ui/playlist/PlaylistView.hpp
+    ui/plugins/builtin/Animation.cpp
+    ui/plugins/builtin/Animation.hpp
+    ui/plugins/builtin/AnimationPaint.cpp
+    ui/plugins/builtin/AnimationPaint.hpp
     ui/plugins/builtin/ArcKnob.cpp
     ui/plugins/builtin/ArcKnob.hpp
     ui/plugins/builtin/BitcrusherEditor.cpp
