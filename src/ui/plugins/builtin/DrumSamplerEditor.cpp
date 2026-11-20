@@ -5,6 +5,8 @@
 #include "core/SampleView.hpp"
 #include "ui/DroppedFiles.hpp"
 #include "ui/plugins/SampleFiles.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
 #include "ui/plugins/builtin/EditorStyle.hpp"
@@ -31,7 +33,9 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <utility>
@@ -50,6 +54,7 @@ constexpr int kGap = 8; ///< between two pads
 constexpr int kGridWidth = 416;
 constexpr int kWaveHeight = 168;
 constexpr double kHandle = 7.0; ///< the decay point's radius
+constexpr double kSweepTail = 60.0; ///< px of lit sample behind a sweep
 
 std::uint32_t id(int pad, Drums::PadField field) { return Drums::padParameter(pad, field); }
 
@@ -101,7 +106,13 @@ protected:
 } // namespace
 
 /// The 16 pads, four by four.
-class PadGrid final : public QWidget {
+///
+/// Animated: the chosen pad flashes on each hit and every pad with a sample
+/// glows faintly with the level. The scope is the drum sampler's mix, and
+/// the engine does not say which pad a hit came from, so only the chosen
+/// pad flashes (TODO(per-pad-hits): flash the pad that played once the
+/// engine reports it).
+class PadGrid final : public QWidget, public Animated {
 public:
     struct Pad {
         QString note; ///< its key: "C1"
@@ -130,15 +141,71 @@ public:
         update();
     }
 
+    /// What the pads show (their keys, their samples) changed.
+    void refresh()
+    {
+        ++version_;
+        update();
+    }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        if (audio.onset())
+            flash_ = std::max(flash_, 0.4 + 0.6 * audio.onsetStrength());
+        flash_ *= std::exp(-dt / 0.18);
+        flash_ *= live;
+        glow_ = audio.level() * live;
+        update();
+        return flash_ > 0.01 || glow_ > 0.002;
+    }
+
+    void rest() override
+    {
+        flash_ = 0.0;
+        glow_ = 0.0;
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
+
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        std::uint64_t key = motion_paint::keyWith(0, static_cast<double>(version_));
+        key = motion_paint::keyWith(key,
+            static_cast<double>(selected_) + 100.0 * static_cast<double>(dropAt_) + (hasFocus() ? 1e4 : 0.0));
+        back_.draw(p, *this, key, [this](QPainter& layer) { paintStatic(layer); });
+        if (!animationOn() || (flash_ <= 0.01 && glow_ <= 0.002))
+            return;
+        const QColor accent = style::accent();
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(Qt::NoBrush);
+        // Every pad with a sound breathes with the mix.
+        if (glow_ > 0.002) {
+            p.setPen(QPen(motion_paint::faded(accent, 0.45 * glow_), 1.0));
+            for (int pad = 0; pad < Drums::kPads; ++pad)
+                if (pad != selected_ && loaded_[static_cast<std::size_t>(pad)])
+                    p.drawRoundedRect(padRect(pad).adjusted(1.5, 1.5, -1.5, -1.5), 9, 9);
+        }
+        // The chosen pad flashes on a hit.
+        const double lit = std::max(flash_, 0.5 * glow_);
+        const QRectF box = padRect(selected_);
+        motion_paint::glowDot(p, box.center(), 0.55 * std::max(box.width(), box.height()), accent, 0.5 * lit);
+        p.setPen(QPen(motion_paint::faded(style::text(), lit), 1.0));
+        p.drawRoundedRect(box.adjusted(3.5, 3.5, -3.5, -3.5), 8, 8);
+    }
+
+    void paintStatic(QPainter& p)
+    {
         p.setRenderHint(QPainter::Antialiasing);
         for (int pad = 0; pad < Drums::kPads; ++pad) {
             const QRectF box = padRect(pad);
             const bool selected = pad == selected_;
             const Pad state = padOf ? padOf(pad) : Pad{};
+            loaded_[static_cast<std::size_t>(pad)] = !state.name.isEmpty() && !state.missing;
             if (selected) {
                 p.setPen(QPen(style::accent(), 2.0));
                 p.setBrush(style::faint().lighter(122)); // #333 on the default theme
@@ -273,10 +340,22 @@ private:
 
     int selected_ = 0;
     int dropAt_ = -1;
+
+    // The motion (animationOn()).
+    motion_paint::LayerCache back_;
+    std::uint64_t version_ = 0; ///< refresh() calls: what the pads show
+    std::array<bool, Drums::kPads> loaded_{}; ///< pads with a sample, as drawn
+    double flash_ = 0.0;
+    double glow_ = 0.0;
 };
 
 /// The chosen pad's sample, with its decay over it.
-class PadWaveform final : public QWidget {
+///
+/// Animated: the waveform lights up with the level, each hit sends a
+/// glowing sweep along it from Start at the pad's speed (its tune), and the
+/// decay glows. As on the pads, a hit is any hit in the mix: the engine does
+/// not say which pad played.
+class PadWaveform final : public QWidget, public Animated {
 public:
     using Value = std::function<double(std::uint32_t)>;
 
@@ -306,10 +385,77 @@ public:
         update();
     }
 
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        glow_ = audio.level() * live;
+        if (waveform_ != nullptr && seconds_ > 0.0) {
+            const QRectF area = waveArea();
+            const double pixelsPerSecond = area.width() / seconds_ * speed();
+            heads_.advance(dt, [&](auto& head, double step) {
+                head.state += pixelsPerSecond * step;
+                if (head.state > area.right() || live < 0.02)
+                    head.life = head.age;
+            });
+            if (audio.onset() && live > 0.0) {
+                const double start = area.left() + area.width() * value_(id(pad_, Drums::kStart)) / 100.0;
+                // It lives as long as the pad sounds: its decay, or the rest of the sample.
+                const double decay = decays() ? value_(id(pad_, Drums::kDecay)) / 1000.0 : 60.0;
+                heads_.spawn(start, decay);
+            }
+        } else {
+            heads_.clear();
+        }
+        update();
+        return glow_ > 0.002 || heads_.alive() > 0;
+    }
+
+    void rest() override
+    {
+        glow_ = 0.0;
+        heads_.clear();
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
+
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        const std::uint64_t key = staticKey();
+        back_.draw(p, *this, key, [this](QPainter& layer) { paintStatic(layer); });
+        if (!animationOn() || waveform_ == nullptr || glow_ <= 0.002)
+            return;
+        const QRectF area = waveArea();
+        const QColor accent = style::accent();
+        // The waveform lit in the accent: a cached copy shown at the level.
+        const auto lit = [this](QPainter& layer) {
+            layer.setRenderHint(QPainter::Antialiasing);
+            paintWaveform(layer, waveArea(), waveform_->peaks, value_(id(pad_, Drums::kReverse)) >= 0.5,
+                style::accent(), 2.0, 1.2);
+        };
+        p.setOpacity(0.35 * glow_);
+        lit_.draw(p, *this, key, lit);
+        heads_.forEach([&](const auto& head) {
+            const double x = head.state;
+            const double fade = 1.0 - head.progress();
+            p.save();
+            p.setClipRect(QRectF(
+                QPointF(std::max(area.left(), x - kSweepTail), area.top()), QPointF(x, area.bottom())));
+            p.setOpacity(std::min(1.0, glow_ * fade));
+            lit_.draw(p, *this, key, lit);
+            p.restore();
+            motion_paint::glowLine(p, QLineF(x, area.top(), x, area.bottom()), accent, glow_ * fade, 6.0);
+        });
+        p.setOpacity(1.0);
+        if (!decay_.isEmpty())
+            motion_paint::glowStroke(p, decay_, accent, 0.5 * glow_, 5.0, 7.0);
+    }
+
+    void paintStatic(QPainter& p)
+    {
         p.setRenderHint(QPainter::Antialiasing);
         const QRectF frame = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
         QPainterPath clip;
@@ -392,6 +538,21 @@ protected:
 private:
     [[nodiscard]] QRectF waveArea() const { return QRectF(rect()).adjusted(0, 10, 0, -10); }
 
+    /// What the static picture shows.
+    [[nodiscard]] std::uint64_t staticKey() const
+    {
+        std::uint64_t key = motion_paint::keyWith(0, static_cast<double>(pad_));
+        for (const Drums::PadField field :
+            {Drums::kTune, Drums::kFine, Drums::kDecay, Drums::kStart, Drums::kReverse})
+            key = motion_paint::keyWith(key, value_(id(pad_, field)));
+        key = motion_paint::keyWith(key, seconds_);
+        key = motion_paint::keyWith(
+            key, static_cast<double>(reinterpret_cast<std::uintptr_t>(waveform_.get())));
+        return motion_paint::keyWith(key,
+            (loaded_ ? 1.0 : 0.0) + (missing_ ? 2.0 : 0.0) + (loading_ ? 4.0 : 0.0)
+                + (dropping_ ? 8.0 : 0.0));
+    }
+
     /// The pad plays at this speed against the sample's own (its tune).
     [[nodiscard]] double speed() const
     {
@@ -438,6 +599,7 @@ private:
     {
         if (seconds_ <= 0.0)
             return;
+        decay_ = QPainterPath();
         const double decay = value_(id(pad_, Drums::kDecay)) / 1000.0;
         const double sustain = decays() ? 0.0 : 1.0;
         QPainterPath path(QPointF(start, levelY(1.0)));
@@ -448,6 +610,7 @@ private:
         p.setBrush(Qt::NoBrush);
         p.setPen(QPen(style::accent(), 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.drawPath(path);
+        decay_ = path;
         if (const auto at = handle()) {
             p.setPen(QPen(style::accent(), 2.5));
             p.setBrush(style::background());
@@ -464,6 +627,13 @@ private:
     std::shared_ptr<const SampleWaveforms::Waveform> waveform_;
     bool dragging_ = false;
     bool dropping_ = false;
+
+    // The motion (animationOn()).
+    motion_paint::LayerCache back_;
+    motion_paint::LayerCache lit_; ///< the waveform in the accent
+    QPainterPath decay_; ///< as drawn (paintDecay())
+    motion::ParticlePool<double, 2> heads_; ///< sweeps: x, px
+    double glow_ = 0.0;
 };
 
 DrumSamplerEditor::DrumSamplerEditor(
@@ -490,7 +660,7 @@ DrumSamplerEditor::DrumSamplerEditor(
 
     waveforms_ = new SampleWaveforms(Drums::kPads, this);
     connect(waveforms_, &SampleWaveforms::changed, this, [this](int slot) {
-        grid_->update();
+        grid_->refresh();
         if (slot == selected_)
             refreshSelected();
     });
@@ -558,6 +728,8 @@ DrumSamplerEditor::DrumSamplerEditor(
     column->addStretch(1);
     row->addLayout(column, 1);
     setDisplay(body);
+    animate(grid_);
+    animate(wave_);
 
     sample_ = readout(tr("Sample"));
     sample_->setCursor(Qt::PointingHandCursor);
@@ -571,7 +743,7 @@ DrumSamplerEditor::DrumSamplerEditor(
     // What the pads and the waveform show.
     for (int pad = 0; pad < Drums::kPads; ++pad) {
         bind(id(pad, Drums::kKey), [this](double) {
-            grid_->update();
+            grid_->refresh();
             refreshSelected();
         });
         for (const Drums::PadField field :
@@ -706,7 +878,7 @@ void DrumSamplerEditor::refreshSlots()
     }
     loaded_->setText(tr("%1 of %2").arg(loaded).arg(Drums::kPads));
     if (changed) {
-        grid_->update();
+        grid_->refresh();
         refreshSelected();
     }
 }

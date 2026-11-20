@@ -4,6 +4,8 @@
 
 #include "core/EffectPreview.hpp"
 #include "core/ParameterScale.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
 #include "ui/plugins/builtin/DisplayHelpers.hpp"
@@ -22,6 +24,7 @@
 #include <cmath>
 #include <functional>
 #include <numbers>
+#include <span>
 #include <utility>
 
 namespace vloomdaw {
@@ -39,6 +42,7 @@ constexpr double kBlockWidth = 220.0;
 constexpr double kBarHeight = 12.0;
 constexpr double kGainTopDb = 24.0;
 constexpr double kGainBottomDb = Utility::kMinGainDb;
+constexpr std::size_t kCloud = 96; ///< the newest samples drawn as the live dots
 
 QString dbText(double db) { return QString::fromStdString(formatParameterValue("dB", db)); }
 
@@ -54,7 +58,15 @@ QString panText(double pan)
 
 /// The utility's picture: gain per side, the stereo field and the
 /// balance, width and polarity.
-class UtilityDisplay : public QWidget {
+///
+/// Animated: the stereo field's fan glows with the level, and the sound
+/// heard now shows as a cloud of dots on it, with a glow at the centre that
+/// swells with the envelope. The scope is mono today (left and right
+/// averaged), so the dots lie on the Mid axis.
+// TODO(stereo-scope): once motion::AudioInput's left and right are filled
+// (BuiltinEditorWindow::frame()) and AudioFeatures keeps them, plot each
+// sample at ((R - L) / sqrt 2, (L + R) / sqrt 2): a real goniometer cloud.
+class UtilityDisplay : public QWidget, public Animated {
 public:
     UtilityDisplay(std::function<std::vector<double>()> settings, double sampleRate, QWidget* parent)
         : QWidget(parent)
@@ -68,22 +80,86 @@ public:
     {
         values_ = settings_();
         matrix_ = utilityMatrix(values_, sampleRate_);
+        key_ = 0;
+        for (const double v : values_)
+            key_ = motion_paint::keyWith(key_, v);
         update();
     }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        glow_ = audio.level() * live;
+        swell_ = motion::approach(swell_, audio.envelope() * live, dt, 0.05);
+        const std::span<const float> wave = audio.waveform();
+        // Every other one of the newest samples: about 4 ms of sound.
+        for (std::size_t i = 0; i < kCloud; ++i) {
+            const std::size_t at = wave.size() >= 2 * kCloud ? wave.size() - 2 * kCloud + 2 * i : 0;
+            cloud_[i] = at < wave.size() ? wave[at] * static_cast<float>(live) : 0.0F;
+        }
+        update(fieldRect().toAlignedRect());
+        return glow_ > 0.002 || swell_ > 0.002;
+    }
+
+    void rest() override
+    {
+        glow_ = 0.0;
+        swell_ = 0.0;
+        cloud_.fill(0.0F);
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
 
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing);
-        p.fillRect(rect(), style::background());
-        const double scale = std::min(1.0, width() / 900.0);
-        paintGains(p, 40.0 * scale);
-        paintField(p, QPointF(width() / 2.0, std::min(kCentreY, height() / 2.0)));
-        paintSettings(p, width() - (kBlockWidth + 50.0) * scale);
+        back_.draw(p, *this, key_, [this](QPainter& l) {
+            l.setRenderHint(QPainter::Antialiasing);
+            l.fillRect(rect(), style::background());
+            const double scale = std::min(1.0, width() / 900.0);
+            paintGains(l, 40.0 * scale);
+            paintField(l, centre());
+            paintSettings(l, width() - (kBlockWidth + 50.0) * scale);
+        });
+        if (animationOn())
+            paintMotion(p);
+    }
+
+    void paintMotion(QPainter& p)
+    {
+        if (glow_ <= 0.002 && swell_ <= 0.002)
+            return;
+        const QPointF c = centre();
+        const double r = radius();
+        const QColor accent = style::accent();
+        // The fan's edges, hard left and hard right, glow with the level.
+        motion_paint::glowStroke(p, edges_, accent, 0.7 * glow_, 6.0, 5.0);
+        // The sound now: mono sits on the Mid axis.
+        motion_paint::glowDot(p, c, 10.0 + 0.6 * r * swell_, accent, 0.5 * swell_);
+        {
+            motion_paint::GlowBatch dots(p, style::text());
+            for (const float sample : cloud_) {
+                const double v = std::clamp(static_cast<double>(sample), -1.25, 1.25);
+                if (std::abs(v) < 1e-4)
+                    continue;
+                dots.dot(QPointF(c.x(), c.y() - v * kUnitShare * r), 3.0, 0.25 + 0.5 * glow_);
+            }
+        }
     }
 
 private:
+    [[nodiscard]] QPointF centre() const { return {width() / 2.0, std::min(kCentreY, height() / 2.0)}; }
+    [[nodiscard]] double radius() const { return std::min(kRadius, centre().y() - 18.0); }
+    /// What the motion covers: the field and its glow.
+    [[nodiscard]] QRectF fieldRect() const
+    {
+        const double r = radius() + 16.0;
+        return {centre().x() - r, centre().y() - r, 2.0 * r, 2.0 * r};
+    }
+
     [[nodiscard]] double setting(std::uint32_t id) const { return id < values_.size() ? values_[id] : 0.0; }
 
     void bar(QPainter& p, const QRectF& well, double from, double to, const QColor& fill) const
@@ -135,7 +211,7 @@ private:
             QStringLiteral("+24 dB"));
     }
 
-    void paintField(QPainter& p, const QPointF& centre) const
+    void paintField(QPainter& p, const QPointF& centre)
     {
         const double r = std::min(kRadius, centre.y() - 18.0);
         p.setBrush(Qt::NoBrush);
@@ -190,8 +266,12 @@ private:
         for (const QPointF& end : ends)
             p.drawLine(centre - end, centre + end);
         p.setPen(QPen(style::accent(), 2.0, Qt::SolidLine, Qt::RoundCap));
-        for (const QPointF& end : {ends.front(), ends.back()})
+        edges_ = QPainterPath();
+        for (const QPointF& end : {ends.front(), ends.back()}) {
             p.drawLine(centre - end, centre + end);
+            edges_.moveTo(centre - end);
+            edges_.lineTo(centre + end);
+        }
     }
 
     void paintSettings(QPainter& p, double left) const
@@ -261,6 +341,14 @@ private:
     double sampleRate_;
     std::vector<double> values_;
     StereoMatrix matrix_;
+
+    // The motion (animationOn()).
+    std::uint64_t key_ = 0;
+    motion_paint::LayerCache back_;
+    QPainterPath edges_; ///< the fan's outer lines as drawn (paintField())
+    std::array<float, kCloud> cloud_{};
+    double glow_ = 0.0;
+    double swell_ = 0.0;
 };
 
 UtilityEditor::UtilityEditor(
@@ -282,6 +370,7 @@ UtilityEditor::UtilityEditor(
         [this] { return display::settingsOf(*this, Utility::kParameterCount); }, this->sampleRate(), nullptr);
     display_->setAccessibleName(tr("Gain per side, the stereo field, balance, width and polarity"));
     setDisplay(display_);
+    animate(display_);
 
     panel()->add(knob(Utility::kGain));
     auto* pan = knob(Utility::kPan);
