@@ -476,7 +476,8 @@ private:
     ChannelRackAudio rackAudio_; ///< the project's channel rack, as the engine plays it
     /// By plugin handle: a PluginEditorWindow, or for a plugin without an
     /// editor of its own an EqEditorWindow (the built-in equalizer), a
-    /// SynthEditorWindow (the built-in synthesizer) or a ParameterEditorWindow.
+    /// SynthEditorWindow (the built-in synthesizer), a BuiltinEditorWindow
+    /// (another built-in with a dedicated editor) or a ParameterEditorWindow.
     std::map<std::uint64_t, QPointer<QWidget>> pluginEditors_;
     QTimer* pluginIdleTimer_ = nullptr; ///< runs the plugins' main-thread work (PluginHost::idle())
     /// Instruments loaded while no device ran: activated at the requested

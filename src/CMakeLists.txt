@@ -181,6 +181,34 @@ qt_add_library(vloomdaw_ui STATIC
     ui/pianoroll/PianoRollView.hpp
     ui/playlist/PlaylistView.cpp
     ui/playlist/PlaylistView.hpp
+    ui/plugins/builtin/ArcKnob.cpp
+    ui/plugins/builtin/ArcKnob.hpp
+    ui/plugins/builtin/BuiltinEditorWindow.cpp
+    ui/plugins/builtin/BuiltinEditorWindow.hpp
+    ui/plugins/builtin/BuiltinEditors.cpp
+    ui/plugins/builtin/BuiltinEditors.hpp
+    ui/plugins/builtin/CompressorEditor.cpp
+    ui/plugins/builtin/CompressorEditor.hpp
+    ui/plugins/builtin/ControlPanel.cpp
+    ui/plugins/builtin/ControlPanel.hpp
+    ui/plugins/builtin/EditorStyle.cpp
+    ui/plugins/builtin/EditorStyle.hpp
+    ui/plugins/builtin/GateEditor.cpp
+    ui/plugins/builtin/GateEditor.hpp
+    ui/plugins/builtin/LevelHistoryView.cpp
+    ui/plugins/builtin/LevelHistoryView.hpp
+    ui/plugins/builtin/LimiterEditor.cpp
+    ui/plugins/builtin/LimiterEditor.hpp
+    ui/plugins/builtin/MeterBars.cpp
+    ui/plugins/builtin/MeterBars.hpp
+    ui/plugins/builtin/ParameterControl.cpp
+    ui/plugins/builtin/ParameterControl.hpp
+    ui/plugins/builtin/PillToggle.cpp
+    ui/plugins/builtin/PillToggle.hpp
+    ui/plugins/builtin/Readout.cpp
+    ui/plugins/builtin/Readout.hpp
+    ui/plugins/builtin/TransferCurve.cpp
+    ui/plugins/builtin/TransferCurve.hpp
     ui/plugins/PresetBar.cpp
     ui/plugins/PresetBar.hpp
     ui/plugins/PluginDrag.cpp

@@ -755,7 +755,7 @@ QLabel#exportFormatName:disabled { color: @textDim; }
 QLabel#exportFormatHint { color: @textDim; font-size: 8pt; background: transparent; }
 QLabel#exportSize { font-size: 12pt; font-weight: 600; }
 
-/* Editors of the built-in plugins (ui/plugins/EqEditorWindow, SynthEditorWindow). */
+/* Editors of the built-in plugins (ui/plugins/EqEditorWindow, SynthEditorWindow, builtin/). */
 QWidget#eqEditor { background: @base; }
 QFrame#pluginEditorHeader { background: @base; border: none; border-bottom: 1px solid @panel; }
 QFrame#pluginEditorHeader QToolButton {
@@ -783,6 +783,14 @@ QFrame#slotGroup QToolButton {
 QFrame#slotGroup QToolButton:checked { background: @border; border: none; color: @text; }
 QLabel#pluginEditorTitle { font-weight: 700; }
 QWidget#synthEditor { background: @base; }
+QWidget#builtinEditor { background: @base; }
+QWidget#builtinEditor QFrame#pluginEditorHeader QToolButton#bypassButton,
+QWidget#builtinEditor QFrame#pluginEditorHeader QToolButton#bypassButton:checked {
+    background: @window;
+    border-color: @border;
+    padding: 0;
+}
+QWidget#builtinEditor QFrame#pluginEditorHeader QToolButton#bypassButton:hover { background: @raised; }
 QWidget#synthEditor QFrame#pluginEditorHeader QToolButton#presetName { min-width: 130px; }
 QFrame#synthCard { background: @window; border: 1px solid @border; border-radius: 10px; }
 QLabel#synthCardTitle { font-weight: 700; }
