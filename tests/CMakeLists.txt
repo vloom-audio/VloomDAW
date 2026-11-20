@@ -41,6 +41,7 @@ add_executable(vloomdaw_tests
     core/ProjectFileTests.cpp
     core/ProjectTests.cpp
     core/SampleFolderTests.cpp
+    core/SampleViewTests.cpp
     core/ScalesTests.cpp
     core/MdxSpectrogramTests.cpp
     core/StemChunksTests.cpp

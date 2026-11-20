@@ -36,6 +36,7 @@ target_sources(vloomdaw_core PRIVATE
     core/Project.cpp
     core/ProjectFile.cpp
     core/SampleFolder.cpp
+    core/SampleView.cpp
     core/Scales.cpp
     core/MdxSpectrogram.cpp
     core/StemChunks.cpp
