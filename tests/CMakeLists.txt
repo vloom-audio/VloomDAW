@@ -37,6 +37,7 @@ add_executable(vloomdaw_tests
     core/ParameterChoicesTests.cpp
     core/ParameterScaleTests.cpp
     core/TimeEffectsTests.cpp
+    core/TrailFadeTests.cpp
     core/PluginMetadataTests.cpp
     core/PluginScannerTests.cpp
     core/PositionFormatTests.cpp

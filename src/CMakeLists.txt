@@ -47,6 +47,7 @@ target_sources(vloomdaw_core PRIVATE
     core/TapTempo.cpp
     core/ThemePresets.cpp
     core/TimeEffects.cpp
+    core/TrailFade.cpp
     core/TrackRouting.cpp
     core/TransportLayout.cpp
     core/UndoHistory.cpp

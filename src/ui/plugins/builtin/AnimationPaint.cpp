@@ -3,6 +3,7 @@
 #include "ui/plugins/builtin/AnimationPaint.hpp"
 
 #include "core/AudioFeatures.hpp"
+#include "core/TrailFade.hpp"
 #include "ui/plugins/builtin/EditorStyle.hpp"
 
 #include <QLinearGradient>
@@ -389,25 +390,13 @@ void TrailBuffer::ensure()
 void TrailBuffer::advance(double keep, const QTransform& motion, double soften)
 {
     ensure();
-    if (!isVisible()) {
-        if (strength_ > 0.0) {
-            front_.fill(Qt::transparent);
-            strength_ = 0.0;
-            pendingKeep_ = 1.0;
-        }
-        return;
-    }
-    keep = std::clamp(keep, 0.0, 1.0);
-    strength_ *= keep;
-    // 8 bits a channel: a fade of a fraction of a per cent would round to
-    // nothing (or to a step a frame), so it is saved up and applied once it
-    // reaches 4 %; meanwhile the image is drawn at full opacity, unchanged.
-    pendingKeep_ *= keep;
-    double opacity = 1.0;
-    if (pendingKeep_ < 0.96) {
-        opacity = pendingKeep_;
-        pendingKeep_ = 1.0;
-    }
+    if (!isVisible())
+        return; // all transparent: nothing to move
+    // 8 bits a channel: a fade of a fraction of a per cent a frame would
+    // round to nothing, so it is saved up and applied once it reaches 4 %,
+    // by fadePremultiplied(), which rounds down: faint pixels end at zero
+    // instead of a grey residue that QPainter's opacity would leave.
+    pendingKeep_ *= std::clamp(keep, 0.0, 1.0);
     // Softening: half a buffer pixel (times `soften`) to one side, then the
     // other, every frame; the bilinear sampling of the shift blurs it.
     const double nudge = 0.5 * std::clamp(soften, 0.0, 1.0) * (flip_ ? -1.0 : 1.0);
@@ -420,17 +409,27 @@ void TrailBuffer::advance(double keep, const QTransform& motion, double soften)
     QPainter p(&back_);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     p.setTransform(step);
-    p.setOpacity(opacity);
     p.drawImage(QPointF(0, 0), front_);
     p.end();
     std::swap(front_, back_);
+    if (pendingKeep_ < 0.96) {
+        // What is left decides isVisible(): it clears when the last pixel goes.
+        const auto alpha = motion::fadePremultiplied(
+            std::span<std::uint32_t>(reinterpret_cast<std::uint32_t*>(front_.bits()),
+                static_cast<std::size_t>(front_.sizeInBytes()) / sizeof(std::uint32_t)),
+            pendingKeep_);
+        strength_ = static_cast<double>(alpha) / 255.0;
+        pendingKeep_ = 1.0;
+    }
 }
 
 void TrailBuffer::ink(const std::function<void(QPainter&)>& paint)
 {
     ensure();
     QPainter p(&front_);
-    p.setCompositionMode(QPainter::CompositionMode_Plus);
+    // Over, not Plus: ink laid frame after frame tends to its own colour;
+    // adding would saturate each channel on its own and burn to white.
+    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
     p.setTransform(QTransform::fromTranslate(-area_.left(), -area_.top())
         * QTransform::fromScale(resolution_, resolution_));
     paint(p);

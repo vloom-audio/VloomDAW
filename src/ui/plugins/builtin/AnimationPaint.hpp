@@ -130,7 +130,8 @@ public:
     /// drawImage() of the small buffer.
     void advance(double keep, const QTransform& motion, double soften = 0.0);
     /// Draws new ink into it: `paint` gets a painter in display
-    /// coordinates, adding (CompositionMode_Plus) unless it sets another mode.
+    /// coordinates, drawing over what is there (SourceOver: ink laid every
+    /// frame tends to its own colour and never burns to white).
     void ink(const std::function<void(QPainter&)>& paint);
     /// Draws it into `painter` at `area()`, at `opacity`. With `mist`
     /// (0 .. 1) it is broken up by mistTexture() scrolled to `drift` (px)
@@ -139,8 +140,8 @@ public:
         QPainter& painter, double opacity, double mist = 0.0, QPointF drift = {}, double fadeTop = 0.0) const;
     /// Empties it.
     void clear();
-    /// It still holds something visible (an estimate: what was inked, faded since).
-    [[nodiscard]] bool isVisible() const { return strength_ > 1.0 / 255.0; }
+    /// It still holds something: inked since, or a pixel left at the last fade.
+    [[nodiscard]] bool isVisible() const { return strength_ > 0.0; }
 
 private:
     void ensure();
