@@ -12,6 +12,7 @@
 #include <vloom/dsp/effects/Phaser.hpp>
 
 #include <cmath>
+#include <numbers>
 #include <utility>
 
 namespace vloomdaw {
@@ -95,7 +96,7 @@ PhaserEditor::PhaserEditor(
     footer()->addRight(output);
 
     refresh();
-    startMetering();
+    animate(display_);
 }
 
 void PhaserEditor::refresh()
@@ -118,9 +119,28 @@ void PhaserEditor::refresh()
     }
     display_->setCurves(at(centre), std::move(sweeps), centre,
         tr("Centre %1").arg(QString::fromStdString(formatParameterValue("Hz", centre))));
+    // dsp::Phaser: the notches' frequency moves sin(2 pi phase) of the sweep
+    // in octaves about the centre (to the ends drawn dashed), the LFO
+    // free-running at the rate.
+    const double down = std::log2(low / centre);
+    const double up = std::log2(high / centre);
+    display_->setMotion(
+        [centre, down, up, stages, feedback, mix, rate](double hz, double amount) {
+            const double octaves = amount >= 0.0 ? amount * up : -amount * down;
+            return phaserResponseDb(hz, centre * std::exp2(octaves), stages, feedback, mix, rate);
+        },
+        [](double phase) { return std::sin(2.0 * std::numbers::pi * phase); }, lfoHz());
+}
+
+double PhaserEditor::lfoHz() const
+{
+    return value(Phaser::kSync) >= 0.5 ? vloom::dsp::noteHz(static_cast<int>(value(Phaser::kNote)), tempo())
+                                       : value(Phaser::kRate);
 }
 
 void PhaserEditor::parameterChanged(std::uint32_t /*id*/, double /*value*/) { refresh(); }
+
+void PhaserEditor::tempoChanged(double /*bpm*/) { refresh(); }
 
 void PhaserEditor::meter(const Meter& reading) { output_->push(reading.running, reading.outputDb); }
 

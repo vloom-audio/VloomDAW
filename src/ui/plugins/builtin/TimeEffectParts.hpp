@@ -2,11 +2,16 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
+
 #include <QColor>
+#include <QImage>
 #include <QPointF>
 #include <QStringList>
 #include <QWidget>
 
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -95,12 +100,22 @@ private:
 /// phaser's notches): the response now as a filled curve, where it sweeps
 /// to dashed, 0 dB as a line, and a handle on that line at a frequency to
 /// drag sideways (hzAt() turns its place into one).
-class ResponseDisplay : public HandleDisplay {
+///
+/// Animated (BuiltinEditorWindow::animate()), given setMotion(): while sound
+/// plays the response sweeps between its dashed ends at the LFO's real
+/// rate, its area glowing with the level and a glow riding each notch. The
+/// plugins do not report their LFO's phase, so the display runs its own at
+/// the same rate: the plugins' LFOs run free too, so only where in the cycle
+/// it is can differ, not how it moves.
+class ResponseDisplay : public HandleDisplay, public Animated {
     Q_OBJECT
 
 public:
     /// The response in dB at a frequency (Hz).
     using Response = std::function<double(double)>;
+    /// The response in dB at a frequency (Hz) with the sweep at `amount`
+    /// (0: the response setCurves() draws filled).
+    using MovingResponse = std::function<double(double hz, double amount)>;
 
     struct Axis {
         bool log = true; ///< log (20 Hz .. 20 kHz) or linear
@@ -116,14 +131,30 @@ public:
     void setCurves(Response now, std::vector<Response> sweeps, std::optional<double> handleHz,
         const QString& handleLabel);
 
+    /// How the response moves: `response` at the sweep amount
+    /// `amountAt(phase)` gives for the LFO's phase (cycles), which turns at
+    /// `rateHz`. No `response`: it stays still.
+    void setMotion(MovingResponse response, std::function<double(double)> amountAt, double rateHz);
+
     /// The frequency at `x`, kept on the axis.
     [[nodiscard]] double hzAt(double x) const;
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override;
+    void rest() override;
+    void animationSwitched(bool on) override;
 
 protected:
     [[nodiscard]] std::optional<QPointF> handle() const override;
     void paintEvent(QPaintEvent* event) override;
 
 private:
+    /// The grid, 0 dB and the sweep's ends (cached while animating).
+    void paintBack(QPainter& painter) const;
+    /// The response now, filled, drawn still (no animation).
+    void paintStill(QPainter& painter) const;
+    /// The response where the sweep is, the notches glowing.
+    void paintMoving(QPainter& painter);
+    void paintHandleAndLabel(QPainter& painter) const;
     [[nodiscard]] double xOf(double hz) const;
     [[nodiscard]] double yOf(double db) const;
     [[nodiscard]] double plotBottom() const;
@@ -134,6 +165,17 @@ private:
     std::vector<Response> sweeps_;
     std::optional<double> handleHz_;
     QString handleLabel_;
+
+    MovingResponse moving_;
+    std::function<double(double)> amountAt_;
+    double rateHz_ = 0.0;
+    double phase_ = 0.0; ///< the display's own LFO, cycles (0 .. 1)
+    double live_ = 0.0; ///< how far the sweep shows (eases in and out with the sound)
+    double glow_ = 0.0; ///< level x liveliness
+    std::uint64_t key_ = 1; ///< changes with what paintBack() draws
+    motion_paint::LayerCache back_;
+    std::vector<QPointF> points_; ///< the moving trace (kept: no allocation a frame)
+    QImage area_; ///< the area under it, at a third of the resolution (kept)
 };
 
 /// A row of buttons for a choice, one lit (the designs' segmented switch:
