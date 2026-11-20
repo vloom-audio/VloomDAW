@@ -48,6 +48,7 @@
 #include "ui/plugins/PluginPickerPopup.hpp"
 #include "ui/plugins/PluginsPanel.hpp"
 #include "ui/plugins/SynthEditorWindow.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
 #include "ui/plugins/builtin/BuiltinEditorWindow.hpp"
 #include "ui/plugins/builtin/BuiltinEditors.hpp"
 #include "ui/stems/StemModelStore.hpp"
@@ -3758,6 +3759,13 @@ void MainWindow::createSettingsDialog()
     general->setStartPositionMode(static_cast<int>(settings_.startPositionMode));
     general->setMetronomeOnStartup(settings_.metronomeOnStartup);
     general->setAssociateProjectFiles(settings_.associateProjectFiles);
+    general->setAnimatePluginDisplays(settings_.animatePluginDisplays);
+    AnimationSettings::instance().setUserEnabled(settings_.animatePluginDisplays);
+    connect(general, &GeneralSettingsPage::animatePluginDisplaysChanged, this, [this](bool on) {
+        settings_.animatePluginDisplays = on;
+        AnimationSettings::instance().setUserEnabled(on);
+        settings_.save();
+    });
     connect(general, &GeneralSettingsPage::startPositionModeChanged, this, [this](int mode) {
         settings_.startPositionMode
             = mode == 1 ? AppSettings::PositionMode::Time : AppSettings::PositionMode::BarsBeats;

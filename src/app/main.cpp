@@ -423,6 +423,7 @@ int main(int argc, char* argv[])
             dlg.generalPage()->setStartPositionMode(static_cast<int>(settings.startPositionMode));
             dlg.generalPage()->setMetronomeOnStartup(settings.metronomeOnStartup);
             dlg.generalPage()->setAssociateProjectFiles(settings.associateProjectFiles);
+            dlg.generalPage()->setAnimatePluginDisplays(settings.animatePluginDisplays);
             dlg.generalPage()->setCheckForUpdates(settings.checkForUpdates);
             dlg.generalPage()->setBetaUpdates(settings.betaUpdates);
             QObject::connect(dlg.generalPage(), &vloomdaw::GeneralSettingsPage::startPositionModeChanged,
@@ -444,6 +445,11 @@ int main(int argc, char* argv[])
 #if defined(Q_OS_WIN)
                     vloomdaw::setWindowsProjectFileAssociation(QCoreApplication::applicationFilePath(), on);
 #endif
+                });
+            QObject::connect(dlg.generalPage(), &vloomdaw::GeneralSettingsPage::animatePluginDisplaysChanged,
+                &dlg, [&](bool on) {
+                    settings.animatePluginDisplays = on;
+                    settings.save();
                 });
             QObject::connect(dlg.generalPage(), &vloomdaw::GeneralSettingsPage::checkForUpdatesChanged, &dlg,
                 [&](bool on) {

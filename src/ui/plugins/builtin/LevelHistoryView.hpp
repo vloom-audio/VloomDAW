@@ -3,6 +3,8 @@
 #pragma once
 
 #include "core/DynamicsMeter.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 
 #include <QString>
 #include <QWidget>
@@ -21,7 +23,13 @@ namespace vloomdaw {
 /// It draws only what it is given: push() one reading per tick, with
 /// kNoLevel for a level that is not known (no audio running, an input that
 /// cannot be worked out); those leave gaps.
-class LevelHistoryView : public QWidget {
+///
+/// Animated (BuiltinEditorWindow::animate()): it scrolls smoothly between
+/// readings, the output trace glows with the level and has a bright head,
+/// the gain reduction (AudioFeatures::reductionDb()) hangs from the top as a
+/// curtain with a glowing edge, and pulseMarker() makes the marker flash
+/// (a threshold the input crossed).
+class LevelHistoryView : public QWidget, public Animated {
     Q_OBJECT
 
 public:
@@ -55,6 +63,13 @@ public:
     /// The user double-clicked the marker.
     std::function<void()> onMarkerReset;
 
+    /// Flashes the marker line (animated only): `strength` 0 .. 1.
+    void pulseMarker(double strength = 1.0);
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override;
+    void rest() override;
+    void animationSwitched(bool on) override;
+
     /// Readings it keeps: the widest display it can fill.
     static constexpr std::size_t kCapacity = 1024;
     /// Pixels between two readings.
@@ -75,6 +90,9 @@ private:
     [[nodiscard]] bool onMarker(double y) const;
     /// x of reading `index` (0: the oldest) when `count` are shown.
     [[nodiscard]] double xOf(std::size_t index, std::size_t count) const;
+    /// How far the readings have scrolled towards the next one (0 .. 1; 1 when still).
+    [[nodiscard]] double scrolled() const;
+    void paintGrid(QPainter& painter) const;
 
     Look look_;
     double topDb_ = 0.0;
@@ -89,6 +107,15 @@ private:
     bool dragging_ = false;
     double dragDb_ = 0.0; ///< the marker's level as the drag goes, unclamped
     double lastY_ = 0.0;
+
+    // The motion (animationOn()).
+    motion_paint::LayerCache gridLayer_;
+    double sincePush_ = 0.0; ///< s since the newest reading
+    double interval_ = 0.033; ///< s between readings, smoothed
+    double glow_ = 0.0; ///< the output's level 0 .. 1, while sound runs
+    double curtainDb_ = 0.0; ///< the gain reduction, smoothed
+    double markerPulse_ = 0.0;
+    bool ticking_ = false; ///< frames come (advance()): they repaint, push() need not
 };
 
 } // namespace vloomdaw

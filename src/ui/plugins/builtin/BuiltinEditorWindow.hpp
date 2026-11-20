@@ -2,8 +2,10 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "core/AudioFeatures.hpp"
 #include "core/DynamicsMeter.hpp"
 #include "core/ParameterScale.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
 #include "ui/plugins/builtin/PillToggle.hpp"
 
 #include <vloom/engine/plugin/AudioProcessor.hpp>
@@ -20,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+class QLabel;
 class QTimer;
 class QToolButton;
 
@@ -56,8 +59,16 @@ class Readout;
 ///
 /// startMetering() gives the subclass meter() about 30 times a second while
 /// the window shows: the level of what the plugin puts out (its scope tap)
-/// and the gain reduction it reports. Deletes itself when closed.
-class BuiltinEditorWindow : public QWidget {
+/// and the gain reduction it reports.
+///
+/// animate() makes a display move with the sound: once a frame (FrameClock,
+/// 60 Hz) while the window shows, is not minimised and sound runs, the shell
+/// reads the scope, works out audio() (levels, envelope, onsets, waveform)
+/// and calls each animated display's advance(). With no sound for
+/// AudioFeatures::kSettleSeconds and nothing left moving, the clock idles;
+/// with "Animate plugin displays" off (or the system's reduced motion) the
+/// displays draw their static picture. Deletes itself when closed.
+class BuiltinEditorWindow : public QWidget, private FrameClock::Client {
     Q_OBJECT
 
 public:
@@ -70,6 +81,8 @@ public:
     [[nodiscard]] bool isBypassed() const { return bypassed_; }
     /// The song's tempo (BPM) for times and rates in notes: 120 until set.
     [[nodiscard]] double tempo() const { return tempo_; }
+    /// The animated displays get frames now (shown, sound running, animation on).
+    [[nodiscard]] bool isAnimating() const;
 
 public slots:
     /// Shows the effect as bypassed or on, without emitting bypassToggled().
@@ -160,8 +173,23 @@ protected:
     /// A reading (startMetering()).
     virtual void meter(const Meter& reading);
 
+    // --- Animation (docs/builtin-editors.md, "Animation") ----------------------
+    /// Makes `display` (a widget of this window that implements Animated)
+    /// move with the sound: it gets advance() once a frame while the window
+    /// shows and sound runs. Starts the metering too (the scope tap).
+    void animate(Animated* display);
+    /// What the sound is doing this frame: what advance() is given.
+    [[nodiscard]] const motion::AudioFeatures& audio() const { return features_; }
+    /// Adds a coarse spectrum of `bands` log-spaced bands to audio()
+    /// (AudioFeatures::bands()): an FFT a frame, so only for a display that draws it.
+    void enableSpectrum(std::size_t bands) { features_.enableSpectrum(sampleRate_, bands); }
+    /// Asks for frames again although no sound runs (a parameter changed
+    /// that a display moves to); they stop again once it has settled.
+    void wakeAnimation();
+
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
+    void changeEvent(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
@@ -177,6 +205,12 @@ private:
     void chooseSlot(int slot);
     void placePanel();
     void readMeters();
+    /// One frame of the animation (FrameClock::Client).
+    void frame(double dt) override;
+    /// Joins or leaves the frame clock as the window, the sound and the setting say.
+    void updateAnimation();
+    void animationSettingChanged(bool enabled);
+    void showAnimationStats();
 
     std::shared_ptr<vloom::PluginInstance> instance_;
     double sampleRate_;
@@ -202,6 +236,16 @@ private:
     QElapsedTimer sinceReading_;
     std::vector<float> scope_; ///< the newest output, read each tick
     std::vector<float> lastTail_; ///< the end of the last read: the same again means no audio is running
+
+    std::vector<Animated*> animated_; ///< displays that move with the sound (children)
+    motion::AudioFeatures features_;
+    bool awake_ = false; ///< sound ran lately, or something still moves
+    QElapsedTimer sinceFrame_;
+    std::vector<float> frameScope_; ///< the newest output, read each frame
+    std::vector<float> frameTail_; ///< as lastTail_, for the frames
+    double sinceAudio_ = 1.0; ///< s since a frame got new audio
+    QLabel* statsLabel_ = nullptr; ///< VLOOMDAW_ANIMATION_STATS: the paint cost
+    QTimer* statsTimer_ = nullptr;
 };
 
 } // namespace vloomdaw

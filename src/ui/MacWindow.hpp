@@ -31,4 +31,7 @@ void hideMacWindowTitle(QWidget* window);
 /// cover the whole screen and still keep its window buttons.
 void setMacMenuBarAndDockHidden(bool on);
 
+/// The user asked macOS to reduce motion (Accessibility → Display).
+[[nodiscard]] bool macPrefersReducedMotion();
+
 } // namespace vloomdaw
