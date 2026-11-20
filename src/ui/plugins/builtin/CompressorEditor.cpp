@@ -75,8 +75,8 @@ CompressorEditor::CompressorEditor(
             change(Compressor::kThreshold, threshold->defaultValue);
     };
     row->addWidget(levels_, 1);
-    meters_
-        = new MeterBars({{tr("In")}, {tr("GR"), true}, {tr("Out")}}, kBottomDb, kReductionRangeDb, display);
+    meters_ = new MeterBars({{tr("In"), false, {}}, {tr("GR"), true, {}}, {tr("Out"), false, {}}}, kBottomDb,
+        kReductionRangeDb, display);
     row->addWidget(meters_);
     curve_ = new TransferCurve(
         [this](double input) {
