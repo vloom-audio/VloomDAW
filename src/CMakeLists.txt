@@ -15,6 +15,7 @@ target_sources(vloomdaw_core PRIVATE
     core/BrowserFilter.cpp
     core/Decibels.cpp
     core/DynamicsMeter.cpp
+    core/EffectPreview.cpp
     core/EqResponse.cpp
     core/PluginPresets.cpp
     core/SpectrumAnalyzer.cpp

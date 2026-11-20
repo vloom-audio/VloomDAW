@@ -21,6 +21,7 @@ add_executable(vloomdaw_tests
     core/BrowserFilterTests.cpp
     core/DecibelsTests.cpp
     core/DynamicsMeterTests.cpp
+    core/EffectPreviewTests.cpp
     core/EqResponseTests.cpp
     core/PluginPresetsTests.cpp
     core/SpectrumAnalyzerTests.cpp
