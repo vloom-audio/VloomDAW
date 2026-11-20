@@ -4,6 +4,8 @@
 
 #include "core/EffectPreview.hpp"
 #include "core/ParameterScale.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
 #include "ui/plugins/builtin/DisplayHelpers.hpp"
@@ -19,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <utility>
 
@@ -35,13 +38,22 @@ constexpr double kHeaderHeight = 30.0; ///< the band's reduction strip
 constexpr double kHandleRadius = 9.0;
 constexpr double kGrab = 16.0;
 constexpr double kPointPixels = 3.0;
+/// The coarse spectrum the animation reads the sibilance from
+/// (AudioFeatures::bands(): log spaced over 30 Hz .. 16 kHz).
+constexpr std::size_t kMotionBands = 24;
+constexpr double kBandsLowHz = 30.0;
+constexpr double kBandsHighHz = 16000.0;
 
 QString dbText(double db) { return QString::fromStdString(formatParameterValue("dB", db)); }
 
 } // namespace
 
 /// The de-esser's picture: the spectrum, the band and the threshold.
-class DeEsserDisplay : public QWidget {
+///
+/// Animated: the band shimmers with the sibilance in it (the coarse
+/// spectrum above the band's edge), glints rising through it, and its head
+/// flashes as the de-esser cuts.
+class DeEsserDisplay : public QWidget, public Animated {
 public:
     DeEsserDisplay(const SpectrumAnalyzer& spectrum, double sampleRate, QWidget* parent)
         : QWidget(parent)
@@ -62,6 +74,7 @@ public:
         threshold_ = thresholdDb;
         split_ = splitBand;
         listening_ = listening;
+        ++generation_;
         update();
     }
 
@@ -69,13 +82,112 @@ public:
     void setReduction(double db)
     {
         reduction_ = db;
+        ++generation_; // the spectrum moved too
         update();
     }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        // The sibilance: the loudest band of the coarse spectrum at or above the edge.
+        double loudest = 0.0;
+        const std::span<const double> bands = audio.bands();
+        for (std::size_t i = 0; i < bands.size(); ++i) {
+            const double share = (static_cast<double>(i) + 0.5) / static_cast<double>(bands.size());
+            if (kBandsLowHz * std::pow(kBandsHighHz / kBandsLowHz, share) >= frequency_)
+                loudest = std::max(loudest, bands[i]);
+        }
+        // 0 .. 1 over -90 .. 0 dB; shown over -70 .. -10 dB.
+        const double sibilance = std::clamp((loudest * 90.0 - 20.0) / 60.0, 0.0, 1.0) * live;
+        shimmer_.step(listening_ ? 0.0 : sibilance, dt);
+
+        const double cut = audio.reductionDb() * live;
+        const double rise = std::max(0.0, cut - lastCut_);
+        lastCut_ = cut;
+        flash_ = std::max(flash_ * std::exp(-dt / 0.25), std::min(1.0, rise / 2.0 + cut / 12.0));
+
+        // Glints: more and brighter the more sibilance.
+        const double bandX = display::xOfHz(frequency_, 0.0, width());
+        const QRectF field(
+            bandX, kHeaderHeight + 4.0, width() - bandX, area().bottom() - kHeaderHeight - 24.0);
+        spawnDue_ += shimmer_.value() * 160.0 * dt;
+        while (spawnDue_ >= 1.0) {
+            spawnDue_ -= 1.0;
+            const Glint glint{.x = field.left() + field.width() * next(),
+                .y = field.top() + field.height() * (0.25 + 0.75 * next()),
+                .size = 1.5 + 3.5 * next() * shimmer_.value()};
+            glints_.spawn(glint, 0.25 + 0.45 * next());
+        }
+        const std::size_t alive
+            = glints_.advance(dt, [](Glints::Particle& each, double step) { each.state.y -= 26.0 * step; });
+
+        const bool moving = alive > 0 || shimmer_.value() > 0.005 || flash_ > 0.01;
+        if (moving || wasMoving_)
+            update(QRectF(bandX - 16.0, 0.0, width() - bandX + 16.0, area().bottom()).toAlignedRect());
+        wasMoving_ = moving;
+        return moving;
+    }
+
+    void rest() override
+    {
+        glints_.clear();
+        shimmer_.reset();
+        flash_ = 0.0;
+        lastCut_ = 0.0;
+        spawnDue_ = 0.0;
+        wasMoving_ = false;
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
 
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        if (!animationOn()) {
+            QPainter p(this);
+            paintPicture(p, false);
+            return;
+        }
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        // The picture changes with the readings (30 a second): kept between them.
+        picture_.draw(p, *this, generation_, [this](QPainter& layer) { paintPicture(layer, true); });
+        paintMotion(p);
+    }
+
+    /// The band alive with the sibilance, and its head flashing with the cut.
+    void paintMotion(QPainter& p) const
+    {
+        const QColor accent = style::accent();
+        const double bandX = display::xOfHz(frequency_, 0.0, width());
+        const double bottom = area().bottom();
+        const double shimmer = shimmer_.value();
+        if (shimmer > 0.005) {
+            p.fillRect(QRectF(bandX, kHeaderHeight, width() - bandX, bottom - kHeaderHeight),
+                motion_paint::faded(accent, 0.12 * shimmer));
+            motion_paint::glowLine(p, QLineF(bandX, 0.0, bandX, bottom), accent, shimmer, 9.0);
+        }
+        {
+            motion_paint::GlowBatch glow(p, accent);
+            glints_.forEach([&glow](const Glints::Particle& each) {
+                const double twinkle = std::sin(3.14159265358979 * each.progress());
+                glow.dot(QPointF(each.state.x, each.state.y), each.state.size + 3.0, twinkle);
+            });
+        }
+        if (flash_ > 0.01) {
+            const QRectF head(bandX, 0.0, width() - bandX, kHeaderHeight);
+            p.fillRect(head, motion_paint::faded(accent, 0.4 * flash_));
+            motion_paint::glowLine(
+                p, QLineF(head.left(), head.bottom(), head.right(), head.bottom()), accent, flash_, 8.0);
+            motion_paint::glowDot(p, head.center(), 14.0 + 16.0 * flash_, accent, 0.5 * flash_);
+        }
+    }
+
+    /// The display without the motion. `moving`: drawn into a layer between
+    /// readings, so cheaply (1 px lines, areas without antialiasing).
+    void paintPicture(QPainter& p, bool moving) const
+    {
         p.setRenderHint(QPainter::Antialiasing);
         p.fillRect(rect(), style::background());
         const QRectF area = this->area();
@@ -131,11 +243,16 @@ protected:
                 grey.setAlphaF(0.09f);
                 QColor greyLine = style::text();
                 greyLine.setAlphaF(0.3f);
-                p.setPen(QPen(greyLine, 1.0));
+                p.setRenderHint(QPainter::Antialiasing, !moving);
+                p.setPen(Qt::NoPen);
                 p.setBrush(grey);
                 p.drawPath(fill);
+                p.setRenderHint(QPainter::Antialiasing);
+                p.setPen(QPen(greyLine, 1.0));
+                p.setBrush(Qt::NoBrush);
+                p.drawPath(in);
             }
-            p.setPen(QPen(style::accent(), 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setPen(QPen(style::accent(), moving ? 1.0 : 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             p.setBrush(Qt::NoBrush);
             p.drawPath(out);
         }
@@ -198,6 +315,20 @@ protected:
     }
 
 private:
+    struct Glint {
+        double x = 0.0;
+        double y = 0.0;
+        double size = 0.0;
+    };
+    using Glints = motion::ParticlePool<Glint, 64>;
+
+    /// 0 .. 1, the same sequence every run.
+    double next()
+    {
+        seed_ = seed_ * 1664525U + 1013904223U;
+        return static_cast<double>(seed_ >> 8U) / 16777216.0;
+    }
+
     /// Above the floating panel.
     [[nodiscard]] QRectF area() const
     {
@@ -233,6 +364,17 @@ private:
     double reduction_ = std::nan("");
     bool dragging_ = false;
     QPointF grab_;
+
+    // The motion (animationOn()).
+    motion_paint::LayerCache picture_;
+    std::uint64_t generation_ = 0; ///< changes with what the picture shows
+    Glints glints_;
+    motion::EnvelopeFollower shimmer_{0.015, 0.2}; ///< the sibilance, 0 .. 1
+    double flash_ = 0.0; ///< the head's flash, 0 .. 1
+    double lastCut_ = 0.0; ///< the reduction last frame, dB
+    double spawnDue_ = 0.0; ///< glints owed (fractional)
+    std::uint32_t seed_ = 0x2545f491U;
+    bool wasMoving_ = false;
 };
 
 DeEsserEditor::DeEsserEditor(
@@ -269,6 +411,8 @@ DeEsserEditor::DeEsserEditor(
                 change(id, info->defaultValue);
     };
     setDisplay(display_);
+    enableSpectrum(kMotionBands);
+    animate(display_);
     parameterChanged(DeEsser::kFrequency, value(DeEsser::kFrequency));
 
     panel()->add(knob(DeEsser::kFrequency));
