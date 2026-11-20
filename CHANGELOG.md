@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Editors for the built-in tuner and spectrum analyzer, after the approved
+  designs (docs/builtin-editors.md). The tuner reads the engine's readouts
+  (note, cents, frequency, level) about 30 times a second with a smoothed
+  needle; the analyzer draws the spectrum from the plugin's stereo scope
+  (`AnalyzerSpectrum`: vloom-dsp's FFT, averaged per Speed, tilted, peak
+  hold, freeze) with a cursor readout. Both are listed under Analyzer
+  ("Utility / Meter") in the Plugins panel.
 - Dedicated editors for the built-in compressor, limiter and gate, after the
   approved designs: a scrolling level display with the threshold or ceiling
   as a line to drag, a floating panel of knobs, presets, A/B and readouts

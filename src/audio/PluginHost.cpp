@@ -98,6 +98,8 @@ BuiltinCategory builtinCategory(const vloom::PluginInfo& builtin)
         category = "Modulation";
     else if (kind == "Distortion")
         category = "Distortion";
+    else if (kind == "Analysis")
+        category = "Analyzer"; // the tuner and the spectrum analyzer
     return {category, "Fx|" + category};
 }
 

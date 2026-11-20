@@ -64,6 +64,11 @@ shell and keep their own windows.
   with `inputFromOutputDb(output, reduction, added gain)` when that is true
   (no dry mix, not listening to the key) and pushes `kNoLevel` otherwise.
   Never draw made-up data: no audio means gaps (`kNoLevel`).
+- **Readouts**: `instance().processor().readouts()` lists the live values a
+  built-in publishes (vloom-dsp `HasReadouts`, engine ADR 0019); look one
+  up by id once and poll `readoutValue(index)` on a timer (lock-free).
+- **Header**: `addHeaderControl()` puts a control before A / B (the
+  analyzer's Freeze).
 - **Look**: `editor_style` (`EditorStyle.hpp`) has the designs' colours,
   taken from the theme (the accent is the theme's), the fonts and the sizes.
   Shared displays: `LevelHistoryView` (scrolling levels with a draggable
@@ -220,3 +225,24 @@ not hand its sample data to the UI, so `SampleWaveforms`
 thread (the same WAV the engine plays, never a network path) and keeps its
 peaks. The pictures' maths (peaks, the dsp's envelope, the time line) is in
 `core/SampleView.hpp`, tested in `tests/core/SampleViewTests.cpp`.
+
+## Analysis
+
+- `TunerEditor` (`vloom.tuner`): the note with its octave (scientific
+  pitch, A4 = Reference), the frequency, a ±50 cent meter with the in-tune
+  zone (±5 cents, `kInTuneCents`) and the cents off, "—" when there is no
+  pitch or the tuner is bypassed. It polls the readouts (`frequency_hz`,
+  `note`, `cents`, `has_pitch`, `level_db`) every 33 ms while it shows; the
+  needle is smoothed (`NeedleSmoother`, 80 ms) and jumps on a new note.
+  Reference, Mute output; footer: Input (a choice) and the level. The maths
+  is in `core/TunerReading.hpp`, tested in `tests/core/TunerReadingTests.cpp`.
+- `AnalyzerEditor` (`vloom.analyzer`): the spectrum, 20 Hz .. 20 kHz on the
+  log axis, filled, with a dB grid (0 dB at the top, Range tall), the
+  peak-hold line (double-click to clear it) and a cursor readout. Freeze in
+  the header; Speed, Tilt, Range, Peak hold; footer: Resolution, Channel
+  and the processor's `peak_db`. The processor passes audio through: the
+  FFT is done here from `PluginInstance::readScopeStereo()` by
+  `core/AnalyzerSpectrum` (vloom-dsp's `Fft`, Hann window, a one-pole power
+  average over `Analyzer::averagingSeconds()`, `Analyzer::tiltDb()`), tested
+  in `tests/core/AnalyzerSpectrumTests.cpp`. The scope keeps 8192 frames,
+  so Resolution 16384 is analysed at 8192.

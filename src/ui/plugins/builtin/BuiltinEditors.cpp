@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/plugins/builtin/BuiltinEditors.hpp"
 
+#include "ui/plugins/builtin/AnalyzerEditor.hpp"
 #include "ui/plugins/builtin/BitcrusherEditor.hpp"
 #include "ui/plugins/builtin/ChorusEditor.hpp"
 #include "ui/plugins/builtin/CompressorEditor.hpp"
@@ -18,6 +19,7 @@
 #include "ui/plugins/builtin/SaturatorEditor.hpp"
 #include "ui/plugins/builtin/TransientEditor.hpp"
 #include "ui/plugins/builtin/TremoloEditor.hpp"
+#include "ui/plugins/builtin/TunerEditor.hpp"
 #include "ui/plugins/builtin/UtilityEditor.hpp"
 
 #include <vloom/engine/plugin/PluginInstance.hpp>
@@ -65,6 +67,8 @@ constexpr std::array kEditors{
     Entry{"vloom.tremolo", &make<TremoloEditor>},
     Entry{"vloom.sampler", &make<SamplerEditor>},
     Entry{"vloom.drums", &make<DrumSamplerEditor>},
+    Entry{"vloom.tuner", &make<TunerEditor>},
+    Entry{"vloom.analyzer", &make<AnalyzerEditor>},
 };
 
 const Entry* entryFor(const vloom::PluginInstance& instance)

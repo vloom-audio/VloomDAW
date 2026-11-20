@@ -208,7 +208,15 @@ void BuiltinEditorWindow::buildHeader(std::vector<Preset> presets)
         slotButtons_[static_cast<std::size_t>(slot)] = button;
     }
     row->addWidget(group);
+    headerRow_ = row;
+    slotGroup_ = group;
     layout()->addWidget(header);
+}
+
+void BuiltinEditorWindow::addHeaderControl(QWidget* control)
+{
+    control->setParent(slotGroup_->parentWidget());
+    headerRow_->insertWidget(headerRow_->indexOf(slotGroup_), control);
 }
 
 const vloom::ParameterInfo* BuiltinEditorWindow::parameter(std::uint32_t id) const
