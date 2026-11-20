@@ -7211,6 +7211,7 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
             if (const auto at = slotOf())
                 setEffectBypassed(at->first, at->second, bypassed);
         });
+        builtin->setTempo(transport_->tempo()); // for times and rates in notes
         pluginEditors_[handle] = builtin;
         builtin->show();
         return;
@@ -9558,6 +9559,10 @@ void MainWindow::refreshFromEngine()
         transport_->setTempo(engine.tempo());
         playlist_->setTempo(engine.tempo());
     }
+    // Editors of built-ins that time in notes (delay, LFOs) follow the shown tempo.
+    for (const auto& entry : pluginEditors_)
+        if (auto* builtin = qobject_cast<BuiltinEditorWindow*>(entry.second.data()))
+            builtin->setTempo(transport_->tempo());
 
     // Real time since the last tick: meters fall by it, and slower readouts
     // update on their own schedule whatever the refresh rate is.

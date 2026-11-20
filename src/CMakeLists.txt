@@ -44,6 +44,7 @@ target_sources(vloomdaw_core PRIVATE
     core/StemSpectrogram.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
+    core/TimeEffects.cpp
     core/TrackRouting.cpp
     core/TransportLayout.cpp
     core/UndoHistory.cpp
@@ -192,18 +193,24 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/BuiltinEditors.hpp
     ui/plugins/builtin/ChoiceButtons.cpp
     ui/plugins/builtin/ChoiceButtons.hpp
+    ui/plugins/builtin/ChorusEditor.cpp
+    ui/plugins/builtin/ChorusEditor.hpp
     ui/plugins/builtin/CompressorEditor.cpp
     ui/plugins/builtin/CompressorEditor.hpp
     ui/plugins/builtin/ControlPanel.cpp
     ui/plugins/builtin/ControlPanel.hpp
     ui/plugins/builtin/DeEsserEditor.cpp
     ui/plugins/builtin/DeEsserEditor.hpp
+    ui/plugins/builtin/DelayEditor.cpp
+    ui/plugins/builtin/DelayEditor.hpp
     ui/plugins/builtin/DisplayHelpers.cpp
     ui/plugins/builtin/DisplayHelpers.hpp
     ui/plugins/builtin/EditorStyle.cpp
     ui/plugins/builtin/EditorStyle.hpp
     ui/plugins/builtin/FilterEditor.cpp
     ui/plugins/builtin/FilterEditor.hpp
+    ui/plugins/builtin/FlangerEditor.cpp
+    ui/plugins/builtin/FlangerEditor.hpp
     ui/plugins/builtin/GateEditor.cpp
     ui/plugins/builtin/GateEditor.hpp
     ui/plugins/builtin/LevelHistoryView.cpp
@@ -214,16 +221,24 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/MeterBars.hpp
     ui/plugins/builtin/ParameterControl.cpp
     ui/plugins/builtin/ParameterControl.hpp
+    ui/plugins/builtin/PhaserEditor.cpp
+    ui/plugins/builtin/PhaserEditor.hpp
     ui/plugins/builtin/PillToggle.cpp
     ui/plugins/builtin/PillToggle.hpp
     ui/plugins/builtin/Readout.cpp
     ui/plugins/builtin/Readout.hpp
+    ui/plugins/builtin/ReverbEditor.cpp
+    ui/plugins/builtin/ReverbEditor.hpp
     ui/plugins/builtin/SaturatorEditor.cpp
     ui/plugins/builtin/SaturatorEditor.hpp
+    ui/plugins/builtin/TimeEffectParts.cpp
+    ui/plugins/builtin/TimeEffectParts.hpp
     ui/plugins/builtin/TransferCurve.cpp
     ui/plugins/builtin/TransferCurve.hpp
     ui/plugins/builtin/TransientEditor.cpp
     ui/plugins/builtin/TransientEditor.hpp
+    ui/plugins/builtin/TremoloEditor.cpp
+    ui/plugins/builtin/TremoloEditor.hpp
     ui/plugins/builtin/UtilityEditor.cpp
     ui/plugins/builtin/UtilityEditor.hpp
     ui/plugins/PresetBar.cpp

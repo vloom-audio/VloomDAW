@@ -68,10 +68,15 @@ public:
     /// The value of parameter `id` now (0 for an unknown id).
     [[nodiscard]] double value(std::uint32_t id) const;
     [[nodiscard]] bool isBypassed() const { return bypassed_; }
+    /// The song's tempo (BPM) for times and rates in notes: 120 until set.
+    [[nodiscard]] double tempo() const { return tempo_; }
 
 public slots:
     /// Shows the effect as bypassed or on, without emitting bypassToggled().
     void setBypassed(bool bypassed);
+    /// The song's tempo is now `bpm` (MainWindow keeps it up to date); calls
+    /// tempoChanged() when it changes.
+    void setTempo(double bpm);
 
 signals:
     /// A parameter was changed: the project has unsaved changes.
@@ -144,6 +149,8 @@ protected:
     /// Parameter `id` changed to `value` (by any control, a preset or A/B),
     /// after the bound controls were updated.
     virtual void parameterChanged(std::uint32_t id, double value);
+    /// The song's tempo changed to `bpm` (setTempo()).
+    virtual void tempoChanged(double bpm);
 
     // --- Meters --------------------------------------------------------------
     /// Starts the readings: meter() runs about 30 times a second while the
@@ -176,6 +183,7 @@ private:
     std::vector<double> values_; ///< by id
     std::vector<std::pair<std::uint32_t, std::function<void(double)>>> shows_;
     bool bypassed_ = false;
+    double tempo_ = 120.0;
 
     std::array<Snapshot, 2> slots_{}; ///< A and B; the one heard is stale until left
     int slot_ = 0;

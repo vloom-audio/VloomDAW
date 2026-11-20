@@ -3,13 +3,19 @@
 #include "ui/plugins/builtin/BuiltinEditors.hpp"
 
 #include "ui/plugins/builtin/BitcrusherEditor.hpp"
+#include "ui/plugins/builtin/ChorusEditor.hpp"
 #include "ui/plugins/builtin/CompressorEditor.hpp"
 #include "ui/plugins/builtin/DeEsserEditor.hpp"
+#include "ui/plugins/builtin/DelayEditor.hpp"
 #include "ui/plugins/builtin/FilterEditor.hpp"
+#include "ui/plugins/builtin/FlangerEditor.hpp"
 #include "ui/plugins/builtin/GateEditor.hpp"
 #include "ui/plugins/builtin/LimiterEditor.hpp"
+#include "ui/plugins/builtin/PhaserEditor.hpp"
+#include "ui/plugins/builtin/ReverbEditor.hpp"
 #include "ui/plugins/builtin/SaturatorEditor.hpp"
 #include "ui/plugins/builtin/TransientEditor.hpp"
+#include "ui/plugins/builtin/TremoloEditor.hpp"
 #include "ui/plugins/builtin/UtilityEditor.hpp"
 
 #include <vloom/engine/plugin/PluginInstance.hpp>
@@ -49,6 +55,12 @@ constexpr std::array kEditors{
     Entry{"vloom.bitcrusher", &make<BitcrusherEditor>},
     Entry{"vloom.deesser", &make<DeEsserEditor>},
     Entry{"vloom.transient", &make<TransientEditor>},
+    Entry{"vloom.delay", &make<DelayEditor>},
+    Entry{"vloom.reverb", &make<ReverbEditor>},
+    Entry{"vloom.chorus", &make<ChorusEditor>},
+    Entry{"vloom.flanger", &make<FlangerEditor>},
+    Entry{"vloom.phaser", &make<PhaserEditor>},
+    Entry{"vloom.tremolo", &make<TremoloEditor>},
 };
 
 const Entry* entryFor(const vloom::PluginInstance& instance)

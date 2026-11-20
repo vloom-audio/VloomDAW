@@ -332,6 +332,16 @@ void BuiltinEditorWindow::setBypassed(bool bypassed)
     power_->update();
 }
 
+void BuiltinEditorWindow::setTempo(double bpm)
+{
+    if (!std::isfinite(bpm) || !(bpm > 0.0) || bpm == tempo_)
+        return;
+    tempo_ = bpm;
+    tempoChanged(bpm);
+}
+
+void BuiltinEditorWindow::tempoChanged(double /*bpm*/) { }
+
 bool BuiltinEditorWindow::eventFilter(QObject* watched, QEvent* event)
 {
     if ((watched == body_ && event->type() == QEvent::Resize)
