@@ -2,9 +2,15 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "ui/plugins/builtin/BuiltinEditors.hpp"
 
+#include "ui/plugins/builtin/BitcrusherEditor.hpp"
 #include "ui/plugins/builtin/CompressorEditor.hpp"
+#include "ui/plugins/builtin/DeEsserEditor.hpp"
+#include "ui/plugins/builtin/FilterEditor.hpp"
 #include "ui/plugins/builtin/GateEditor.hpp"
 #include "ui/plugins/builtin/LimiterEditor.hpp"
+#include "ui/plugins/builtin/SaturatorEditor.hpp"
+#include "ui/plugins/builtin/TransientEditor.hpp"
+#include "ui/plugins/builtin/UtilityEditor.hpp"
 
 #include <vloom/engine/plugin/PluginInstance.hpp>
 
@@ -37,6 +43,12 @@ constexpr std::array kEditors{
     Entry{"vloom.compressor", &make<CompressorEditor>},
     Entry{"vloom.limiter", &make<LimiterEditor>},
     Entry{"vloom.gate", &make<GateEditor>},
+    Entry{"vloom.saturator", &make<SaturatorEditor>},
+    Entry{"vloom.utility", &make<UtilityEditor>},
+    Entry{"vloom.filter", &make<FilterEditor>},
+    Entry{"vloom.bitcrusher", &make<BitcrusherEditor>},
+    Entry{"vloom.deesser", &make<DeEsserEditor>},
+    Entry{"vloom.transient", &make<TransientEditor>},
 };
 
 const Entry* entryFor(const vloom::PluginInstance& instance)

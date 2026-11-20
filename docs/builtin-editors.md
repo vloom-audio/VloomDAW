@@ -120,3 +120,37 @@ in the same style, and note the difference in the class comment.
   attack, hold, release, hysteresis; footer: detector low cut and its
   frequency, Listen, open or closed (from the gain reduction: the engine
   does not report `dsp::Gate::isOpen()`).
+
+## Phase 2: tone editors
+
+Shared pieces they added (usable by any editor):
+
+- `ChoiceButtons`: a captioned row of joined buttons for a choice parameter
+  in the panel (bind it with `bind()` / `change()`).
+- `DisplayHelpers.hpp` (`display::`): the editor's settings by id
+  (`settingsOf()`), a choice's labels, the 20 Hz .. 20 kHz log axis with its
+  grid, and a wave path.
+- `core/EffectPreview.hpp`: pictures worked out with the effects' own code,
+  run offline on a test signal (a sine, hits, a steady stereo pair) or with
+  their maths (`dsp::Filter::magnitudeDb()`, the de-esser's biquads). Tested
+  in `tests/core/EffectPreviewTests.cpp`.
+
+The editors (each class comment lists its differences from the design):
+
+- `SaturatorEditor` (`vloom.saturator`): the shaping curve with a drive
+  handle, and a sine before and after; character (Soft, Tube, Tape, Hard),
+  drive, tone, output, mix; footer: oversampling, latency, output peak.
+- `UtilityEditor` (`vloom.utility`): gain per side, the stereo field of a
+  fan of panned sounds, balance, width and polarity; gain, pan, width, Mono,
+  Invert L / R; footer: Swap, DC block, output peak.
+- `FilterEditor` (`vloom.filter`, 640 x 420): the response with a cutoff /
+  resonance handle; type, frequency, resonance, drive; footer: slope, output
+  peak.
+- `BitcrusherEditor` (`vloom.bitcrusher`): a sine before and after, the
+  quantizer's levels; bits, downsample, jitter, drive, mix, anti-alias;
+  footer: dither, rate, output, peak.
+- `DeEsserEditor` (`vloom.deesser`): the output spectrum, the estimated input,
+  the detection band with the reduction, a frequency / threshold handle;
+  frequency, threshold, range, Listen; footer: mode, reduction.
+- `TransientEditor` (`vloom.transient`): four hits before and after the
+  shaper; attack, sustain, output, mix; footer: speed, output peak.
