@@ -5,6 +5,8 @@
 #include "ui/Theme.hpp"
 #include "ui/plugins/ParameterText.hpp"
 #include "ui/plugins/PresetBar.hpp"
+#include "ui/plugins/builtin/ParameterControl.hpp"
+#include "ui/plugins/builtin/Readout.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
 #include "ui/widgets/ToggleSwitch/ToggleSwitch.hpp"
 
@@ -21,8 +23,6 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
-#include <QSignalBlocker>
-#include <QSpinBox>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QToolButton>
@@ -569,7 +569,40 @@ struct Card {
     QVBoxLayout* body = nullptr;
 };
 
-Card makeCard(const QString& title, QWidget* parent)
+/// The design's dot before a sound source's name (the sub, the noise, the filter).
+class SourceDot final : public QWidget {
+public:
+    explicit SourceDot(QWidget* parent)
+        : QWidget(parent)
+    {
+        setFixedSize(8, 8);
+    }
+
+protected:
+    void paintEvent(QPaintEvent* /*event*/) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(Theme::colors().accent);
+        p.drawEllipse(QRectF(rect()));
+    }
+};
+
+/// A control's spec for the shell's Readout, from a synth parameter.
+ControlSpec readoutSpec(std::uint32_t id)
+{
+    const vloom::dsp::ParameterSpec& parameter = Synth::parameters()[id];
+    ControlSpec spec;
+    spec.minValue = parameter.minValue;
+    spec.maxValue = parameter.maxValue;
+    spec.defaultValue = parameter.defaultValue;
+    spec.stepped = parameter.stepped;
+    spec.unit = parameter.unit;
+    return spec;
+}
+
+Card makeCard(const QString& title, QWidget* parent, bool dot = false)
 {
     Card card;
     card.frame = new QFrame(parent);
@@ -578,7 +611,9 @@ Card makeCard(const QString& title, QWidget* parent)
     card.body->setContentsMargins(10, 8, 10, 10);
     card.body->setSpacing(8);
     card.heading = new QHBoxLayout;
-    card.heading->setSpacing(8);
+    card.heading->setSpacing(dot ? 6 : 8);
+    if (dot)
+        card.heading->addWidget(new SourceDot(card.frame));
     auto* name = new QLabel(title, card.frame);
     name->setObjectName(QStringLiteral("synthCardTitle"));
     card.heading->addWidget(name);
@@ -705,14 +740,16 @@ SynthEditorWindow::SynthEditorWindow(
         header);
     headerRow->addWidget(presets_);
     rightRow->addStretch(1);
-    // The volume: the same small knob as the master volume in the transport bar.
-    const vloom::dsp::ParameterSpec& volume = spec(Synth::kVolume);
-    auto* volumeKnob = new Knob(tr("VOL"), volume.minValue, volume.maxValue, volume.defaultValue, header);
-    volumeKnob->setDescription(tr("Volume"));
-    volumeKnob->setValueText([](double value) { return valueText(Synth::kVolume, value); });
-    connect(volumeKnob, &Knob::valueChanged, this, [this](double value) { change(Synth::kVolume, value); });
-    syncs_.emplace_back([this, volumeKnob] { volumeKnob->setValue(value(Synth::kVolume)); });
-    rightRow->addWidget(volumeKnob);
+    // The volume, as the design reads it ("Volume −6.0 dB"): drag, scroll or
+    // double-click it as a knob.
+    auto* volume = new Readout(tr("Volume"), header);
+    volume->setSpec(readoutSpec(Synth::kVolume));
+    volume->setWidestText(QStringLiteral("-60.0 dB"));
+    volume->setToolTip(tr("Volume: drag up or down, scroll, or double-click for the default"));
+    connect(volume, &ParameterControl::valueEdited, this,
+        [this](double value) { change(Synth::kVolume, value); });
+    syncs_.emplace_back([this, volume] { volume->setValue(value(Synth::kVolume)); });
+    rightRow->addWidget(volume, 0, Qt::AlignVCenter);
     headerRow->addWidget(right, 1);
     column->addWidget(header);
 
@@ -721,6 +758,10 @@ SynthEditorWindow::SynthEditorWindow(
     column->addWidget(pages, 1);
 
     syncControls();
+    // The window holds the focus when it opens, so no control shows a focus
+    // mark until Tab moves to it (as BuiltinEditorWindow).
+    setFocusPolicy(Qt::StrongFocus);
+    setFocus(Qt::OtherFocusReason);
     setFixedWidth(kWindowWidth);
     setFixedHeight(sizeHint().height());
 }
@@ -776,7 +817,7 @@ void SynthEditorWindow::syncControls()
 }
 
 QWidget* SynthEditorWindow::knob(
-    std::uint32_t id, const QString& caption, Scale scale, int dial, int cellWidth)
+    std::uint32_t id, const QString& caption, Scale scale, int dial, int cellWidth, const QColor& arc)
 {
     const vloom::dsp::ParameterSpec& parameter = spec(id);
     // Octaves and Cubic: the knob turns 0 .. 1 and the value follows.
@@ -811,6 +852,8 @@ QWidget* SynthEditorWindow::knob(
         ? new Knob(caption, parameter.minValue, parameter.maxValue, parameter.defaultValue, cell)
         : new Knob(caption, 0.0, 1.0, toPosition(parameter.defaultValue), cell);
     dialKnob->setDialSize(dial);
+    if (arc.isValid())
+        dialKnob->setArcColor(arc);
     dialKnob->setValueText([id, toValue](double position) { return valueText(id, toValue(position)); });
     stack->addWidget(dialKnob, 0, Qt::AlignHCenter);
     auto* reading = new QLabel(cell);
@@ -837,10 +880,16 @@ QWidget* SynthEditorWindow::toggle(std::uint32_t id, const QString& what)
     return button;
 }
 
-QWidget* SynthEditorWindow::flag(std::uint32_t id, const QString& text, const QString& what)
+QWidget* SynthEditorWindow::flag(
+    std::uint32_t id, const QString& text, const QString& what, const QColor& colour)
 {
     auto* button = new QToolButton(this);
     button->setObjectName(QStringLiteral("synthFlag"));
+    // On: filled in the source's colour, as the design's A, B and S.
+    if (colour.isValid())
+        button->setStyleSheet(
+            QStringLiteral("QToolButton#synthFlag:checked { background: %1; border-color: %1; color: %2; }")
+                .arg(colour.name(), Theme::colors().base.name()));
     button->setText(text);
     button->setCheckable(true);
     button->setFocusPolicy(Qt::NoFocus);
@@ -860,25 +909,6 @@ QWidget* SynthEditorWindow::choice(std::uint32_t id, const QStringList& names, c
     box->setAccessibleName(what);
     connect(box, &QComboBox::activated, this, [this, id](int index) { change(id, index); });
     syncs_.emplace_back([this, id, box] { box->setCurrentIndex(static_cast<int>(std::lround(value(id)))); });
-    return box;
-}
-
-QWidget* SynthEditorWindow::number(std::uint32_t id, const QString& what)
-{
-    const vloom::dsp::ParameterSpec& parameter = spec(id);
-    auto* box = new QSpinBox(this);
-    box->setObjectName(QStringLiteral("synthNumber"));
-    box->setRange(static_cast<int>(parameter.minValue), static_cast<int>(parameter.maxValue));
-    box->setButtonSymbols(QAbstractSpinBox::NoButtons);
-    box->setAlignment(Qt::AlignHCenter);
-    box->setFixedWidth(40);
-    box->setToolTip(what);
-    box->setAccessibleName(what);
-    connect(box, &QSpinBox::valueChanged, this, [this, id](int whole) { change(id, whole); });
-    syncs_.emplace_back([this, id, box] {
-        const QSignalBlocker quiet(box);
-        box->setValue(static_cast<int>(std::lround(value(id))));
-    });
     return box;
 }
 
@@ -1026,7 +1056,7 @@ QWidget* SynthEditorWindow::matrixPage()
 QWidget* SynthEditorWindow::sourceCard(const QString& title, bool noise, std::uint32_t first,
     std::uint32_t second, const QString& firstCaption, const QString& secondCaption)
 {
-    const Card card = makeCard(title, this);
+    const Card card = makeCard(title, this, true);
     card.frame->setFixedWidth(92);
     auto* picture
         = new SourcePicture([this](std::uint32_t id) { return value(id); }, noise, second, card.frame);
@@ -1071,12 +1101,17 @@ QWidget* SynthEditorWindow::oscillatorCard(const QString& letter, std::uint32_t 
 
     auto* pitch = new QHBoxLayout;
     pitch->setSpacing(4);
+    pitch->setSpacing(12);
+    // Readouts, as the design's "Octave 0  Semi 0  Fine +7 ct": drag, scroll or double-click.
     const auto field = [this, frame, pitch](const QString& name, std::uint32_t id, const QString& what) {
-        auto* label = new QLabel(name, frame);
-        label->setObjectName(QStringLiteral("synthHint"));
-        pitch->addWidget(label);
-        pitch->addWidget(number(id, what));
-        pitch->addSpacing(6);
+        auto* reading = new Readout(name, frame);
+        reading->setSpec(readoutSpec(id));
+        reading->setFormatter([id](double v) { return valueText(id, v); });
+        reading->setWidestText(QStringLiteral("+100 ct"));
+        reading->setToolTip(what);
+        connect(reading, &ParameterControl::valueEdited, this, [this, id](double v) { change(id, v); });
+        syncs_.emplace_back([this, id, reading] { reading->setValue(value(id)); });
+        pitch->addWidget(reading);
     };
     field(tr("Octave"), onId + 4, tr("Octaves up or down"));
     field(tr("Semi"), onId + 5, tr("Semitones up or down"));
@@ -1087,19 +1122,20 @@ QWidget* SynthEditorWindow::oscillatorCard(const QString& letter, std::uint32_t 
     auto* knobs = new QHBoxLayout;
     knobs->setSpacing(0);
     constexpr int kCell = 46;
-    knobs->addWidget(knob(onId + 2, tr("Position"), Scale::Linear, kDial, kCell));
-    knobs->addWidget(knob(onId + 3, tr("Warp"), Scale::Linear, kDial, kCell));
-    knobs->addWidget(knob(onId + 7, tr("Unison"), Scale::Linear, kDial, kCell));
-    knobs->addWidget(knob(onId + 8, tr("Detune"), Scale::Linear, kDial, kCell));
-    knobs->addWidget(knob(onId + 9, tr("Pan"), Scale::Linear, kDial, kCell));
-    knobs->addWidget(knob(onId + 10, tr("Level"), Scale::Linear, kDial, kCell));
+    const QColor colour = Theme::patternColor(hue); // the design draws an oscillator's arcs in its colour
+    knobs->addWidget(knob(onId + 2, tr("Position"), Scale::Linear, kDial, kCell, colour));
+    knobs->addWidget(knob(onId + 3, tr("Warp"), Scale::Linear, kDial, kCell, colour));
+    knobs->addWidget(knob(onId + 7, tr("Unison"), Scale::Linear, kDial, kCell, colour));
+    knobs->addWidget(knob(onId + 8, tr("Detune"), Scale::Linear, kDial, kCell, colour));
+    knobs->addWidget(knob(onId + 9, tr("Pan"), Scale::Linear, kDial, kCell, colour));
+    knobs->addWidget(knob(onId + 10, tr("Level"), Scale::Linear, kDial, kCell, colour));
     body->addLayout(knobs);
     return frame;
 }
 
 QWidget* SynthEditorWindow::filterCard()
 {
-    const Card card = makeCard(tr("Filter"), this);
+    const Card card = makeCard(tr("Filter"), this, true);
     card.body->setSpacing(6);
     card.heading->addWidget(
         choice(Synth::kFilterType, {tr("Low 12"), tr("Band 12"), tr("High 12")}, tr("Filter type")));
@@ -1118,11 +1154,14 @@ QWidget* SynthEditorWindow::filterCard()
     input->setObjectName(QStringLiteral("synthHint"));
     routes->addWidget(input);
     routes->addStretch(1);
-    routes->addWidget(flag(Synth::kRouteA, QStringLiteral("A"), tr("Oscillator A goes through the filter")));
-    routes->addWidget(flag(Synth::kRouteB, QStringLiteral("B"), tr("Oscillator B goes through the filter")));
-    routes->addWidget(
-        flag(Synth::kRouteSub, QStringLiteral("S"), tr("The sub oscillator goes through the filter")));
-    routes->addWidget(flag(Synth::kRouteNoise, QStringLiteral("N"), tr("The noise goes through the filter")));
+    routes->addWidget(flag(Synth::kRouteA, QStringLiteral("A"), tr("Oscillator A goes through the filter"),
+        Theme::patternColor(kHueA)));
+    routes->addWidget(flag(Synth::kRouteB, QStringLiteral("B"), tr("Oscillator B goes through the filter"),
+        Theme::patternColor(kHueB)));
+    routes->addWidget(flag(Synth::kRouteSub, QStringLiteral("S"),
+        tr("The sub oscillator goes through the filter"), Theme::colors().text));
+    routes->addWidget(flag(Synth::kRouteNoise, QStringLiteral("N"), tr("The noise goes through the filter"),
+        Theme::colors().text));
     card.body->addLayout(routes);
 
     auto* knobs = new QHBoxLayout;

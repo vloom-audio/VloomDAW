@@ -7,12 +7,14 @@
 #include "ui/plugins/builtin/CompressorEditor.hpp"
 #include "ui/plugins/builtin/DeEsserEditor.hpp"
 #include "ui/plugins/builtin/DelayEditor.hpp"
+#include "ui/plugins/builtin/DrumSamplerEditor.hpp"
 #include "ui/plugins/builtin/FilterEditor.hpp"
 #include "ui/plugins/builtin/FlangerEditor.hpp"
 #include "ui/plugins/builtin/GateEditor.hpp"
 #include "ui/plugins/builtin/LimiterEditor.hpp"
 #include "ui/plugins/builtin/PhaserEditor.hpp"
 #include "ui/plugins/builtin/ReverbEditor.hpp"
+#include "ui/plugins/builtin/SamplerEditor.hpp"
 #include "ui/plugins/builtin/SaturatorEditor.hpp"
 #include "ui/plugins/builtin/TransientEditor.hpp"
 #include "ui/plugins/builtin/TremoloEditor.hpp"
@@ -61,6 +63,8 @@ constexpr std::array kEditors{
     Entry{"vloom.flanger", &make<FlangerEditor>},
     Entry{"vloom.phaser", &make<PhaserEditor>},
     Entry{"vloom.tremolo", &make<TremoloEditor>},
+    Entry{"vloom.sampler", &make<SamplerEditor>},
+    Entry{"vloom.drums", &make<DrumSamplerEditor>},
 };
 
 const Entry* entryFor(const vloom::PluginInstance& instance)

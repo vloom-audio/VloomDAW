@@ -5,6 +5,7 @@
 #include "core/ParameterChoices.hpp"
 #include "ui/DroppedFiles.hpp"
 #include "ui/plugins/ParameterText.hpp"
+#include "ui/plugins/SampleFiles.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
 
 #include <vloom/engine/plugin/PluginInstance.hpp>
@@ -15,7 +16,6 @@
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -27,7 +27,6 @@
 #include <QStyle>
 #include <QTimer>
 #include <QToolButton>
-#include <QToolTip>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -60,9 +59,7 @@ public:
         auto* pick = new QPushButton(tr("Load sample…"), this);
         pick->setToolTip(tr("Pick an audio file, or drop one here from the browser"));
         connect(pick, &QPushButton::clicked, this, [this] {
-            const QString start = path_.isEmpty() ? QDir::homePath() : QFileInfo(path_).absolutePath();
-            const QString file = QFileDialog::getOpenFileName(this, tr("Load Sample"), start,
-                tr("Audio files (*.wav *.mp3 *.flac *.ogg *.aif *.aiff *.m4a *.opus);;All files (*)"));
+            const QString file = chooseSampleFile(this, path_);
             if (!file.isEmpty())
                 load_(slot_, file);
         });
@@ -370,22 +367,13 @@ ParameterEditorWindow::ParameterEditorWindow(std::shared_ptr<vloom::PluginInstan
 
 void ParameterEditorWindow::loadSample(int slot, const QString& path)
 {
-    QApplication::setOverrideCursor(Qt::WaitCursor); // a file other than WAV is decoded first
-    std::string error;
-    const bool loaded = instance_->processor().loadSample(slot, path.toStdString(), &error);
-    QApplication::restoreOverrideCursor();
+    QWidget* anchor = slot >= 0 && static_cast<std::size_t>(slot) < slots_.size()
+        ? slots_[static_cast<std::size_t>(slot)]
+        : nullptr;
+    const bool loaded = loadSampleFile(instance_->processor(), slot, path, anchor);
     refreshSampleSlots();
-    if (loaded) {
+    if (loaded)
         emit edited();
-        return;
-    }
-    // The slot keeps what it had; say why next to it.
-    if (slot >= 0 && static_cast<std::size_t>(slot) < slots_.size()) {
-        QWidget* control = slots_[static_cast<std::size_t>(slot)];
-        QToolTip::showText(control->mapToGlobal(QPoint(0, control->height())),
-            tr("Could not load %1: %2").arg(QFileInfo(path).fileName(), QString::fromStdString(error)),
-            control);
-    }
 }
 
 void ParameterEditorWindow::refreshSampleSlots()

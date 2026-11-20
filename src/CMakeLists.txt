@@ -37,6 +37,7 @@ target_sources(vloomdaw_core PRIVATE
     core/Project.cpp
     core/ProjectFile.cpp
     core/SampleFolder.cpp
+    core/SampleView.cpp
     core/Scales.cpp
     core/MdxSpectrogram.cpp
     core/StemChunks.cpp
@@ -205,6 +206,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/DelayEditor.hpp
     ui/plugins/builtin/DisplayHelpers.cpp
     ui/plugins/builtin/DisplayHelpers.hpp
+    ui/plugins/builtin/DrumSamplerEditor.cpp
+    ui/plugins/builtin/DrumSamplerEditor.hpp
     ui/plugins/builtin/EditorStyle.cpp
     ui/plugins/builtin/EditorStyle.hpp
     ui/plugins/builtin/FilterEditor.cpp
@@ -229,6 +232,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/Readout.hpp
     ui/plugins/builtin/ReverbEditor.cpp
     ui/plugins/builtin/ReverbEditor.hpp
+    ui/plugins/builtin/SampleParts.cpp
+    ui/plugins/builtin/SampleParts.hpp
+    ui/plugins/builtin/SamplerEditor.cpp
+    ui/plugins/builtin/SamplerEditor.hpp
     ui/plugins/builtin/SaturatorEditor.cpp
     ui/plugins/builtin/SaturatorEditor.hpp
     ui/plugins/builtin/TimeEffectParts.cpp
@@ -251,6 +258,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/ParameterEditorWindow.hpp
     ui/plugins/ParameterText.cpp
     ui/plugins/ParameterText.hpp
+    ui/plugins/SampleFiles.cpp
+    ui/plugins/SampleFiles.hpp
     ui/plugins/SynthEditorWindow.cpp
     ui/plugins/SynthEditorWindow.hpp
     ui/plugins/PluginEditorWindow.cpp
