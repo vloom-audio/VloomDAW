@@ -43,6 +43,7 @@ target_sources(vloomdaw_core PRIVATE
     core/StemSpectrogram.cpp
     core/TapTempo.cpp
     core/ThemePresets.cpp
+    core/TimeEffects.cpp
     core/TrackRouting.cpp
     core/TransportLayout.cpp
     core/UndoHistory.cpp
