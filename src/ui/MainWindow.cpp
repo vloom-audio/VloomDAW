@@ -7264,11 +7264,12 @@ void MainWindow::setEffectBypassed(std::size_t track, std::size_t slot, bool byp
     updateMixer();
     syncEffectCounts();
     const auto editor = pluginEditors_.find(mixer_.track(track).effects[slot].instance);
-    if (editor != pluginEditors_.end())
-        if (auto* eq = qobject_cast<EqEditorWindow*>(editor->second.data()))
-            eq->setBypassed(bypassed);
-        else if (auto* builtin = qobject_cast<BuiltinEditorWindow*>(editor->second.data()))
-            builtin->setBypassed(bypassed);
+    if (editor == pluginEditors_.end())
+        return;
+    if (auto* eq = qobject_cast<EqEditorWindow*>(editor->second.data()))
+        eq->setBypassed(bypassed);
+    else if (auto* builtin = qobject_cast<BuiltinEditorWindow*>(editor->second.data()))
+        builtin->setBypassed(bypassed);
 }
 
 std::vector<std::uint64_t> MainWindow::pluginsInUse() const
