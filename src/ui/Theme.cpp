@@ -817,6 +817,8 @@ QFrame#eqBandPanel QLabel#eqBandShape { color: @textDim; }
 QFrame#eqBandPanel QLabel#parameterValue { font-weight: 600; }
 QFrame#eqBandPanel QToolButton { border: 1px solid @border; border-radius: 6px; padding: 4px; }
 QFrame#eqBandPanel QToolButton:hover { background: @raised; }
+QLabel#sampleFile { color: @textDim; }
+QLabel#sampleFile[missing="true"] { color: @danger; }
 
 QWidget#emptyState QLabel#emptyTitle { font-size: 22pt; font-weight: 600; }
 QWidget#emptyState QLabel#emptyHint { color: @textDim; }

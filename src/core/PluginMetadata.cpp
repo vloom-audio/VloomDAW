@@ -349,9 +349,11 @@ std::string detectPluginSubCategory(const PluginInfo& plugin)
         return "Synth / Lead";
     }
 
-    // Effects: check user category override first, then probed category + producer name heuristics.
-    if (!plugin.userCategory.empty() && plugin.userCategory != "Other"
-        && plugin.userCategory != "Uncategorized") {
+    // Effects: check user category override first (and a built-in's own
+    // category, which is exact), then probed category + producer name heuristics.
+    if ((!plugin.userCategory.empty() && plugin.userCategory != "Other"
+            && plugin.userCategory != "Uncategorized")
+        || plugin.format == PluginFormat::Builtin) {
         if (cat == "Reverb")
             return "Reverb";
         if (cat == "Delay")
