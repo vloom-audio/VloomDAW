@@ -474,8 +474,11 @@ void BuiltinEditorWindow::readMeters()
             reading.reductionDb = bypassed_ ? 0.0 : std::max(0.0, static_cast<double>(*reduction));
     }
     meter(reading);
-    // Sound again: the animated displays wake up.
-    if (running && !awake_ && !animated_.empty()) {
+    // Sound again (put out, or heard by a plugin that reports its input):
+    // the animated displays wake up.
+    const std::optional<double> heard = animated_.empty() || awake_ ? std::nullopt : inputPeakDb();
+    const bool hearing = heard.has_value() && *heard > motion::AudioFeatures::kSilenceDb;
+    if ((running || hearing) && !awake_ && !animated_.empty()) {
         awake_ = true;
         updateAnimation();
     }
@@ -551,6 +554,7 @@ void BuiltinEditorWindow::frame(double dt)
         if (const auto reduction = instance_->processor().gainReductionDb())
             input.reductionDb = bypassed_ ? 0.0 : std::max(0.0, static_cast<double>(*reduction));
     }
+    input.inputPeakDb = inputPeakDb();
     features_.update(input, dt);
 
     bool moving = false;

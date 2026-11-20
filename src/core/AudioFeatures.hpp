@@ -187,7 +187,9 @@ struct AudioInput {
     /// Later: the left and right output on their own (empty: unknown).
     std::span<const float> left;
     std::span<const float> right;
-    /// Later: the input's peak (dB full scale); nullopt: unknown.
+    /// The input's peak (dB full scale); nullopt: unknown. Above
+    /// kSilenceDb it counts as sound (settled() stays false) even when the
+    /// output is silent. A plugin that reports it fills it (a muted tuner).
     std::optional<double> inputPeakDb;
 };
 

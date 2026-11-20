@@ -190,6 +190,10 @@ protected:
     /// Asks for frames again although no sound runs (a parameter changed
     /// that a display moves to); they stop again once it has settled.
     void wakeAnimation();
+    /// The peak of what the plugin hears (dB full scale), for a plugin that
+    /// reports it: it counts as sound for the animation even when the output
+    /// is silent (motion::AudioInput::inputPeakDb). Default: unknown.
+    [[nodiscard]] virtual std::optional<double> inputPeakDb() const { return std::nullopt; }
 
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
