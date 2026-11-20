@@ -26,6 +26,7 @@ target_sources(vloomdaw_core PRIVATE
     core/NoteEdits.cpp
     core/NoteHistory.cpp
     core/NoteNames.cpp
+    core/ParameterChoices.cpp
     core/PluginMetadata.cpp
     core/PluginScanner.cpp
     core/PositionFormat.cpp

@@ -73,32 +73,63 @@ PluginHost::Loaded create(const std::shared_ptr<Library>& library, std::string_v
 
 } // namespace
 
+BuiltinCategory builtinCategory(const vloom::PluginInfo& builtin)
+{
+    const std::string& kind = builtin.category; // as vloom-engine names it
+    if (builtin.kind == vloom::PluginInfo::Kind::Instrument || kind == "Synth" || kind == "Sampler"
+        || kind == "Drums") {
+        // The plugin lists tell instruments from effects by category, and
+        // their type by tags (core/PluginMetadata).
+        if (kind == "Drums")
+            return {"Instrument", "Instrument|Drum"};
+        if (kind == "Sampler")
+            return {"Instrument", "Instrument|Sampler"};
+        return {"Instrument", "Instrument|Synth"};
+    }
+    // The engine's groups, split into the app's own categories.
+    std::string category = "Utility";
+    if (kind == "Dynamics")
+        category = "Dynamics";
+    else if (kind == "EQ/Filter")
+        category = builtin.id == "vloom.eq" ? "EQ" : "Filter";
+    else if (kind == "Delay/Reverb")
+        category = builtin.id == "vloom.reverb" ? "Reverb" : "Delay";
+    else if (kind == "Modulation")
+        category = "Modulation";
+    else if (kind == "Distortion")
+        category = "Distortion";
+    return {category, "Fx|" + category};
+}
+
 std::vector<PluginInfo> builtinPlugins()
 {
-    // What each does, for the lists' categories (core/PluginMetadata).
-    const auto category = [](std::string_view id) -> std::string {
-        if (id == "vloom.eq")
-            return "EQ";
-        return "Utility";
-    };
-    // The plugin lists tell instruments from effects by category and tags.
-    const auto instrument = [](const vloom::PluginInfo& builtin) {
-        return builtin.kind == vloom::PluginInfo::Kind::Instrument;
-    };
     std::vector<PluginInfo> list;
     for (const vloom::PluginInfo& builtin : vloom::builtinProcessors()) {
+        const BuiltinCategory kind = builtinCategory(builtin);
         PluginInfo info;
         info.name = builtin.name;
         info.format = PluginFormat::Builtin;
         info.path = builtin.id;
         info.vendor = builtin.vendor;
-        info.category = instrument(builtin) ? "Instrument" : category(builtin.id);
+        info.category = kind.category;
         info.version = builtin.version;
-        info.tags = instrument(builtin) ? "Instrument|Synth" : "Fx";
+        info.tags = kind.tags;
         info.probe = PluginInfo::Probe::Ok;
         list.push_back(std::move(info));
     }
     return list;
+}
+
+std::vector<std::string> sampleProblems(const vloom::AudioProcessor& processor)
+{
+    std::vector<std::string> problems;
+    for (int slot = 0; slot < processor.sampleSlotCount(); ++slot) {
+        const vloom::SampleSlotInfo info = processor.sampleSlot(slot);
+        if (info.path.empty() || info.error.empty())
+            continue;
+        problems.push_back(info.name + ": " + info.error);
+    }
+    return problems;
 }
 
 PluginHost::~PluginHost()
@@ -131,6 +162,10 @@ PluginHost::Loaded PluginHost::load(PluginFormat format, const std::filesystem::
     if (processor == nullptr)
         return loaded;
 
+    // Built-ins that play samples read the files the app decodes (MP3,
+    // FLAC, ...) through the resolver, also when a state is loaded.
+    if (sampleResolver_ && processor->sampleSlotCount() > 0)
+        processor->setSampleFileResolver(sampleResolver_);
     auto instance = std::make_shared<vloom::PluginInstance>(std::move(processor));
     if (!instance->activate(sampleRate, vloom::kMaxBlockFrames)) {
         loaded.error
@@ -162,6 +197,14 @@ PluginHost::Loaded PluginHost::loadWithState(PluginFormat format, const std::fil
         lastStates_[loaded.handle].assign(state.begin(), state.end());
     }
     return loaded;
+}
+
+void PluginHost::setSampleFileResolver(vloom::SampleFileResolver resolver)
+{
+    sampleResolver_ = std::move(resolver);
+    for (auto& [handle, instance] : instances_)
+        if (instance->processor().sampleSlotCount() > 0)
+            instance->processor().setSampleFileResolver(sampleResolver_);
 }
 
 std::shared_ptr<vloom::PluginInstance> PluginHost::instance(std::uint64_t handle) const
