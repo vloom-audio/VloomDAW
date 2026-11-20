@@ -236,6 +236,10 @@ peaks. The pictures' maths (peaks, the dsp's envelope, the time line) is in
   needle is smoothed (`NeedleSmoother`, 80 ms) and jumps on a new note.
   Reference, Mute output; footer: Input (a choice) and the level. The maths
   is in `core/TunerReading.hpp`, tested in `tests/core/TunerReadingTests.cpp`.
+  Animated: the needle eases between readings with a short glowing trail,
+  the zone blooms once the pitch holds in tune for 0.25 s, the note glows
+  with the input level and pulses on a new note (its `level_db` counts as
+  sound: `inputPeakDb()`).
 - `AnalyzerEditor` (`vloom.analyzer`): the spectrum, 20 Hz .. 20 kHz on the
   log axis, filled, with a dB grid (0 dB at the top, Range tall), the
   peak-hold line (double-click to clear it) and a cursor readout. Freeze in
@@ -245,7 +249,11 @@ peaks. The pictures' maths (peaks, the dsp's envelope, the time line) is in
   `core/AnalyzerSpectrum` (vloom-dsp's `Fft`, Hann window, a one-pole power
   average over `Analyzer::averagingSeconds()`, `Analyzer::tiltDb()`), tested
   in `tests/core/AnalyzerSpectrumTests.cpp`. The scope keeps 8192 frames,
-  so Resolution 16384 is analysed at 8192.
+  so Resolution 16384 is analysed at 8192. Animated: each analysis leaves
+  an afterimage that sinks and fades as mist under the live line (longer
+  at a slow Speed), the held line sparkles where a new peak is set, the
+  loudest point and the cursor's dot glow with the level; Freeze holds it
+  all still.
 
 ## Animation
 
@@ -279,6 +287,10 @@ interface), `AnimationPaint.hpp` (drawing helpers) and
   false, every display gets `setAnimationOn(false)` and draws its static
   picture. `VLOOMDAW_IGNORE_REDUCED_MOTION=1` ignores the system's
   preference (renders and measurements on a machine with it set).
+- **What the plugin hears**: an editor whose plugin reports its input
+  level overrides `inputPeakDb()`; above silence it counts as sound (it
+  wakes the clock and keeps `settled()` false) although the output is
+  silent. The tuner does (it mutes its output by default).
 - **Later**: `motion::AudioInput` has room for what the engine may report
   (left and right on their own, the input level). Fill them in
   `BuiltinEditorWindow::frame()` when the engine has them; the displays

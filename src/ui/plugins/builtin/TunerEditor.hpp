@@ -7,6 +7,8 @@
 
 #include <QElapsedTimer>
 
+#include <optional>
+
 class QTimer;
 
 namespace vloomdaw {
@@ -21,7 +23,9 @@ class TunerDisplay;
 /// It reads the tuner's readouts (AudioProcessor::readoutValue(): frequency,
 /// note, cents, pitch flag, level) about 30 times a second while it shows,
 /// and smooths the needle a little (NeedleSmoother). No pitch, or the
-/// tuner bypassed: "—". Differences from the design: the needle turns the
+/// tuner bypassed: "—". The display animates with the readings (and the
+/// tuner's input level counts as sound, since it mutes its output by
+/// default). Differences from the design: the needle turns the
 /// level colour while in tune.
 class TunerEditor : public BuiltinEditorWindow {
     Q_OBJECT
@@ -33,6 +37,7 @@ public:
 protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
+    [[nodiscard]] std::optional<double> inputPeakDb() const override;
 
 private:
     void poll();
@@ -43,6 +48,8 @@ private:
     QTimer* timer_ = nullptr;
     QElapsedTimer sincePoll_;
     NeedleSmoother needle_;
+    float lastLevel_ = 0.0f; ///< the level readout last poll
+    double unchanged_ = 0.0; ///< s it has not changed: the tuner stopped running
     // Readout indices, looked up by id once; -1: the tuner has none.
     int frequencyIndex_ = -1;
     int noteIndex_ = -1;

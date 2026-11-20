@@ -3,6 +3,7 @@
 #include "ui/plugins/builtin/AnalyzerEditor.hpp"
 
 #include "core/ParameterScale.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
 #include "ui/plugins/builtin/DisplayHelpers.hpp"
@@ -17,14 +18,17 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPolygonF>
 #include <QToolButton>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <optional>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace vloomdaw {
 
@@ -54,7 +58,13 @@ int analysedSize(double resolution)
 
 /// The analyzer's picture: the spectrum on a log axis with its dB grid, the
 /// held line and a cursor readout.
-class AnalyzerDisplay : public QWidget {
+///
+/// Animated (docs/builtin-editors.md, "Animation"): each analysis leaves an
+/// afterimage that sinks and fades as a mist under the live line (faster at
+/// a faster Speed), the held line sparkles where a new peak is set, the
+/// loudest point and the cursor's dot glow with the level. Freeze holds it
+/// all still; no sound: it fades out with the spectrum.
+class AnalyzerDisplay : public QWidget, public Animated {
 public:
     AnalyzerDisplay(const AnalyzerSpectrum& spectrum, QWidget* parent)
         : QWidget(parent)
@@ -78,8 +88,280 @@ public:
         update();
     }
 
+    /// The spectrum was analysed again: reads its columns (animated only:
+    /// the static picture reads them as it paints) and repaints.
+    void refresh()
+    {
+        if (animationOn()) {
+            readColumns(true);
+            fresh_ = true;
+        }
+        if (!ticking_)
+            update(); // else the next frame repaints it
+    }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        ticking_ = false;
+        if (spectrum_.frozen())
+            return false; // Freeze: the picture holds still, the mist and sparks too
+        ticking_ = true;
+        level_ = audio.level();
+        const QRectF plot(0.0, kTopY, width(), height() - kTopY);
+        mist_.setArea(plot);
+        // The afterimage falls away with the spectrum's own averaging: a
+        // slow Speed lingers, a fast one clears quickly. It sinks as it fades.
+        const double seconds = std::clamp(0.5 + 2.0 * spectrum_.averagingSeconds(), 0.5, 2.5);
+        mist_.advance(motion::decayFactor(dt, seconds, 40.0),
+            QTransform::fromTranslate(0.0, kSinkPxPerSecond * dt), 0.5);
+        drift_ += QPointF(6.0 * dt, -10.0 * dt);
+        if (fresh_ && spectrum_.hasSignal() && !columns_.empty()) {
+            QColor ink = style::accent();
+            ink.setAlphaF(static_cast<float>(0.12 + 0.18 * audio.envelope()));
+            mapLine(line_);
+            mist_.ink([&](QPainter& p) {
+                p.setRenderHint(QPainter::Antialiasing);
+                QPen pen(ink, 1.0); // one buffer pixel: three display pixels, softened up
+                pen.setCosmetic(true);
+                p.setPen(pen);
+                p.drawPolyline(line_);
+            });
+        }
+        const bool analysed = fresh_;
+        fresh_ = false;
+        sparks_.advance(dt, [](auto& spark, double step) { spark.state.lift += kSparkRise * step; });
+        const double cursorTarget = cursor_ && spectrum_.hasSignal() ? 0.35 + 0.65 * level_ : 0.0;
+        cursorGlow_ = motion::approach(cursorGlow_, cursorTarget, dt, 0.08);
+        const bool moving = spectrum_.hasSignal() || mist_.isVisible() || sparks_.alive() > 0
+            || cursorGlow_ > kRest || level_ > kRest;
+        // Repainted at the rate the spectrum comes (about 30 a second): the
+        // whole plot is redrawn, so every other frame would double the cost
+        // for motion that is mostly the spectrum's own.
+        sincePaint_ += dt;
+        if (analysed || sincePaint_ >= kPaintSeconds) {
+            sincePaint_ = 0.0;
+            update();
+        }
+        return moving;
+    }
+
+    void rest() override
+    {
+        ticking_ = false;
+        mist_.clear();
+        sparks_.clear();
+        cursorGlow_ = 0.0;
+        level_ = 0.0;
+        fresh_ = false;
+        update();
+    }
+
+    void animationSwitched(bool on) override
+    {
+        if (on)
+            readColumns(false);
+        rest();
+    }
+
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
+    {
+        if (!animationOn()) {
+            paintStatic();
+            return;
+        }
+        const AnimationPaintTimer timer;
+        QPainter p(this);
+        grid_.draw(p, *this, motion_paint::keyWith(0, range_), [this](QPainter& layer) {
+            layer.setRenderHint(QPainter::Antialiasing);
+            layer.fillRect(rect(), style::background());
+            display::drawFrequencyGrid(layer, QRectF(0.0, 0.0, width(), height()), 14.0);
+            paintLevels(layer);
+        });
+        if (columns_.size() != columnCount())
+            readColumns(false);
+
+        mist_.paint(p, 0.9);
+        if (spectrum_.hasSignal() || spectrum_.peakHold()) {
+            mapLine(line_);
+            // The area under the line: not antialiased (its edge is the line).
+            const auto count = static_cast<qsizetype>(line_.size());
+            fill_.resize(count + 2);
+            std::copy(line_.cbegin(), line_.cend(), fill_.begin());
+            fill_[count] = QPointF(width(), height());
+            fill_[count + 1] = QPointF(0.0, height());
+            QColor shade = style::accent();
+            shade.setAlphaF(0.2f);
+            p.setPen(Qt::NoPen);
+            p.setBrush(shade);
+            p.drawPolygon(fill_);
+            p.setBrush(Qt::NoBrush);
+
+            // The loudest point glows with the level.
+            if (spectrum_.hasSignal() && level_ > kRest) {
+                const auto loudest = std::min_element(
+                    line_.cbegin(), line_.cend(), [](QPointF a, QPointF b) { return a.y() < b.y(); });
+                if (loudest != line_.cend())
+                    motion_paint::glowDot(p, *loudest, 22.0, style::accent(), 0.45 * level_);
+            }
+
+            // The live line, 1 px (a wide pen goes through the stroker).
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(style::accent(), 1.0));
+            p.drawPolyline(line_);
+
+            if (anyPeak_) {
+                mapPeak(peak_);
+                p.setPen(QPen(motion_paint::faded(style::text(), 0.7), 1.0));
+                p.drawPolyline(peak_);
+            }
+        }
+        paintSparks(p);
+        if (cursorGlow_ > kRest && cursor_) {
+            const double x = std::clamp(*cursor_, 0.0, static_cast<double>(width()));
+            motion_paint::glowDot(p, QPointF(x, yOf(cursorDb(x))), 16.0, style::text(), 0.6 * cursorGlow_);
+        }
+        paintCursor(p);
+    }
+
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QWidget::resizeEvent(event);
+        if (animationOn())
+            readColumns(false);
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        setCursorX(event->position().x());
+        QWidget::mouseMoveEvent(event);
+    }
+
+    void leaveEvent(QEvent* event) override
+    {
+        setCursorX(std::nullopt);
+        QWidget::leaveEvent(event);
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent* event) override
+    {
+        if (onReset)
+            onReset();
+        QWidget::mouseDoubleClickEvent(event);
+    }
+
+private:
+    static constexpr double kSinkPxPerSecond = 18.0; ///< the afterimage sinks
+    static constexpr double kSparkRise = 14.0; ///< px a second a spark floats up
+    static constexpr double kSparkLife = 0.6; ///< s
+    static constexpr double kSparkRiseDb = 1.0; ///< a held peak up this much: a spark
+    static constexpr int kSparkSpacing = 10; ///< columns between two sparks of one analysis
+    static constexpr std::size_t kSparksPerAnalysis = 6;
+    static constexpr double kRest = 0.003;
+    static constexpr double kPaintSeconds = 0.04; ///< the longest between two repaints
+
+    struct Spark {
+        double x = 0.0;
+        double db = 0.0; ///< where the held line was set
+        double lift = 0.0; ///< px it has floated up
+        double strength = 0.0; ///< 0 .. 1
+    };
+
+    [[nodiscard]] double yOf(double db) const
+    {
+        const double share = std::clamp((kTopDb - db) / range_, 0.0, 1.0);
+        return kTopY + share * (height() - kTopY);
+    }
+
+    [[nodiscard]] std::size_t columnCount() const
+    {
+        return static_cast<std::size_t>(std::floor(width() / kColumn)) + 1;
+    }
+
+    /// The level at column x.
+    [[nodiscard]] double cursorDb(double x) const
+    {
+        return spectrum_.levelDb(
+            display::hzAtX(x - kColumn / 2.0, 0.0, width()), display::hzAtX(x + kColumn / 2.0, 0.0, width()));
+    }
+
+    /// Reads the live and held levels of every column (each analysis, ~30 a
+    /// second, not each frame), and with `sparkle` spawns sparks where the
+    /// held line rose most.
+    void readColumns(bool sparkle)
+    {
+        const std::size_t count = columnCount();
+        if (columns_.size() != count) {
+            columns_.assign(count, AnalyzerSpectrum::kFloorDb);
+            held_.assign(count, AnalyzerSpectrum::kFloorDb);
+            line_.resize(static_cast<qsizetype>(count));
+            peak_.resize(static_cast<qsizetype>(count));
+            sparkle = false; // a new size: no old line to compare with
+        }
+        std::array<std::pair<double, std::size_t>, kSparksPerAnalysis> best{};
+        anyPeak_ = false;
+        for (std::size_t i = 0; i < count; ++i) {
+            const double x = static_cast<double>(i) * kColumn;
+            const double from = display::hzAtX(x - kColumn / 2.0, 0.0, width());
+            const double to = display::hzAtX(x + kColumn / 2.0, 0.0, width());
+            columns_[i] = spectrum_.levelDb(from, to);
+            const double held = spectrum_.peakDb(from, to);
+            anyPeak_ = anyPeak_ || held > AnalyzerSpectrum::kFloorDb;
+            const double rise = held - held_[i];
+            held_[i] = held;
+            if (!sparkle || rise < kSparkRiseDb || held <= kTopDb - range_)
+                continue;
+            // Keep the biggest rises, apart from each other: a neighbour's
+            // slot if one is near, else the weakest.
+            std::size_t slot = 0;
+            for (std::size_t k = 0; k < best.size(); ++k) {
+                if (best[k].first > 0.0 && i - best[k].second < static_cast<std::size_t>(kSparkSpacing)) {
+                    slot = k;
+                    break;
+                }
+                if (best[k].first < best[slot].first)
+                    slot = k;
+            }
+            if (rise > best[slot].first)
+                best[slot] = {rise, i};
+        }
+        for (const auto& [rise, index] : best) {
+            if (rise <= 0.0)
+                continue;
+            sparks_.spawn(Spark{.x = static_cast<double>(index) * kColumn,
+                              .db = held_[index],
+                              .lift = 0.0,
+                              .strength = std::min(1.0, 0.4 + rise / 12.0)},
+                kSparkLife);
+        }
+    }
+
+    void mapLine(QPolygonF& out) const
+    {
+        for (std::size_t i = 0; i < columns_.size(); ++i)
+            out[static_cast<qsizetype>(i)] = QPointF(static_cast<double>(i) * kColumn, yOf(columns_[i]));
+    }
+    void mapPeak(QPolygonF& out) const
+    {
+        for (std::size_t i = 0; i < held_.size(); ++i)
+            out[static_cast<qsizetype>(i)] = QPointF(static_cast<double>(i) * kColumn, yOf(held_[i]));
+    }
+
+    void paintSparks(QPainter& p) const
+    {
+        if (sparks_.alive() == 0)
+            return;
+        motion_paint::GlowBatch glow(p, style::text());
+        sparks_.forEach([&](const auto& spark) {
+            const double fade = 1.0 - spark.progress();
+            const QPointF at(spark.state.x, yOf(spark.state.db) - spark.state.lift);
+            glow.dot(at, 7.0, 0.55 * spark.state.strength * fade);
+            glow.dot(at, 2.5, spark.state.strength * fade);
+        });
+    }
+
+    /// The picture with the animation off (as the design has it).
+    void paintStatic()
     {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
@@ -131,32 +413,6 @@ protected:
         paintCursor(p);
     }
 
-    void mouseMoveEvent(QMouseEvent* event) override
-    {
-        setCursorX(event->position().x());
-        QWidget::mouseMoveEvent(event);
-    }
-
-    void leaveEvent(QEvent* event) override
-    {
-        setCursorX(std::nullopt);
-        QWidget::leaveEvent(event);
-    }
-
-    void mouseDoubleClickEvent(QMouseEvent* event) override
-    {
-        if (onReset)
-            onReset();
-        QWidget::mouseDoubleClickEvent(event);
-    }
-
-private:
-    [[nodiscard]] double yOf(double db) const
-    {
-        const double share = std::clamp((kTopDb - db) / range_, 0.0, 1.0);
-        return kTopY + share * (height() - kTopY);
-    }
-
     /// The dB grid, labelled on the right.
     void paintLevels(QPainter& p) const
     {
@@ -187,7 +443,15 @@ private:
         QPen dashed(guide, 1.0);
         dashed.setDashPattern({3.0, 3.0});
         p.setPen(dashed);
-        p.drawLine(QPointF(x, 0.0), QPointF(x, height()));
+        if (animationOn()) {
+            // Painted each frame: on whole pixels, not antialiased (cheaper).
+            p.setRenderHint(QPainter::Antialiasing, false);
+            const double column = std::floor(x) + 0.5;
+            p.drawLine(QPointF(column, 0.0), QPointF(column, height()));
+            p.setRenderHint(QPainter::Antialiasing);
+        } else {
+            p.drawLine(QPointF(x, 0.0), QPointF(x, height()));
+        }
         p.setPen(Qt::NoPen);
         p.setBrush(style::text());
         p.drawEllipse(QPointF(x, yOf(db)), 5.0, 5.0);
@@ -210,6 +474,23 @@ private:
     const AnalyzerSpectrum& spectrum_;
     double range_ = 72.0;
     std::optional<double> cursor_;
+
+    // Animated only: the columns read at each analysis, and the motion.
+    std::vector<double> columns_; ///< the live level of each column, dB
+    std::vector<double> held_; ///< the held level of each column, dB
+    bool anyPeak_ = false;
+    bool fresh_ = false; ///< an analysis not yet inked into the mist
+    bool ticking_ = false; ///< frames come (and repaint): refresh() need not
+    QPolygonF line_; ///< reused each paint: no allocation a frame
+    QPolygonF peak_;
+    QPolygonF fill_;
+    double level_ = 0.0; ///< the output's level (AudioFeatures::level())
+    double cursorGlow_ = 0.0;
+    double sincePaint_ = 0.0; ///< s
+    QPointF drift_; ///< the mist's noise, drifting
+    motion_paint::TrailBuffer mist_{0.25};
+    motion::ParticlePool<Spark, 48> sparks_;
+    motion_paint::LayerCache grid_;
 };
 
 AnalyzerEditor::AnalyzerEditor(
@@ -231,9 +512,10 @@ AnalyzerEditor::AnalyzerEditor(
         tr("The spectrum from 20 Hz to 20 kHz with its held peaks; double-click to clear them"));
     display_->onReset = [this] {
         spectrum_.clearPeaks();
-        display_->update();
+        display_->refresh();
     };
     setDisplay(display_);
+    animate(display_);
 
     const std::vector<vloom::ReadoutInfo> readouts = this->instance().processor().readouts();
     for (std::size_t i = 0; i < readouts.size(); ++i)
@@ -357,7 +639,7 @@ void AnalyzerEditor::meter(const Meter& reading)
         ? static_cast<double>(instance().processor().readoutValue(peakIndex_))
         : Analyzer::kFloorDb;
     peak_->setText(peak > Analyzer::kFloorDb ? dbText(peak) : QStringLiteral("–"));
-    display_->update();
+    display_->refresh();
 }
 
 } // namespace vloomdaw
