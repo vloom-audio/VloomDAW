@@ -15,6 +15,7 @@ target_sources(vloomdaw_core PRIVATE
     core/BrowserFilter.cpp
     core/Decibels.cpp
     core/DynamicsMeter.cpp
+    core/EffectPreview.cpp
     core/EqResponse.cpp
     core/PluginPresets.cpp
     core/SpectrumAnalyzer.cpp
@@ -183,16 +184,26 @@ qt_add_library(vloomdaw_ui STATIC
     ui/playlist/PlaylistView.hpp
     ui/plugins/builtin/ArcKnob.cpp
     ui/plugins/builtin/ArcKnob.hpp
+    ui/plugins/builtin/BitcrusherEditor.cpp
+    ui/plugins/builtin/BitcrusherEditor.hpp
     ui/plugins/builtin/BuiltinEditorWindow.cpp
     ui/plugins/builtin/BuiltinEditorWindow.hpp
     ui/plugins/builtin/BuiltinEditors.cpp
     ui/plugins/builtin/BuiltinEditors.hpp
+    ui/plugins/builtin/ChoiceButtons.cpp
+    ui/plugins/builtin/ChoiceButtons.hpp
     ui/plugins/builtin/CompressorEditor.cpp
     ui/plugins/builtin/CompressorEditor.hpp
     ui/plugins/builtin/ControlPanel.cpp
     ui/plugins/builtin/ControlPanel.hpp
+    ui/plugins/builtin/DeEsserEditor.cpp
+    ui/plugins/builtin/DeEsserEditor.hpp
+    ui/plugins/builtin/DisplayHelpers.cpp
+    ui/plugins/builtin/DisplayHelpers.hpp
     ui/plugins/builtin/EditorStyle.cpp
     ui/plugins/builtin/EditorStyle.hpp
+    ui/plugins/builtin/FilterEditor.cpp
+    ui/plugins/builtin/FilterEditor.hpp
     ui/plugins/builtin/GateEditor.cpp
     ui/plugins/builtin/GateEditor.hpp
     ui/plugins/builtin/LevelHistoryView.cpp
@@ -207,8 +218,14 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/PillToggle.hpp
     ui/plugins/builtin/Readout.cpp
     ui/plugins/builtin/Readout.hpp
+    ui/plugins/builtin/SaturatorEditor.cpp
+    ui/plugins/builtin/SaturatorEditor.hpp
     ui/plugins/builtin/TransferCurve.cpp
     ui/plugins/builtin/TransferCurve.hpp
+    ui/plugins/builtin/TransientEditor.cpp
+    ui/plugins/builtin/TransientEditor.hpp
+    ui/plugins/builtin/UtilityEditor.cpp
+    ui/plugins/builtin/UtilityEditor.hpp
     ui/plugins/PresetBar.cpp
     ui/plugins/PresetBar.hpp
     ui/plugins/PluginDrag.cpp
