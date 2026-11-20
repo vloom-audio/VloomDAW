@@ -19,6 +19,10 @@ class TransientDisplay;
 /// The panel has attack, sustain, output and mix; the footer the speed
 /// and the measured output peak.
 ///
+/// Animated: the playing sound's level runs in from the right over the
+/// hits, leaving an afterimage that lasts longer with more sustain; onsets
+/// flash at the head and throw sparks, more and faster with more attack.
+///
 /// Differences from the design: the design scrolls the envelope of the
 /// playing sound; the engine only reports the output, so the input
 /// cannot be shown next to it, and the display shows the effect on a

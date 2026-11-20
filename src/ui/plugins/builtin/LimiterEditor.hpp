@@ -6,6 +6,7 @@
 
 namespace vloomdaw {
 
+class CeilingFlare;
 class LevelHistoryView;
 
 /// The editor of the built-in limiter ("vloom.limiter").
@@ -16,6 +17,11 @@ class LevelHistoryView;
 /// line to drag. The panel has the input gain, the ceiling, release,
 /// lookahead and true peak; the footer the latency, the stereo link and the
 /// gain reduction.
+///
+/// Animated: the output trace glows with the level and the gain reduction
+/// hangs from the top as a curtain (LevelHistoryView); where the peaks hit
+/// the ceiling the line flares and throws sparks that scroll away with the
+/// history (CeilingFlare).
 class LimiterEditor : public BuiltinEditorWindow {
     Q_OBJECT
 
@@ -31,6 +37,7 @@ private:
     void showLatency();
 
     LevelHistoryView* levels_ = nullptr;
+    CeilingFlare* flare_ = nullptr;
     Readout* latency_ = nullptr;
     Readout* reduction_ = nullptr;
 };

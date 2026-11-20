@@ -208,7 +208,7 @@ void LevelHistoryView::paintEvent(QPaintEvent* /*event*/)
     const QColor accent = style::accent();
     const QColor text = style::text();
     const bool moving = animationOn();
-    if (moving && curtainDb_ > 0.05) {
+    if (moving && look_.reduction && curtainDb_ > 0.05) {
         // The gain reduction now, hanging from the top: a curtain that
         // breathes with it, its edge glowing.
         const double depth = curtainDb_ * pixelsPerDb();
