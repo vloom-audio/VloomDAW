@@ -20,6 +20,7 @@ add_executable(vloomdaw_tests
     core/AudioIoSetupTests.cpp
     core/BrowserFilterTests.cpp
     core/DecibelsTests.cpp
+    core/DynamicsMeterTests.cpp
     core/EqResponseTests.cpp
     core/PluginPresetsTests.cpp
     core/SpectrumAnalyzerTests.cpp
@@ -32,6 +33,7 @@ add_executable(vloomdaw_tests
     core/NoteHistoryTests.cpp
     core/NoteNamesTests.cpp
     core/ParameterChoicesTests.cpp
+    core/ParameterScaleTests.cpp
     core/PluginMetadataTests.cpp
     core/PluginScannerTests.cpp
     core/PositionFormatTests.cpp

@@ -14,6 +14,7 @@ target_sources(vloomdaw_core PRIVATE
     core/AudioIoSetup.cpp
     core/BrowserFilter.cpp
     core/Decibels.cpp
+    core/DynamicsMeter.cpp
     core/EqResponse.cpp
     core/PluginPresets.cpp
     core/SpectrumAnalyzer.cpp
@@ -27,6 +28,7 @@ target_sources(vloomdaw_core PRIVATE
     core/NoteHistory.cpp
     core/NoteNames.cpp
     core/ParameterChoices.cpp
+    core/ParameterScale.cpp
     core/PluginMetadata.cpp
     core/PluginScanner.cpp
     core/PositionFormat.cpp
