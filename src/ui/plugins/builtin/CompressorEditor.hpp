@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #pragma once
 
+#include "core/DynamicsMeter.hpp"
 #include "ui/plugins/builtin/BuiltinEditorWindow.hpp"
 
 namespace vloomdaw {
@@ -21,6 +22,11 @@ class TransferCurve;
 /// attack, release, makeup and mix, and auto makeup; the footer the
 /// detector's low cut (the sidechain filter), Listen, the detector mode,
 /// the stereo link and the gain reduction.
+///
+/// Animated: the levels scroll smoothly with a glowing output trace, the
+/// gain reduction hangs as a breathing curtain from the top, the transfer
+/// curve's dot leaves a trail, and the threshold line flashes when the
+/// input rises over it.
 class CompressorEditor : public BuiltinEditorWindow {
     Q_OBJECT
 
@@ -40,6 +46,7 @@ private:
     TransferCurve* curve_ = nullptr;
     MeterBars* meters_ = nullptr;
     Readout* reduction_ = nullptr;
+    double lastInput_ = kNoLevel; ///< the input at the last reading: the threshold's crossings
 };
 
 } // namespace vloomdaw
