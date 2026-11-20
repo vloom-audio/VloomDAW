@@ -120,3 +120,43 @@ in the same style, and note the difference in the class comment.
   attack, hold, release, hysteresis; footer: detector low cut and its
   frequency, Listen, open or closed (from the gain reduction: the engine
   does not report `dsp::Gate::isOpen()`).
+
+## Time and modulation editors
+
+The shell also knows the song's tempo: `tempo()` (120 until set), and
+`tempoChanged()` when `MainWindow` passes a new one (`setTempo()`, at once
+and on every refresh tick). An editor that shows a time or a rate in notes
+uses it. A "Note" parameter reads its names from the plugin ("1/8 D").
+
+`TimeEffectParts.hpp` has what these editors share: `HandleDisplay` (a
+display with one round handle to drag), `ResponseDisplay` (a frequency
+response, filled, with its sweep dashed and a handle on the 0 dB line),
+`SegmentedChoice` (Tremolo | Pan), `OutputLevel` (the footer's held output
+peak) and a time axis. The maths is in `core/TimeEffects` and its tests
+check it against the effects themselves.
+
+- `DelayEditor` (`vloom.delay`): a centred hit and its echoes, left above
+  the line and right below, in dB, the feedback's decay dashed; the handle
+  on the second echo drags the time (sideways; to the nearest note while
+  synced) and the feedback (up and down). Sync, Ping-pong, time (or note),
+  feedback, low cut, high cut, width, mix; footer: tempo, the delay of each
+  side, stereo offset, output.
+- `ReverbEditor` (`vloom.reverb`): the dry hit, the pre-delay, the first
+  trips round the lines and the tail falling 60 dB in the decay time, to
+  scale, with the highs (8 kHz, shortened by damping) dashed; the handle on
+  the tail drags the decay. Size, decay, pre-delay, diffusion, damping,
+  width, mix, Freeze; footer: low cut, high cut, output.
+- `ChorusEditor` (`vloom.chorus`): each voice's delay over a few LFO cycles.
+  Rate (or note), depth, delay, feedback, width, mix; footer: voices,
+  spread, LFO sync, output.
+- `FlangerEditor` (`vloom.flanger`): the comb up to 8 kHz at Delay, and at
+  the end of the sweep dashed; the handle at the lowest notch drags the
+  delay. Rate (or note), depth, delay, feedback, stereo phase, mix; footer:
+  LFO sync, output.
+- `PhaserEditor` (`vloom.phaser`): the notches at the centre, and at both
+  ends of the sweep dashed; the handle drags the centre. Rate (or note),
+  depth, centre, feedback, stereo phase, mix; footer: stages, LFO sync,
+  output.
+- `TremoloEditor` (`vloom.tremolo`): the gain of each side over a few LFO
+  cycles. Mode (Tremolo | Pan), rate (or note), depth, shape, stereo phase
+  (dimmed for Pan); footer: Sync, output.
