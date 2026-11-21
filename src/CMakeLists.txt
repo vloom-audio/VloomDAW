@@ -257,6 +257,8 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/PresetBar.hpp
     ui/plugins/PluginDrag.cpp
     ui/plugins/PluginDrag.hpp
+    ui/plugins/EditorMotion.cpp
+    ui/plugins/EditorMotion.hpp
     ui/plugins/EqEditorWindow.cpp
     ui/plugins/EqEditorWindow.hpp
     ui/plugins/ParameterEditorWindow.cpp
