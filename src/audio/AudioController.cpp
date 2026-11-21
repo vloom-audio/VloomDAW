@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Vloom Audio contributors
 #include "audio/AudioController.hpp"
 
+#include "core/OutputOpenPlan.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -101,15 +103,30 @@ bool AudioController::openDevice(int index, std::string* error)
     config.deviceIndex = index;
     config.sampleRate = requestedSampleRate_;
     config.bufferFrames = bufferFrames_;
-    config.channels = wantedOutChannels;
 
-    if (!device_.open(config, callback, wantedOutChannels == 2 ? error : nullptr)) {
-        if (wantedOutChannels == 2)
-            return false;
-        config.channels = 2;
-        if (!device_.open(config, callback, error))
-            return false;
+    // Exclusive tries first when asked for; if none opens, shared mode keeps
+    // sound playing and exclusiveFallbackError() says why exclusive failed.
+    exclusiveFallbackError_.clear();
+    std::string exclusiveError;
+    std::string sharedError;
+    bool opened = false;
+    for (const OutputOpenStep& step : outputOpenSteps(exclusiveRequested_, wantedOutChannels)) {
+        config.exclusive = step.exclusive;
+        config.channels = step.channels;
+        std::string stepError;
+        if (device_.open(config, callback, &stepError)) {
+            opened = true;
+            break;
+        }
+        (step.exclusive ? exclusiveError : sharedError) = std::move(stepError);
     }
+    if (!opened) {
+        if (error != nullptr)
+            *error = sharedError;
+        return false;
+    }
+    if (exclusiveRequested_ && !device_.isExclusive())
+        exclusiveFallbackError_ = exclusiveError;
 
     // Audio is stopped here, so preparing the engine is safe.
     engine_.prepare(device_.sampleRate(), vloom::AudioDevice::kMaxBlockFrames);
@@ -343,6 +360,16 @@ void AudioController::closeMidiInput()
 {
     midi_.close();
     (void)engine_.releaseLiveNotes();
+}
+
+void AudioController::setExclusive(bool exclusive) noexcept
+{
+#if defined(_WIN32)
+    exclusiveRequested_ = exclusive;
+#else
+    (void)exclusive; // WASAPI only
+    exclusiveRequested_ = false;
+#endif
 }
 
 void AudioController::setFormat(int sampleRate, int bufferFrames) noexcept

@@ -110,6 +110,7 @@ int main(int argc, char* argv[])
         const auto openPreferredAudio = [&audio, &settings, &applyIoToAudio, &lastInputError] {
             applyIoToAudio();
             audio.setFormat(settings.sampleRate, settings.bufferFrames);
+            audio.setExclusive(settings.audioExclusive);
             const auto devices = audio.outputDevices();
             int index = vloomdaw::findDevice(
                 devices.names, {settings.outputDevice.toStdString(), settings.outputDeviceOccurrence});
@@ -289,11 +290,15 @@ int main(int argc, char* argv[])
                     names << QString::fromStdString(name);
                 dlg.audioPage()->setDevices(names, idx);
                 dlg.audioPage()->setFormat(settings.sampleRate, settings.bufferFrames);
+                dlg.audioPage()->setExclusive(settings.audioExclusive);
                 if (audio.isRunning()) {
-                    QString text = QObject::tr("Running at %1 Hz").arg(audio.sampleRate());
-                    if (audio.sampleRate() != audio.requestedSampleRate())
-                        text += QObject::tr(" (device does not support %1 Hz)")
-                                    .arg(audio.requestedSampleRate());
+                    // Exclusive mode that failed is said here, over the rate.
+                    const QString text = audio.exclusiveFallbackError().empty()
+                        ? vloomdaw::AudioSettingsPage::runningStatusText(
+                              audio.sampleRate(), audio.requestedSampleRate(), audio.isExclusive())
+                        : vloomdaw::AudioSettingsPage::exclusiveFallbackText(
+                              QString::fromStdString(audio.deviceName()),
+                              QString::fromStdString(audio.exclusiveFallbackError()));
                     dlg.audioPage()->setStatus(text, true);
                 } else {
                     dlg.audioPage()->setStatus(QObject::tr("Not running"), false);
@@ -420,6 +425,13 @@ int main(int argc, char* argv[])
                     openPreferredAudio();
                     syncDialogAudio();
                 });
+            QObject::connect(
+                dlg.audioPage(), &vloomdaw::AudioSettingsPage::exclusiveChanged, &dlg, [&](bool exclusive) {
+                    settings.audioExclusive = exclusive;
+                    settings.save();
+                    openPreferredAudio();
+                    syncDialogAudio();
+                });
             dlg.generalPage()->setStartPositionMode(static_cast<int>(settings.startPositionMode));
             dlg.generalPage()->setMetronomeOnStartup(settings.metronomeOnStartup);
             dlg.generalPage()->setAssociateProjectFiles(settings.associateProjectFiles);
@@ -531,6 +543,7 @@ int main(int argc, char* argv[])
                 status.device = QString::fromStdString(audio.deviceName());
                 status.sampleRate = audio.sampleRate();
                 status.bufferFrames = audio.bufferFrames();
+                status.exclusive = audio.isExclusive();
             }
             if (audio.isInputRunning()) {
                 status.inputDevice = QString::fromStdString(audio.inputDeviceName());

@@ -3719,6 +3719,7 @@ void MainWindow::createSettingsDialog()
     // Every change applies now and is saved at once.
     auto* audio = settingsDialog_->audioPage();
     audio->setFormat(settings_.sampleRate, settings_.bufferFrames);
+    audio->setExclusive(settings_.audioExclusive);
     audio->setUnifiedDeviceMode(settings_.ioConfig.unifiedDevice);
     // `index` is into the list the page shows, which is deviceNames_.
     connect(audio, &AudioSettingsPage::deviceSelected, this, &MainWindow::selectOutputDevice);
@@ -3729,6 +3730,7 @@ void MainWindow::createSettingsDialog()
         syncInputAndMidiDevices();
     });
     connect(audio, &AudioSettingsPage::formatChanged, this, &MainWindow::changeAudioFormat);
+    connect(audio, &AudioSettingsPage::exclusiveChanged, this, &MainWindow::changeAudioExclusive);
     connect(audio, &AudioSettingsPage::audioIoSetupRequested, this, [this] { showAudioIoDialog(false); });
     connect(audio, &AudioSettingsPage::unifiedDeviceModeChanged, this, [this](bool unified) {
         AudioIoConfig next = settings_.ioConfig;
@@ -3852,6 +3854,7 @@ void MainWindow::applyTheme()
 void MainWindow::applyStartupSettings()
 {
     audio_.setFormat(settings_.sampleRate, settings_.bufferFrames);
+    audio_.setExclusive(settings_.audioExclusive);
     applyAudioIoConfig(settings_.ioConfig, false);
     transport_->metronomeAction()->setChecked(settings_.metronomeOnStartup);
     transport_->setPositionShowsTime(settings_.startPositionMode == AppSettings::PositionMode::Time);
@@ -5902,6 +5905,14 @@ void MainWindow::changeAudioFormat(int sampleRate, int bufferFrames)
     openSelectedDevice(); // reopen with the new format
 }
 
+void MainWindow::changeAudioExclusive(bool exclusive)
+{
+    settings_.audioExclusive = exclusive;
+    settings_.save();
+    audio_.setExclusive(exclusive);
+    openSelectedDevice(); // reopen in the new mode
+}
+
 void MainWindow::updateDeviceStatusText()
 {
     if (deviceStatus_ == nullptr)
@@ -5910,7 +5921,9 @@ void MainWindow::updateDeviceStatusText()
         deviceStatus_->setText(tr("No audio output"));
         return;
     }
-    const QString format = tr("%1 Hz  ·  %2 samples").arg(audio_.sampleRate()).arg(audio_.bufferFrames());
+    QString format = tr("%1 Hz  ·  %2 samples").arg(audio_.sampleRate()).arg(audio_.bufferFrames());
+    if (audio_.isExclusive())
+        format += tr("  ·  Exclusive");
     const QString outName = QString::fromStdString(audio_.deviceName());
     if (audio_.isInputRunning()) {
         const QString inName = QString::fromStdString(audio_.inputDeviceName());
@@ -5965,10 +5978,17 @@ bool MainWindow::startDevice(int index, bool fallback)
     syncInputAndMidiDevices();
     updateDeviceStatusText();
 
-    // Say so when the device could not run at the requested rate.
-    QString status = tr("Running at %1 Hz").arg(audio_.sampleRate());
-    if (audio_.sampleRate() != audio_.requestedSampleRate())
-        status += tr(" (device does not support %1 Hz)").arg(audio_.requestedSampleRate());
+    // Say so when the device could not run at the requested rate, and when
+    // exclusive mode failed and sound plays through shared mode instead.
+    QString status = AudioSettingsPage::runningStatusText(
+        audio_.sampleRate(), audio_.requestedSampleRate(), audio_.isExclusive());
+    if (!audio_.exclusiveFallbackError().empty()) {
+        const QString sharedNote
+            = AudioSettingsPage::exclusiveFallbackText(QString::fromStdString(audio_.deviceName()),
+                QString::fromStdString(audio_.exclusiveFallbackError()));
+        status = sharedNote;
+        statusBar()->showMessage(sharedNote, 12000);
+    }
     settingsDialog_->audioPage()->setStatus(status, true);
     return true;
 }
@@ -7411,6 +7431,7 @@ void MainWindow::closeProject()
             status.device = QString::fromStdString(audio_.deviceName());
             status.sampleRate = audio_.sampleRate();
             status.bufferFrames = audio_.bufferFrames();
+            status.exclusive = audio_.isExclusive();
         }
         if (audio_.isInputRunning()) {
             status.inputDevice = QString::fromStdString(audio_.inputDeviceName());
@@ -8082,6 +8103,7 @@ void MainWindow::showLauncher()
         status.device = QString::fromStdString(audio_.deviceName());
         status.sampleRate = audio_.sampleRate();
         status.bufferFrames = audio_.sampleRate() > 0 ? audio_.bufferFrames() : 0;
+        status.exclusive = audio_.isExclusive();
     }
     if (audio_.isInputRunning()) {
         status.inputDevice = QString::fromStdString(audio_.inputDeviceName());
@@ -9757,6 +9779,8 @@ void MainWindow::showAbout()
                                .arg(QString::fromStdString(audio_.deviceName()))
                                .arg(audio_.sampleRate())
                                .arg(audio_.bufferFrames());
+        if (audio_.isExclusive())
+            info.audioStatus += tr("  ·  Exclusive");
     } else {
         info.audioStatus = tr("No active output device");
     }
