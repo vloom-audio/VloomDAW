@@ -161,7 +161,10 @@ void AudioFeatures::update(const AudioInput& input, double dt)
         rmsDb_ = -std::numeric_limits<double>::infinity();
     }
 
-    const bool sounding = running_ && peakDb_ > kSilenceDb;
+    // A plugin that hears sound but puts out none (a tuner muting its
+    // output) still has sound to show: its input counts too.
+    const bool hearing = input.inputPeakDb.has_value() && *input.inputPeakDb > kSilenceDb;
+    const bool sounding = (running_ && peakDb_ > kSilenceDb) || hearing;
     silent_ = sounding ? 0.0 : std::min(silent_ + dt, kSettleSeconds * 4.0);
 
     level_.step(normalisedLevel(peakDb_), dt);

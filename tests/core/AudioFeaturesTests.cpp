@@ -238,6 +238,24 @@ TEST_CASE("Audio features: pulse, reduction and silence", "[motion]")
     CHECK(features.settled());
 }
 
+TEST_CASE("Audio features: a heard input counts as sound", "[motion]")
+{
+    AudioFeatures features;
+    const double dt = 1.0 / 60.0;
+    const std::vector<float> muted(800, 0.0F);
+    // The output is silent (a muted tuner) but the plugin hears sound.
+    for (int i = 0; i < 300; ++i)
+        features.update(AudioInput{.mono = muted, .running = true, .inputPeakDb = -20.0}, dt);
+    CHECK(features.silentSeconds() == 0.0);
+    CHECK_FALSE(features.settled());
+    CHECK(features.liveliness() == 1.0);
+    CHECK(features.level() < 0.01); // the output's level: still silent
+    // Below the silence floor it does not count.
+    for (int i = 0; i < 300; ++i)
+        features.update(AudioInput{.mono = muted, .running = true, .inputPeakDb = -120.0}, dt);
+    CHECK(features.settled());
+}
+
 TEST_CASE("Audio features: a coarse spectrum finds the tone", "[motion]")
 {
     AudioFeatures features;

@@ -16,10 +16,12 @@ target_sources(vloomdaw_core PRIVATE
     core/BrowserFilter.cpp
     core/Decibels.cpp
     core/DynamicsMeter.cpp
+    core/AnalyzerSpectrum.cpp
     core/EffectPreview.cpp
     core/EqResponse.cpp
     core/PluginPresets.cpp
     core/SpectrumAnalyzer.cpp
+    core/TunerReading.cpp
     core/DeviceRef.cpp
     core/DeviceWatch.cpp
     core/FrameStats.cpp
@@ -254,6 +256,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/TremoloEditor.hpp
     ui/plugins/builtin/UtilityEditor.cpp
     ui/plugins/builtin/UtilityEditor.hpp
+    ui/plugins/builtin/AnalyzerEditor.cpp
+    ui/plugins/builtin/AnalyzerEditor.hpp
+    ui/plugins/builtin/TunerEditor.cpp
+    ui/plugins/builtin/TunerEditor.hpp
     ui/plugins/PresetBar.cpp
     ui/plugins/PresetBar.hpp
     ui/plugins/PluginDrag.cpp

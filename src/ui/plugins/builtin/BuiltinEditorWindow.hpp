@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+class QHBoxLayout;
 class QLabel;
 class QTimer;
 class QToolButton;
@@ -134,6 +135,9 @@ protected:
     [[nodiscard]] ControlPanel* panel() const { return panel_; }
     /// The footer: FooterBar::addLeft() / addRight().
     [[nodiscard]] FooterBar* footer() const { return footer_; }
+    /// Puts `control` in the header, right, before A / B (the analyzer's
+    /// Freeze). At most one or two: the presets need the room.
+    void addHeaderControl(QWidget* control);
 
     // --- Controls bound to a parameter ------------------------------------
     /// A knob for parameter `id`. `label`: its name unless given. `scale`:
@@ -186,6 +190,10 @@ protected:
     /// Asks for frames again although no sound runs (a parameter changed
     /// that a display moves to); they stop again once it has settled.
     void wakeAnimation();
+    /// The peak of what the plugin hears (dB full scale), for a plugin that
+    /// reports it: it counts as sound for the animation even when the output
+    /// is silent (motion::AudioInput::inputPeakDb). Default: unknown.
+    [[nodiscard]] virtual std::optional<double> inputPeakDb() const { return std::nullopt; }
 
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
@@ -226,6 +234,8 @@ private:
     QToolButton* power_ = nullptr;
     PresetBar* presets_ = nullptr;
     std::array<QToolButton*, 2> slotButtons_{};
+    QHBoxLayout* headerRow_ = nullptr;
+    QWidget* slotGroup_ = nullptr; ///< A and B, in headerRow_
     QWidget* body_ = nullptr; ///< holds the display, with the panel over it
     QWidget* display_ = nullptr;
     ControlPanel* panel_ = nullptr;
