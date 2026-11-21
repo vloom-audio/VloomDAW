@@ -3,8 +3,11 @@
 #include "ui/plugins/SynthEditorWindow.hpp"
 
 #include "ui/Theme.hpp"
+#include "ui/plugins/EditorMotion.hpp"
 #include "ui/plugins/ParameterText.hpp"
 #include "ui/plugins/PresetBar.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ParameterControl.hpp"
 #include "ui/plugins/builtin/Readout.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
@@ -29,7 +32,9 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <numbers>
 #include <string_view>
 #include <utility>
@@ -49,6 +54,7 @@ constexpr int kWindowWidth = 1040;
 constexpr int kDial = 30; ///< the knobs of the cards
 constexpr int kLowestKey = 36; ///< the keyboard: C2 ..
 constexpr int kOctaves = 5; ///< .. to C7
+constexpr double kDotGlow = 11.0; ///< px: the glow of a moving dot (envelopes, LFOs)
 
 const vloom::dsp::ParameterSpec& spec(std::uint32_t id) { return Synth::parameters()[id]; }
 
@@ -110,8 +116,10 @@ const std::vector<FactoryPreset>& factoryPresets()
     return kPresets;
 }
 
-/// A picture of part of the synth: draws itself from the current values.
-class Picture : public QWidget {
+/// A picture of part of the synth: draws itself from the current values,
+/// kept in a cache until one changes. Animated: a picture that moves with the
+/// sound overrides advance() and paints its motion in drawMotion().
+class Picture : public QWidget, public Animated {
 public:
     using Value = std::function<double(std::uint32_t)>;
 
@@ -123,25 +131,65 @@ public:
         setMinimumWidth(120);
     }
 
+    bool advance(const motion::AudioFeatures& /*audio*/, double /*dt*/) override { return false; }
+    void rest() override { update(); }
+    void animationSwitched(bool /*on*/) override { rest(); }
+
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
-        const Theme::Colors& c = Theme::colors();
+        const AnimationPaintTimer timer;
         QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(Qt::NoPen);
-        p.setBrush(c.base);
-        p.drawRoundedRect(rect(), 8, 8);
-        draw(p, c);
+        // Every value is in the key: a picture reads several (cheap: a hash).
+        std::uint64_t key = 0;
+        for (std::uint32_t id = 0; id < Synth::kParameterCount; ++id)
+            key = motion_paint::keyWith(key, value(id));
+        cache_.draw(p, *this, key, [this](QPainter& layer) {
+            const Theme::Colors& c = Theme::colors();
+            layer.setRenderHint(QPainter::Antialiasing);
+            layer.setPen(Qt::NoPen);
+            layer.setBrush(c.base);
+            layer.drawRoundedRect(rect(), 8, 8);
+            draw(layer, c);
+        });
+        if (animationOn())
+            drawMotion(p);
     }
     virtual void draw(QPainter& p, const Theme::Colors& c) = 0;
+    /// What moves with the sound, over the cached picture.
+    virtual void drawMotion(QPainter& /*p*/) { }
     [[nodiscard]] double value(std::uint32_t id) const { return value_(id); }
 
 private:
     Value value_;
+    motion_paint::LayerCache cache_;
 };
 
-/// An oscillator's table, its frames one behind the other, and the cycle it reads now.
+/// The glow of the sound for a picture: brighter with the level, flaring at a hit.
+double soundGlow(const motion::AudioFeatures& audio)
+{
+    return std::clamp(
+        audio.liveliness() * (0.3 * audio.envelope() + 0.45 * audio.level() + 0.45 * audio.pulse()), 0.0,
+        1.0);
+}
+
+/// Where a glowing dot repaints.
+QRect dotRect(QPointF at)
+{
+    return QRectF(
+        at.x() - kDotGlow - 2.0, at.y() - kDotGlow - 2.0, 2.0 * kDotGlow + 4.0, 2.0 * kDotGlow + 4.0)
+        .toAlignedRect();
+}
+
+/// A glowing dot riding a picture's line.
+void paintDot(QPainter& p, QPointF at, const QColor& colour, double intensity)
+{
+    motion_paint::glowDot(p, at, kDotGlow, colour, intensity);
+    motion_paint::glowDot(p, at, 3.5, Theme::colors().text, std::min(1.0, 0.4 + intensity));
+}
+
+/// An oscillator's table, its frames one behind the other, and the cycle it
+/// reads now, which glows with the synth's output while it plays.
 class TablePicture final : public Picture {
 public:
     TablePicture(Value value, std::uint32_t onId, std::size_t hue, QWidget* parent)
@@ -151,7 +199,27 @@ public:
     {
     }
 
+    bool advance(const motion::AudioFeatures& audio, double /*dt*/) override
+    {
+        const double glow = value(onId_) >= 0.5 ? soundGlow(audio) : 0.0;
+        if (glow > 0.005 || glow_ > 0.005)
+            update();
+        glow_ = glow;
+        return glow > 0.005;
+    }
+    void rest() override
+    {
+        glow_ = 0.0;
+        update();
+    }
+
 protected:
+    void drawMotion(QPainter& p) override
+    {
+        if (glow_ > 0.005)
+            motion_paint::glowStroke(p, now_, Theme::patternColor(hue_), glow_, 8.0, 4.0);
+    }
+
     void draw(QPainter& p, const Theme::Colors& c) override
     {
         constexpr int kShown = 12; // of the table's frames
@@ -187,13 +255,16 @@ protected:
         QColor now = Theme::patternColor(hue_);
         if (value(onId_) < 0.5)
             now = c.textDim; // switched off
+        now_ = cycle(std::clamp(position, 0.0f, 1.0f));
         p.setPen(QPen(now, 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        p.drawPath(cycle(std::clamp(position, 0.0f, 1.0f)));
+        p.drawPath(now_);
     }
 
 private:
     std::uint32_t onId_;
     std::size_t hue_;
+    QPainterPath now_; ///< the cycle it reads, as last drawn
+    double glow_ = 0.0;
 };
 
 /// The filter's response; its point is dragged for cutoff and resonance.
@@ -207,7 +278,31 @@ public:
         setCursor(Qt::CrossCursor);
     }
 
+    /// The curve glows with the sound while the filter is on.
+    bool advance(const motion::AudioFeatures& audio, double /*dt*/) override
+    {
+        const double glow = value(Synth::kFilterOn) >= 0.5 ? soundGlow(audio) : 0.0;
+        if (glow > 0.005 || glow_ > 0.005)
+            update();
+        glow_ = glow;
+        return glow > 0.005;
+    }
+    void rest() override
+    {
+        glow_ = 0.0;
+        update();
+    }
+
 protected:
+    void drawMotion(QPainter& p) override
+    {
+        if (glow_ <= 0.005)
+            return;
+        const QColor colour = Theme::colors().accent;
+        motion_paint::glowStroke(p, curve_, colour, glow_, 9.0, 4.0);
+        motion_paint::glowDot(p, cutoff_, 14.0, colour, glow_);
+    }
+
     void draw(QPainter& p, const Theme::Colors& c) override
     {
         const bool filtering = value(Synth::kFilterOn) >= 0.5;
@@ -238,8 +333,9 @@ protected:
         const double cutoff = value(Synth::kCutoff);
         p.setPen(QPen(colour, 2));
         p.setBrush(c.base);
-        p.drawEllipse(
-            QPointF(xOf(cutoff), std::clamp(yOf(responseDb(cutoff)), 6.0, height() - 6.0)), 5.5, 5.5);
+        cutoff_ = QPointF(xOf(cutoff), std::clamp(yOf(responseDb(cutoff)), 6.0, height() - 6.0));
+        p.drawEllipse(cutoff_, 5.5, 5.5);
+        curve_ = curve;
     }
 
     void mousePressEvent(QMouseEvent* event) override { drag(event); }
@@ -252,6 +348,10 @@ protected:
 private:
     static constexpr double kTopDb = 24.0;
     static constexpr double kBottomDb = -36.0;
+
+    QPainterPath curve_; ///< the response, as last drawn
+    QPointF cutoff_; ///< its point
+    double glow_ = 0.0;
 
     [[nodiscard]] QPainterPath clip() const
     {
@@ -297,7 +397,10 @@ private:
     }
 };
 
-/// An envelope: attack, hold, decay, the sustain level, release.
+/// An envelope: attack, hold, decay, the sustain level, release. At each
+/// note's onset a glowing dot runs along it in the envelope's own times,
+/// waits at the sustain while the sound holds and runs down the release
+/// once it falls away.
 class EnvelopePicture final : public Picture {
 public:
     EnvelopePicture(Value value, std::uint32_t attackId, QWidget* parent)
@@ -306,7 +409,56 @@ public:
     {
     }
 
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        if (audio.onset()) {
+            stage_ = Stage::Attack;
+            time_ = 0.0;
+            held_ = 0.0;
+        }
+        if (stage_ == Stage::Idle)
+            return false;
+        time_ += dt;
+        // Through the stages that are over (a time of 0 is passed at once).
+        for (;;) {
+            const double length = stageSeconds(stage_);
+            if (stage_ == Stage::Sustain) {
+                held_ = std::max(held_, audio.level());
+                // The sound falls away: the note was let go.
+                if (!audio.running() || audio.level() < held_ - 0.15) {
+                    stage_ = Stage::Release;
+                    time_ = 0.0;
+                    continue;
+                }
+                break;
+            }
+            if (time_ < length)
+                break;
+            time_ -= length;
+            stage_
+                = stage_ == Stage::Release ? Stage::Idle : static_cast<Stage>(static_cast<int>(stage_) + 1);
+            if (stage_ == Stage::Idle)
+                break;
+        }
+        intensity_ = 0.45 + 0.55 * audio.level();
+        const QPointF at = dot();
+        update(dotRect(shown_).united(dotRect(at)));
+        shown_ = at;
+        return stage_ != Stage::Idle;
+    }
+    void rest() override
+    {
+        stage_ = Stage::Idle;
+        update();
+    }
+
 protected:
+    void drawMotion(QPainter& p) override
+    {
+        if (stage_ != Stage::Idle)
+            paintDot(p, shown_, Theme::colors().accent, intensity_);
+    }
+
     void draw(QPainter& p, const Theme::Colors& c) override
     {
         // Each time gets room by its cube root, so a short one still shows.
@@ -320,17 +472,27 @@ protected:
         double x = left;
         QPainterPath path;
         path.moveTo(x, bottom);
+        points_[0] = QPointF(x, bottom);
         x += span * room(attackId_);
         path.lineTo(x, top);
+        points_[1] = QPointF(x, top);
         x += span * room(attackId_ + 1) * (value(attackId_ + 1) > 0.0 ? 1.0 : 0.0);
         path.lineTo(x, top);
+        points_[2] = QPointF(x, top);
         const double decayEnd = x + span * room(attackId_ + 2);
         path.quadTo(x + (decayEnd - x) * 0.25, sustain, decayEnd, sustain);
+        points_[3] = QPointF(x + (decayEnd - x) * 0.25, sustain);
+        points_[4] = QPointF(decayEnd, sustain);
         const double releaseStart = left + span - span * room(attackId_ + 4);
         path.lineTo(std::max(releaseStart, decayEnd), sustain);
         path.quadTo(
             std::max(releaseStart, decayEnd) + (left + span - std::max(releaseStart, decayEnd)) * 0.25,
             bottom, left + span, bottom);
+        points_[5] = QPointF(std::max(releaseStart, decayEnd), sustain);
+        points_[6] = QPointF(
+            std::max(releaseStart, decayEnd) + (left + span - std::max(releaseStart, decayEnd)) * 0.25,
+            bottom);
+        points_[7] = QPointF(left + span, bottom);
         QColor fill = c.accent;
         fill.setAlpha(40);
         QPainterPath area = path;
@@ -344,10 +506,86 @@ protected:
     }
 
 private:
+    enum class Stage { Attack, Hold, Decay, Sustain, Release, Idle };
+
+    /// How long `stage` lasts (s); the sustain lasts as long as the sound.
+    [[nodiscard]] double stageSeconds(Stage stage) const
+    {
+        switch (stage) {
+        case Stage::Attack:
+            return value(attackId_) / 1000.0;
+        case Stage::Hold:
+            return value(attackId_ + 1) / 1000.0;
+        case Stage::Decay:
+            return value(attackId_ + 2) / 1000.0;
+        case Stage::Release:
+            return value(attackId_ + 4) / 1000.0;
+        case Stage::Sustain:
+        case Stage::Idle:
+            break;
+        }
+        return 0.0;
+    }
+    /// Where the dot is on the shape as last drawn.
+    [[nodiscard]] QPointF dot() const
+    {
+        const double length = stageSeconds(stage_);
+        const double t = length > 0.0 ? std::clamp(time_ / length, 0.0, 1.0) : 1.0;
+        const auto quad = [t](QPointF from, QPointF control, QPointF to) {
+            const double u = 1.0 - t;
+            return from * (u * u) + control * (2.0 * u * t) + to * (t * t);
+        };
+        switch (stage_) {
+        case Stage::Attack:
+            return points_[0] + (points_[1] - points_[0]) * t;
+        case Stage::Hold:
+            return points_[1] + (points_[2] - points_[1]) * t;
+        case Stage::Decay:
+            return quad(points_[2], points_[3], points_[4]);
+        case Stage::Sustain:
+            return points_[4];
+        case Stage::Release:
+            return quad(points_[5], points_[6], points_[7]);
+        case Stage::Idle:
+            break;
+        }
+        return points_[7];
+    }
+
     std::uint32_t attackId_;
+    /// The shape as last drawn: start, attack top, hold end, the decay's
+    /// control and end, the release's start, control and end.
+    std::array<QPointF, 8> points_{};
+    Stage stage_ = Stage::Idle;
+    double time_ = 0.0; ///< s into the stage
+    double held_ = 0.0; ///< the loudest level while sustaining
+    double intensity_ = 0.0;
+    QPointF shown_; ///< where the dot was drawn
 };
 
-/// Two cycles of an LFO's shape, as deep as its amount.
+/// An LFO's shape at `phase` (0 .. 1) of cycle `cycle`, -1 .. 1.
+double lfoAt(Synth::LfoShape shape, double phase, int cycle)
+{
+    // The Random shape: a level per cycle, the same ones at every redraw.
+    static constexpr std::array<double, 4> kLevels{0.7, -0.4, 0.2, -0.9};
+    switch (shape) {
+    case Synth::LfoShape::Sine:
+        return std::sin(2.0 * std::numbers::pi * phase);
+    case Synth::LfoShape::Triangle:
+        return phase < 0.25 ? 4.0 * phase : phase < 0.75 ? 2.0 - 4.0 * phase : 4.0 * phase - 4.0;
+    case Synth::LfoShape::Saw:
+        return 1.0 - 2.0 * phase;
+    case Synth::LfoShape::Square:
+        return phase < 0.5 ? 1.0 : -1.0;
+    case Synth::LfoShape::Random:
+        break;
+    }
+    return kLevels[static_cast<std::size_t>(cycle) % kLevels.size()];
+}
+
+/// Two cycles of an LFO's shape, as deep as its amount. While the synth
+/// plays, a glowing dot runs along it at the LFO's rate (from the start at
+/// each note when it retriggers).
 class LfoPicture final : public Picture {
 public:
     LfoPicture(Value value, std::uint32_t rateId, QWidget* parent)
@@ -356,30 +594,45 @@ public:
     {
     }
 
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        if (!moves() || !(live > 0.005)) {
+            if (intensity_ > 0.0)
+                update(dotRect(shown_));
+            intensity_ = 0.0;
+            return false;
+        }
+        if (audio.onset() && value(rateId_ + 4) >= 0.5)
+            phase_ = 0.0;
+        phase_ = std::fmod(phase_ + value(rateId_) * dt, 2.0); // two cycles shown
+        intensity_ = live * (0.45 + 0.55 * audio.level());
+        const QPointF at = dot();
+        update(dotRect(shown_).united(dotRect(at)));
+        shown_ = at;
+        return true;
+    }
+    void rest() override
+    {
+        intensity_ = 0.0;
+        phase_ = 0.0;
+        update();
+    }
+
 protected:
+    void drawMotion(QPainter& p) override
+    {
+        if (intensity_ > 0.005)
+            paintDot(p, shown_, Theme::colors().accent, intensity_);
+    }
+
     void draw(QPainter& p, const Theme::Colors& c) override
     {
         const auto shape = static_cast<Synth::LfoShape>(std::lround(value(rateId_ + 1)));
-        const bool moves = std::lround(value(rateId_ + 2)) != 0 && value(rateId_ + 3) != 0.0;
+        const bool moving = moves();
         const double middle = height() / 2.0;
-        const double depth = (height() / 2.0 - 12.0) * std::max(0.15, std::abs(value(rateId_ + 3)) / 100.0);
-        // The Random shape: a level per cycle, the same ones at every redraw.
-        static constexpr double kLevels[] = {0.7, -0.4, 0.2, -0.9};
-        const auto at = [shape](double phase, int cycle) {
-            switch (shape) {
-            case Synth::LfoShape::Sine:
-                return std::sin(2.0 * std::numbers::pi * phase);
-            case Synth::LfoShape::Triangle:
-                return phase < 0.25 ? 4.0 * phase : phase < 0.75 ? 2.0 - 4.0 * phase : 4.0 * phase - 4.0;
-            case Synth::LfoShape::Saw:
-                return 1.0 - 2.0 * phase;
-            case Synth::LfoShape::Square:
-                return phase < 0.5 ? 1.0 : -1.0;
-            case Synth::LfoShape::Random:
-                break;
-            }
-            return kLevels[cycle % 4];
-        };
+        const double depth = depthPx();
+        const auto at = [shape](double phase, int cycle) { return lfoAt(shape, phase, cycle); };
         QPainterPath path;
         for (int x = 0; x <= width() - 20; ++x) {
             const double cycles = 2.0 * x / std::max(1, width() - 20);
@@ -392,13 +645,34 @@ protected:
         }
         p.setPen(QPen(c.border, 1));
         p.drawLine(QPointF(10, middle), QPointF(width() - 10, middle));
-        p.setPen(QPen(moves ? c.accent : c.textDim, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setPen(QPen(moving ? c.accent : c.textDim, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
         p.drawPath(path);
     }
 
 private:
+    /// It moves something: a target and an amount.
+    [[nodiscard]] bool moves() const
+    {
+        return std::lround(value(rateId_ + 2)) != 0 && value(rateId_ + 3) != 0.0;
+    }
+    [[nodiscard]] double depthPx() const
+    {
+        return (height() / 2.0 - 12.0) * std::max(0.15, std::abs(value(rateId_ + 3)) / 100.0);
+    }
+    /// The dot on the drawn shape at phase_ (0 .. 2: two cycles).
+    [[nodiscard]] QPointF dot() const
+    {
+        const auto shape = static_cast<Synth::LfoShape>(std::lround(value(rateId_ + 1)));
+        const int cycle = std::min(static_cast<int>(phase_), 1);
+        const double x = 10.0 + phase_ / 2.0 * std::max(1, width() - 20);
+        return {x, height() / 2.0 - depthPx() * lfoAt(shape, std::min(phase_ - cycle, 0.9999), cycle)};
+    }
+
     std::uint32_t rateId_;
+    double phase_ = 0.0; ///< 0 .. 2: where the dot is in the two cycles shown
+    double intensity_ = 0.0;
+    QPointF shown_; ///< where the dot was drawn
 };
 
 /// The numbered dot that names an oscillator.
@@ -474,7 +748,7 @@ private:
 
 /// A keyboard to play the synth by hand: press a key (lower down is harder),
 /// drag to slide to others.
-class Keyboard final : public QWidget {
+class Keyboard final : public QWidget, public Animated {
 public:
     std::function<void(int key, float velocity)> onPress;
     std::function<void()> onRelease;
@@ -493,11 +767,47 @@ public:
         update();
     }
 
+    /// The key played by hand glows with what the synth puts out (the
+    /// keyboard is the only note the editor knows of).
+    bool advance(const motion::AudioFeatures& audio, double /*dt*/) override
+    {
+        const double glow = held_ >= 0 ? soundGlow(audio) : 0.0;
+        if (glow > 0.005 || glow_ > 0.005)
+            update(glowRect_);
+        glow_ = glow;
+        if (held_ >= 0) {
+            glowRect_ = keyRect(held_)
+                            .adjusted(-whiteWidth(), -whiteWidth(), whiteWidth(), whiteWidth())
+                            .toAlignedRect();
+            if (glow > 0.005)
+                update(glowRect_);
+        }
+        return glow > 0.005;
+    }
+    void rest() override
+    {
+        glow_ = 0.0;
+        update();
+    }
+    void animationSwitched(bool /*on*/) override { rest(); }
+
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
-        const Theme::Colors& c = Theme::colors();
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        cache_.draw(
+            p, *this, static_cast<std::uint64_t>(held_ + 1), [this](QPainter& layer) { paintKeys(layer); });
+        if (animationOn() && held_ >= 0 && glow_ > 0.005) {
+            const QRectF key = keyRect(held_);
+            motion_paint::glowDot(p, QPointF(key.center().x(), key.bottom() - key.width() * 0.6),
+                whiteWidth() * 1.2, Theme::colors().accent, glow_);
+        }
+    }
+
+    void paintKeys(QPainter& p) const
+    {
+        const Theme::Colors& c = Theme::colors();
         p.setRenderHint(QPainter::Antialiasing);
         p.setPen(Qt::NoPen);
         for (int white = 0; white < kWhites; ++white) {
@@ -533,6 +843,20 @@ private:
     static constexpr int kSteps[7] = {0, 2, 4, 5, 7, 9, 11}; // C D E F G A B
 
     [[nodiscard]] double whiteWidth() const { return static_cast<double>(width()) / kWhites; }
+    /// The rectangle of `key` (on the keyboard).
+    [[nodiscard]] QRectF keyRect(int key) const
+    {
+        const int octave = (key - kLowestKey) / 12;
+        const int step = (key - kLowestKey) % 12;
+        for (int i = 0; i < 7; ++i) {
+            const int white = octave * 7 + i;
+            if (kSteps[i] == step)
+                return {white * whiteWidth(), 0.0, whiteWidth(), static_cast<double>(height())};
+            if (hasBlackAfter(white) && kSteps[i] + 1 == step)
+                return blackRect(white);
+        }
+        return {};
+    }
     [[nodiscard]] static int keyOfWhite(int white)
     {
         return kLowestKey + 12 * (white / 7) + kSteps[white % 7];
@@ -560,6 +884,9 @@ private:
     }
 
     int held_ = -1;
+    double glow_ = 0.0;
+    QRect glowRect_; ///< where the glow was drawn
+    motion_paint::LayerCache cache_;
 };
 
 /// A card: a frame with a heading row; returns the column to fill.
@@ -637,7 +964,7 @@ bool SynthEditorWindow::edits(const vloom::PluginInstance& instance)
 }
 
 SynthEditorWindow::SynthEditorWindow(
-    std::shared_ptr<vloom::PluginInstance> instance, const QString& title, QWidget* parent)
+    std::shared_ptr<vloom::PluginInstance> instance, const QString& title, QWidget* parent, double sampleRate)
     : QWidget(parent, Qt::Window | Qt::Tool)
     , instance_(std::move(instance))
 {
@@ -758,6 +1085,10 @@ SynthEditorWindow::SynthEditorWindow(
     column->addWidget(pages, 1);
 
     syncControls();
+    // The pictures move with the sound (the scope tap of what the synth puts out).
+    auto* animation = new EditorMotion(instance_, sampleRate, this, true);
+    for (Animated* each : animated_)
+        animation->add(each);
     // The window holds the focus when it opens, so no control shows a focus
     // mark until Tab moves to it (as BuiltinEditorWindow).
     setFocusPolicy(Qt::StrongFocus);
@@ -990,6 +1321,7 @@ QWidget* SynthEditorWindow::mainPage()
         keys->setHeld(-1);
     };
     keys->setToolTip(tr("Play the synth: press a key (lower down is harder), drag to slide"));
+    animated_.push_back(keys);
     body->addWidget(keys);
     return page;
 }
@@ -1097,6 +1429,7 @@ QWidget* SynthEditorWindow::oscillatorCard(const QString& letter, std::uint32_t 
     auto* picture = new TablePicture([this](std::uint32_t id) { return value(id); }, onId, hue, frame);
     picture->setFixedHeight(112);
     pictures_.push_back(picture);
+    animated_.push_back(picture);
     body->addWidget(picture);
 
     auto* pitch = new QHBoxLayout;
@@ -1146,6 +1479,7 @@ QWidget* SynthEditorWindow::filterCard()
     picture->onChange = [this](std::uint32_t id, double value) { change(id, value); };
     picture->setToolTip(tr("Drag: cutoff (sideways) and resonance (up)"));
     pictures_.push_back(picture);
+    animated_.push_back(picture);
     card.body->addWidget(picture);
 
     auto* routes = new QHBoxLayout;
@@ -1212,6 +1546,7 @@ QWidget* SynthEditorWindow::envelopePage(int index)
     auto* picture = new EnvelopePicture([this](std::uint32_t id) { return value(id); }, attackId, page);
     picture->setFixedHeight(84);
     pictures_.push_back(picture);
+    animated_.push_back(picture);
     column->addWidget(picture);
     auto* knobs = new QHBoxLayout;
     knobs->setSpacing(0);
@@ -1248,6 +1583,7 @@ QWidget* SynthEditorWindow::lfoPage(int index)
     auto* picture = new LfoPicture([this](std::uint32_t id) { return value(id); }, rateId, page);
     picture->setFixedHeight(84);
     pictures_.push_back(picture);
+    animated_.push_back(picture);
     column->addWidget(picture);
     auto* row = new QHBoxLayout;
     row->setSpacing(0);

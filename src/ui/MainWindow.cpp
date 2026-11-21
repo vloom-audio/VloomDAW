@@ -7195,7 +7195,7 @@ void MainWindow::openPluginEditor(std::uint64_t handle, const QString& title)
         setWindowModified(true);
     };
     if (!instance->processor().hasEditor() && SynthEditorWindow::edits(*instance)) {
-        auto* synth = new SynthEditorWindow(instance, title, this);
+        auto* synth = new SynthEditorWindow(instance, title, this, static_cast<double>(settings_.sampleRate));
         connect(synth, &SynthEditorWindow::edited, this, [this] {
             pluginsEdited_ = true; // unsaved changes
             setWindowModified(true);
