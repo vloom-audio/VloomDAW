@@ -179,18 +179,18 @@ private:
 struct AudioInput {
     /// The newest samples since the last frame, oldest first (left and right
     /// averaged): what the plugin put out.
-    std::span<const float> mono;
+    std::span<const float> mono{};
     /// Audio went through since the last frame.
     bool running = false;
     /// The gain reduction it reports (dB, >= 0); NaN for none.
     double reductionDb = std::numeric_limits<double>::quiet_NaN();
     /// Later: the left and right output on their own (empty: unknown).
-    std::span<const float> left;
-    std::span<const float> right;
+    std::span<const float> left{};
+    std::span<const float> right{};
     /// The input's peak (dB full scale); nullopt: unknown. Above
     /// kSilenceDb it counts as sound (settled() stays false) even when the
     /// output is silent. A plugin that reports it fills it (a muted tuner).
-    std::optional<double> inputPeakDb;
+    std::optional<double> inputPeakDb{};
 };
 
 /// The features an animated display draws from, updated once a frame.
