@@ -12,7 +12,8 @@ namespace vloomdaw {
 
 class ToggleSwitch;
 
-/// Settings → General: what VloomDAW looks like when it starts, and updates.
+/// Settings → General: what VloomDAW looks like when it starts, the plugin
+/// displays' animation, and updates.
 /// A pure view: emits what the user picked.
 class GeneralSettingsPage : public QWidget {
     Q_OBJECT
@@ -24,6 +25,7 @@ public:
     void setStartPositionMode(int mode);
     void setMetronomeOnStartup(bool on);
     void setAssociateProjectFiles(bool on);
+    void setAnimatePluginDisplays(bool on);
     void setCheckForUpdates(bool on);
     void setBetaUpdates(bool on);
     /// The line under "Check now": the last result ("Up to date", an error).
@@ -33,6 +35,7 @@ signals:
     void startPositionModeChanged(int mode);
     void metronomeOnStartupChanged(bool on);
     void associateProjectFilesChanged(bool on);
+    void animatePluginDisplaysChanged(bool on);
     void checkForUpdatesChanged(bool on);
     void betaUpdatesChanged(bool on);
     void checkForUpdatesNow();
@@ -41,6 +44,7 @@ private:
     QComboBox* positionMode_ = nullptr;
     ToggleSwitch* metronome_ = nullptr;
     ToggleSwitch* associateFiles_ = nullptr;
+    ToggleSwitch* animateDisplays_ = nullptr;
     ToggleSwitch* checkUpdates_ = nullptr;
     ToggleSwitch* betaUpdates_ = nullptr;
     QPushButton* checkNow_ = nullptr;

@@ -64,6 +64,11 @@ shell and keep their own windows.
   with `inputFromOutputDb(output, reduction, added gain)` when that is true
   (no dry mix, not listening to the key) and pushes `kNoLevel` otherwise.
   Never draw made-up data: no audio means gaps (`kNoLevel`).
+- **Readouts**: `instance().processor().readouts()` lists the live values a
+  built-in publishes (vloom-dsp `HasReadouts`, engine ADR 0019); look one
+  up by id once and poll `readoutValue(index)` on a timer (lock-free).
+- **Header**: `addHeaderControl()` puts a control before A / B (the
+  analyzer's Freeze).
 - **Look**: `editor_style` (`EditorStyle.hpp`) has the designs' colours,
   taken from the theme (the accent is the theme's), the fonts and the sizes.
   Shared displays: `LevelHistoryView` (scrolling levels with a draggable
@@ -167,14 +172,18 @@ display with one round handle to drag), `ResponseDisplay` (a frequency
 response, filled, with its sweep dashed and a handle on the 0 dB line),
 `SegmentedChoice` (Tremolo | Pan), `OutputLevel` (the footer's held output
 peak) and a time axis. The maths is in `core/TimeEffects` and its tests
-check it against the effects themselves.
+check it against the effects themselves. The plugins do not report their
+LFO's phase: an animated display runs its own at the real rate (the
+plugins' LFOs run free too, so only where in the cycle it is can differ).
 
 - `DelayEditor` (`vloom.delay`): a centred hit and its echoes, left above
   the line and right below, in dB, the feedback's decay dashed; the handle
   on the second echo drags the time (sideways; to the nearest note while
   synced) and the feedback (up and down). Sync, Ping-pong, time (or note),
   feedback, low cut, high cut, width, mix; footer: tempo, the delay of each
-  side, stereo offset, output.
+  side, stereo offset, output. Animated: each hit sends a pulse along the
+  echoes at real time, as tall as the feedback's decay, leaving a fading
+  trail; each echo flashes as it is reached.
 - `ReverbEditor` (`vloom.reverb`): the dry hit, the pre-delay, the first
   trips round the lines and the tail falling 60 dB in the decay time, to
   scale, with the highs (8 kHz, shortened by damping) dashed; the handle on
@@ -182,18 +191,23 @@ check it against the effects themselves.
   width, mix, Freeze; footer: low cut, high cut, output.
 - `ChorusEditor` (`vloom.chorus`): each voice's delay over a few LFO cycles.
   Rate (or note), depth, delay, feedback, width, mix; footer: voices,
-  spread, LFO sync, output.
+  spread, LFO sync, output. Animated: the sweeps scroll at the LFO's rate,
+  and each voice's ribbon is the newest output read at its delay now.
 - `FlangerEditor` (`vloom.flanger`): the comb up to 8 kHz at Delay, and at
   the end of the sweep dashed; the handle at the lowest notch drags the
   delay. Rate (or note), depth, delay, feedback, stereo phase, mix; footer:
-  LFO sync, output.
+  LFO sync, output. Animated (with the phaser, `ResponseDisplay::setMotion()`):
+  the response sweeps between its dashed ends at the LFO's rate, glowing
+  with the level, a glow in each notch.
 - `PhaserEditor` (`vloom.phaser`): the notches at the centre, and at both
   ends of the sweep dashed; the handle drags the centre. Rate (or note),
   depth, centre, feedback, stereo phase, mix; footer: stages, LFO sync,
   output.
 - `TremoloEditor` (`vloom.tremolo`): the gain of each side over a few LFO
   cycles. Mode (Tremolo | Pan), rate (or note), depth, shape, stereo phase
-  (dimmed for Pan); footer: Sync, output.
+  (dimmed for Pan); footer: Sync, output. Animated: the curves scroll past a
+  playhead at the LFO's rate, each side glowing as loud as its gain now, the
+  output's level trailing off behind it.
 
 ## Instruments
 
@@ -220,3 +234,173 @@ not hand its sample data to the UI, so `SampleWaveforms`
 thread (the same WAV the engine plays, never a network path) and keeps its
 peaks. The pictures' maths (peaks, the dsp's envelope, the time line) is in
 `core/SampleView.hpp`, tested in `tests/core/SampleViewTests.cpp`.
+
+## Analysis
+
+- `TunerEditor` (`vloom.tuner`): the note with its octave (scientific
+  pitch, A4 = Reference), the frequency, a ±50 cent meter with the in-tune
+  zone (±5 cents, `kInTuneCents`) and the cents off, "—" when there is no
+  pitch or the tuner is bypassed. It polls the readouts (`frequency_hz`,
+  `note`, `cents`, `has_pitch`, `level_db`) every 33 ms while it shows; the
+  needle is smoothed (`NeedleSmoother`, 80 ms) and jumps on a new note.
+  Reference, Mute output; footer: Input (a choice) and the level. The maths
+  is in `core/TunerReading.hpp`, tested in `tests/core/TunerReadingTests.cpp`.
+  Animated: the needle eases between readings with a short glowing trail,
+  the zone blooms once the pitch holds in tune for 0.25 s, the note glows
+  with the input level and pulses on a new note (its `level_db` counts as
+  sound: `inputPeakDb()`).
+- `AnalyzerEditor` (`vloom.analyzer`): the spectrum, 20 Hz .. 20 kHz on the
+  log axis, filled, with a dB grid (0 dB at the top, Range tall), the
+  peak-hold line (double-click to clear it) and a cursor readout. Freeze in
+  the header; Speed, Tilt, Range, Peak hold; footer: Resolution, Channel
+  and the processor's `peak_db`. The processor passes audio through: the
+  FFT is done here from `PluginInstance::readScopeStereo()` by
+  `core/AnalyzerSpectrum` (vloom-dsp's `Fft`, Hann window, a one-pole power
+  average over `Analyzer::averagingSeconds()`, `Analyzer::tiltDb()`), tested
+  in `tests/core/AnalyzerSpectrumTests.cpp`. The scope keeps 8192 frames,
+  so Resolution 16384 is analysed at 8192. Animated: each analysis leaves
+  an afterimage that sinks and fades as mist under the live line (longer
+  at a slow Speed), the held line sparkles where a new peak is set, the
+  loudest point and the cursor's dot glow with the level; Freeze holds it
+  all still.
+
+## Animation
+
+The displays move with the sound: a reverb's mist, a compressor's breathing
+gain reduction. Everything they show comes from the real signal and the
+parameters; with no sound they are calm and still. The layer is in
+`src/ui/plugins/builtin/Animation.hpp` (the clock, the setting, the
+interface), `AnimationPaint.hpp` (drawing helpers) and
+`src/core/AudioFeatures.hpp` (what the sound is doing, unit tested in
+`tests/core/AudioFeaturesTests.cpp`). `ReverbEditor` and `CompressorEditor`
+(`LevelHistoryView`, `TransferCurve`) are the worked examples.
+
+### How it runs
+
+- **One clock**: `FrameClock`, a 60 Hz `QTimer` shared by every editor. It
+  runs only while some editor wants frames and stops when none does.
+- **When an editor gets frames**: once it has an animated display, while
+  the window is shown, not minimised, the setting is on, and sound ran
+  lately. With no sound for `AudioFeatures::kSettleSeconds` (2 s) and no
+  display still moving (or one more second, whatever they say), the editor
+  leaves the clock; `rest()` is called on each display. The 30 Hz meter
+  timer notices sound again and brings the frames back. No sound, no CPU.
+- **Each frame** the shell reads what the plugin put out since the last
+  frame (the scope tap: left and right averaged), updates
+  `motion::AudioFeatures` with the real frame time `dt`, and calls
+  `advance(audio, dt)` on each animated display.
+- **The setting**: Settings → General → "Animate plugin displays"
+  (`AppSettings::animatePluginDisplays`, on by default), and the system's
+  reduced motion (Windows "Animation effects" off, macOS "Reduce motion";
+  Qt has no hint for it). Either one off: `AnimationSettings::enabled()` is
+  false, every display gets `setAnimationOn(false)` and draws its static
+  picture. `VLOOMDAW_IGNORE_REDUCED_MOTION=1` ignores the system's
+  preference (renders and measurements on a machine with it set).
+- **What the plugin hears**: an editor whose plugin reports its input
+  level overrides `inputPeakDb()`; above silence it counts as sound (it
+  wakes the clock and keeps `settled()` false) although the output is
+  silent. The tuner does (it mutes its output by default).
+- **Later**: `motion::AudioInput` has room for what the engine may report
+  (left and right on their own, the input level). Fill them in
+  `BuiltinEditorWindow::frame()` when the engine has them; the displays
+  keep the same interface.
+
+### Making a display audio-reactive
+
+1. Derive the display from `Animated` too, and hand it to the shell:
+   ```cpp
+   class ChorusDisplay : public QWidget, public Animated {
+   public:
+       bool advance(const motion::AudioFeatures& audio, double dt) override;
+       void rest() override;                       // drop the motion, update()
+       void animationSwitched(bool) override { rest(); }
+   protected:
+       void paintEvent(QPaintEvent*) override;
+   };
+
+   // In the editor's constructor, after setDisplay():
+   animate(display_);   // starts the metering too
+   ```
+2. In `advance()` move what you draw by `dt` (never by "one frame"), call
+   `update()` (or `update(rect)` for a part) and return whether anything
+   still moves. Read the sound from `audio`:
+   - `level()` (peak, fast, 0 .. 1 over −60 .. 0 dB) for brightness;
+     `envelope()` (RMS, slower) for a size or a spread;
+   - `onset()` / `onsetStrength()` for a hit; `pulse()` decays after one;
+   - `waveform()` (the newest 2048 samples) for a ribbon or a trace;
+   - `reductionDb()` (smoothed gain reduction);
+   - `bands()` once the editor called `enableSpectrum(24)` (not done by
+     default: an FFT a frame);
+   - `liveliness()`: 1 while sound plays, easing to 0 in 2 s after it
+     stops. Multiply what moves by it so the display comes to rest in time.
+3. Tie the motion to the parameters: a decay time fades by
+   `motion::decayFactor(dt, decaySeconds, 60.0)`, a rate moves by
+   `rate * dt`, a time axis scrolls at its own px per second.
+4. In `paintEvent()`:
+   ```cpp
+   const AnimationPaintTimer timer;          // counts the paint cost
+   QPainter p(this);
+   back_.draw(p, *this, stateKey(), [this](QPainter& l) { paintStatic(l); });
+   if (animationOn())
+       paintMotion(p);                       // the moving layer
+   ```
+   With `animationOn()` false draw exactly the static picture.
+5. A parameter change that a display shows moving without sound (rare):
+   `wakeAnimation()` gives frames until it has settled.
+
+Rules: never draw made-up motion. Random numbers may spread particles an
+onset spawned, never start anything. No sound: calm.
+
+### Performance rules
+
+The budget is 2 to 3 % of one core per open editor (900 × 480) while sound
+plays, nothing when silent.
+
+- Cache what follows only the parameters (grids, axes, curves, labels) in a
+  `motion_paint::LayerCache`, keyed by the values it shows
+  (`motion_paint::keyWith()`); size and theme colours are added for you.
+- Allocate nothing per frame: `ParticlePool` is fixed, keep sample copies
+  in `std::array`s, reuse buffers.
+- No full-frame blur, no per-pixel CPU work per frame. Glow is a few wide
+  strokes (`glowStroke()`) or a cached sprite (`glowDot()`); mist is a
+  small `TrailBuffer` at a third of the resolution, smoothed up when drawn;
+  noise is a precomputed texture (`mistTexture()`) scrolled.
+- Never stroke wider than 1 px or fill antialiased paths every frame:
+  Qt's raster engine draws a 1 px antialiased line on a fast path (a
+  225-point trace: 0.07 ms) and anything wider through the stroker, 15
+  times slower (1.1 ms; a three-layer wide glow: 6 ms). Fill areas
+  without antialiasing and put a 1 px line on their edge.
+- Repaint only what moves: `update(rect)` when the motion stays in part of
+  the display; the cached layers are then blitted only there.
+- Measure: `FrameClock::instance().stats()` (frames, paints and their
+  time), or run with `VLOOMDAW_ANIMATION_STATS=1` for an overlay in the
+  window's corner (fps, paint ms, frame ms, % of a core).
+
+### Recipes (`AnimationPaint.hpp`, namespace `motion_paint`)
+
+- **Glow**: `glowStroke(p, path, colour, intensity, radius)` draws the
+  path 1 px wide with glow sprites stamped along it (keep it short: a
+  trace's newest stretch). `glowLine(p, line, colour, intensity, radius)`
+  for a straight edge or marker of any length (a gradient band).
+  `glowDot(p, centre, radius, colour, intensity)` for one sprite; a
+  `GlowBatch` for many (sparks): the painter is set up once, each `dot()`
+  blits a sprite cached by colour and size.
+- **Particles**: `motion::ParticlePool<State, N>`; `spawn(state, life)` on
+  an onset (it reuses the oldest when full), `advance(dt, move)` in
+  `advance()`, `forEach()` in the paint, `progress()` (0 .. 1) to fade.
+- **Trails and afterimages**: a `TrailBuffer` over part of the display.
+  Each frame `advance(keep, motion, soften)` (`keep` from the decay,
+  `motion` a `QTransform` in display coordinates: a step right for time
+  passing, a scale about a line for spreading), then `ink()` the new
+  content, and `paint()` it. A slow fade is saved up and applied in 4 %
+  steps, so 8-bit rounding neither loses it nor leaves a ghost.
+- **Mist**: `TrailBuffer::paint(p, opacity, mist, drift, fadeTop)`:
+  `mist` breaks the trail up with the scrolled noise texture, `drift`
+  scrolls it, `fadeTop` darkens and fades its top (the reverb's damping).
+- **Waveform ribbon**: `paintWaveformRibbon(p, samples, rect, columns,
+  fill, edge, glow)`, the band of a waveform on a log scale about a centre
+  line, as a bar a column and two 1 px edges; draw it, or call it inside
+  `ink()` so it leaves mist.
+- **Smoothing**: `motion::approach(current, target, dt, tau)`,
+  `EnvelopeFollower` (attack and release), `OnsetDetector`,
+  `smoothingFactor()`: all by `dt`, the same at any frame rate.

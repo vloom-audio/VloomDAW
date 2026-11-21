@@ -80,4 +80,9 @@ void setMacMenuBarAndDockHidden(bool on)
         : NSApplicationPresentationDefault;
 }
 
+bool macPrefersReducedMotion()
+{
+    return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+}
+
 } // namespace vloomdaw

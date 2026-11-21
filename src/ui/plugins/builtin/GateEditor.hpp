@@ -6,6 +6,7 @@
 
 namespace vloomdaw {
 
+class GateBreath;
 class LevelHistoryView;
 
 /// The editor of the built-in noise gate ("vloom.gate").
@@ -16,6 +17,11 @@ class LevelHistoryView;
 /// line to drag. The panel has threshold, range, attack, hold, release and
 /// hysteresis; the footer the detector's low cut (the sidechain filter),
 /// Listen and whether the gate is open.
+///
+/// Animated: open, the trace glows with the level and the threshold with
+/// it; closed, what is under the threshold dims and fogs over; the
+/// threshold flashes as the input crosses it, and the hold time runs out as
+/// a bar under it (GateBreath).
 class GateEditor : public BuiltinEditorWindow {
     Q_OBJECT
 
@@ -28,6 +34,7 @@ protected:
 
 private:
     LevelHistoryView* levels_ = nullptr;
+    GateBreath* breath_ = nullptr;
     Readout* state_ = nullptr;
 };
 

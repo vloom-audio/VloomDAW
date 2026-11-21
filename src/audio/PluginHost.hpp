@@ -45,8 +45,9 @@ struct PluginPick {
 
 /// Where a built-in goes in the app's plugin lists: one of the app's
 /// categories (core/PluginMetadata: "Dynamics", "EQ", "Filter", "Delay",
-/// "Reverb", "Modulation", "Distortion", "Utility", or "Instrument") and the
-/// tags that give an instrument its type ("Instrument|Drum", ...).
+/// "Reverb", "Modulation", "Distortion", "Utility", "Analyzer", or
+/// "Instrument") and the tags that give an instrument its type
+/// ("Instrument|Drum", ...).
 struct BuiltinCategory {
     std::string category;
     std::string tags;

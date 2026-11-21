@@ -6,6 +6,8 @@
 #include "core/TimeEffects.hpp"
 #include "ui/DroppedFiles.hpp"
 #include "ui/plugins/SampleFiles.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
 #include "ui/plugins/builtin/EditorStyle.hpp"
@@ -23,6 +25,7 @@
 #include <QDropEvent>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QLinearGradient>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
@@ -32,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -54,6 +58,9 @@ constexpr double kRoomBelow = 148.0; ///< the time line and the panel, under the
 constexpr double kEnvelopeTop = 24.0; ///< the envelope at full level, under the top
 constexpr double kGrab = 6.0; ///< how near a marker a press takes it
 constexpr double kTickSpacing = 90.0; ///< px between time labels, at least
+constexpr std::size_t kHeads = 4; ///< notes whose sweep shows at once
+constexpr double kSweepTail = 70.0; ///< px of lit sample behind a sweep
+constexpr double kFadeOut = 0.3; ///< s a sweep takes to fade once the next note starts
 
 /// How parameter `info` reads at `value` (a key: "C3"); empty for none.
 QString choiceName(const vloom::ParameterInfo* info, double value)
@@ -64,7 +71,13 @@ QString choiceName(const vloom::ParameterInfo* info, double value)
 } // namespace
 
 /// The sample: its waveform, the markers to drag, the envelope and the time.
-class SamplerDisplay final : public QWidget {
+///
+/// Animated: each note (an onset in what it plays) sends a glowing sweep
+/// along the sample from Start at the speed it plays (its tune), round the
+/// loop while Loop Mode is on, with a spark riding the envelope over it;
+/// the envelope glows with the level. The engine does not report where its
+/// voices are, so the sweep is worked out from the onset and the settings.
+class SamplerDisplay final : public QWidget, public Animated {
 public:
     using Value = std::function<double(std::uint32_t)>;
 
@@ -101,10 +114,96 @@ public:
         update();
     }
 
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        glow_ = audio.level() * live;
+        swell_ = audio.envelope() * live;
+        const QRectF area = waveArea();
+        if (frames_ > 0 && seconds_ > 0.0) {
+            const double speed = playbackSpeed(value_(Sampler::kTranspose), value_(Sampler::kFineTune));
+            const double pixelsPerSecond = area.width() / seconds_ * speed;
+            const bool looping = value_(Sampler::kLoopMode) >= 0.5;
+            const double loopStart = xOf(value_(Sampler::kLoopStart));
+            const double loopEnd = xOf(value_(Sampler::kLoopEnd));
+            heads_.advance(dt, [&](auto& head, double step) {
+                head.state.x += pixelsPerSecond * step;
+                if (looping && loopEnd - loopStart > 1.0 && head.state.x >= loopEnd)
+                    head.state.x = loopStart + std::fmod(head.state.x - loopStart, loopEnd - loopStart);
+                if (head.state.x > area.right() || live < 0.02)
+                    head.life = head.age; // played out, or the sound stopped
+            });
+            if (audio.onset() && live > 0.0) {
+                // A new note: the sweeps of the notes before fade out.
+                heads_.advance(
+                    0.0, [](auto& head, double) { head.life = std::min(head.life, head.age + kFadeOut); });
+                heads_.spawn(
+                    Head{.x = xOf(value_(Sampler::kStart)), .strength = audio.onsetStrength()}, 60.0);
+            }
+        } else {
+            heads_.clear();
+        }
+        update(QRectF(0.0, 0.0, width(), area.bottom() + 2.0).toAlignedRect());
+        return glow_ > 0.002 || swell_ > 0.002 || heads_.alive() > 0;
+    }
+
+    void rest() override
+    {
+        glow_ = 0.0;
+        swell_ = 0.0;
+        heads_.clear();
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
+
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        std::uint64_t key = motion_paint::keyWith(0, static_cast<double>(frames_));
+        for (const std::uint32_t id : {Sampler::kStart, Sampler::kLoopMode, Sampler::kLoopStart,
+                 Sampler::kLoopEnd, Sampler::kAttack, Sampler::kDecay, Sampler::kSustain, Sampler::kRelease,
+                 Sampler::kTranspose, Sampler::kFineTune})
+            key = motion_paint::keyWith(key, value_(id));
+        key = motion_paint::keyWith(key, static_cast<double>(qHash(path_) ^ qHash(error_)));
+        key = motion_paint::keyWith(
+            key, static_cast<double>(reinterpret_cast<std::uintptr_t>(waveform_.get())));
+        key = motion_paint::keyWith(key, (loading_ ? 1.0 : 0.0) + (dropping_ ? 2.0 : 0.0));
+        back_.draw(p, *this, key, [this](QPainter& layer) { paintStatic(layer); });
+        if (animationOn() && frames_ > 0)
+            paintMotion(p);
+    }
+
+    void paintMotion(QPainter& p)
+    {
+        const QRectF area = waveArea();
+        const QColor accent = style::accent();
+        if (swell_ > 0.002 && !envelope_.isEmpty())
+            motion_paint::glowStroke(p, envelope_, accent, 0.6 * swell_, 6.0, 7.0);
+        if (glow_ <= 0.002)
+            return;
+        p.setRenderHint(QPainter::Antialiasing, false);
+        heads_.forEach([&](const auto& head) {
+            const double x = head.state.x;
+            const double strength = glow_ * (0.5 + 0.5 * head.state.strength)
+                * std::min(1.0, (head.life - head.age) / kFadeOut);
+            // The stretch it just played, lit and fading behind it.
+            QLinearGradient tail(QPointF(x - kSweepTail, 0.0), QPointF(x, 0.0));
+            tail.setColorAt(0.0, motion_paint::faded(accent, 0.0));
+            tail.setColorAt(1.0, motion_paint::faded(accent, 0.22 * strength));
+            p.fillRect(
+                QRectF(QPointF(std::max(area.left(), x - kSweepTail), area.top()), QPointF(x, area.bottom())),
+                tail);
+            motion_paint::glowLine(p, QLineF(x, area.top(), x, area.bottom()), accent, strength, 7.0);
+            motion_paint::glowDot(p, QPointF(x, envelopeY(x)), 9.0 + 8.0 * strength, accent, strength);
+            motion_paint::glowDot(p, QPointF(x, envelopeY(x)), 3.0, style::text(), strength);
+        });
+    }
+
+    void paintStatic(QPainter& p)
+    {
         p.setRenderHint(QPainter::Antialiasing);
         p.fillRect(rect(), style::background());
         const QRectF area = waveArea();
@@ -288,11 +387,13 @@ private:
         onChange(*dragging_, percent);
     }
 
-    /// The amp envelope from Start, at the root key; its release ends where the sample does.
-    void paintEnvelope(QPainter& p, const QRectF& area, double startX)
+    /// Where the amp envelope (paintEnvelope()) is at `x`.
+    [[nodiscard]] double envelopeY(double x) const
     {
-        if (seconds_ <= 0.0)
-            return;
+        const QRectF area = waveArea();
+        const double startX = xOf(value_(Sampler::kStart));
+        if (seconds_ <= 0.0 || x < startX)
+            return area.bottom();
         const double speed = playbackSpeed(value_(Sampler::kTranspose), value_(Sampler::kFineTune));
         const double attack = value_(Sampler::kAttack) / 1000.0;
         const double decay = value_(Sampler::kDecay) / 1000.0;
@@ -301,19 +402,27 @@ private:
         // Seconds of playing from Start to the end of the sample.
         const double playing = seconds_ * (1.0 - value_(Sampler::kStart) / 100.0) / speed;
         const double letGo = std::max(0.0, playing - release);
-        const double atLetGo = envelopeLevel(letGo, attack, decay, sustain);
+        const double t = (x - startX) / area.width() * seconds_ / speed;
+        const double level = t < letGo
+            ? envelopeLevel(t, attack, decay, sustain)
+            : releaseLevel(envelopeLevel(letGo, attack, decay, sustain), t - letGo, release);
         const double top = area.top() + kEnvelopeTop;
-        const auto yOf = [&](double level) { return area.bottom() - level * (area.bottom() - top); };
+        return area.bottom() - level * (area.bottom() - top);
+    }
+
+    /// The amp envelope from Start, at the root key; its release ends where the sample does.
+    void paintEnvelope(QPainter& p, const QRectF& area, double startX)
+    {
+        envelope_ = QPainterPath();
+        if (seconds_ <= 0.0)
+            return;
         QPainterPath path(QPointF(startX, area.bottom()));
-        for (double x = startX + 1.0; x <= area.right() + 0.5; x += 1.0) {
-            const double t = (x - startX) / area.width() * seconds_ / speed;
-            const double level = t < letGo ? envelopeLevel(t, attack, decay, sustain)
-                                           : releaseLevel(atLetGo, t - letGo, release);
-            path.lineTo(x, yOf(level));
-        }
+        for (double x = startX + 1.0; x <= area.right() + 0.5; x += 1.0)
+            path.lineTo(x, envelopeY(x));
         p.setBrush(Qt::NoBrush);
         p.setPen(QPen(style::accent(), 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.drawPath(path);
+        envelope_ = path;
     }
 
     /// The sample's own seconds under it.
@@ -358,6 +467,17 @@ private:
     bool loading_ = false;
     std::optional<std::uint32_t> dragging_;
     bool dropping_ = false;
+
+    // The motion (animationOn()).
+    struct Head {
+        double x = 0.0; ///< where it plays now, px
+        double strength = 0.0; ///< the onset's
+    };
+    motion_paint::LayerCache back_;
+    QPainterPath envelope_; ///< as drawn (paintEnvelope())
+    motion::ParticlePool<Head, kHeads> heads_;
+    double glow_ = 0.0;
+    double swell_ = 0.0;
 };
 
 namespace {
@@ -446,6 +566,7 @@ SamplerEditor::SamplerEditor(
     display_->onLoad = [this] { chooseFile(); };
     display_->onDrop = [this](const QString& path) { load(path); };
     setDisplay(display_);
+    animate(display_);
     // Everything the picture shows.
     for (const std::uint32_t id :
         {Sampler::kStart, Sampler::kLoopMode, Sampler::kLoopStart, Sampler::kLoopEnd, Sampler::kAttack,

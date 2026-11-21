@@ -10,15 +10,18 @@
 add_library(vloomdaw_core STATIC)
 target_sources(vloomdaw_core PRIVATE
     # core — pure logic: formatting, (later) project model, commands, undo
+    core/AudioFeatures.cpp
     core/AudioFormat.cpp
     core/AudioIoSetup.cpp
     core/BrowserFilter.cpp
     core/Decibels.cpp
     core/DynamicsMeter.cpp
+    core/AnalyzerSpectrum.cpp
     core/EffectPreview.cpp
     core/EqResponse.cpp
     core/PluginPresets.cpp
     core/SpectrumAnalyzer.cpp
+    core/TunerReading.cpp
     core/DeviceRef.cpp
     core/DeviceWatch.cpp
     core/FrameStats.cpp
@@ -46,6 +49,7 @@ target_sources(vloomdaw_core PRIVATE
     core/TapTempo.cpp
     core/ThemePresets.cpp
     core/TimeEffects.cpp
+    core/TrailFade.cpp
     core/TrackRouting.cpp
     core/TransportLayout.cpp
     core/UndoHistory.cpp
@@ -184,6 +188,10 @@ qt_add_library(vloomdaw_ui STATIC
     ui/pianoroll/PianoRollView.hpp
     ui/playlist/PlaylistView.cpp
     ui/playlist/PlaylistView.hpp
+    ui/plugins/builtin/Animation.cpp
+    ui/plugins/builtin/Animation.hpp
+    ui/plugins/builtin/AnimationPaint.cpp
+    ui/plugins/builtin/AnimationPaint.hpp
     ui/plugins/builtin/ArcKnob.cpp
     ui/plugins/builtin/ArcKnob.hpp
     ui/plugins/builtin/BitcrusherEditor.cpp
@@ -248,10 +256,16 @@ qt_add_library(vloomdaw_ui STATIC
     ui/plugins/builtin/TremoloEditor.hpp
     ui/plugins/builtin/UtilityEditor.cpp
     ui/plugins/builtin/UtilityEditor.hpp
+    ui/plugins/builtin/AnalyzerEditor.cpp
+    ui/plugins/builtin/AnalyzerEditor.hpp
+    ui/plugins/builtin/TunerEditor.cpp
+    ui/plugins/builtin/TunerEditor.hpp
     ui/plugins/PresetBar.cpp
     ui/plugins/PresetBar.hpp
     ui/plugins/PluginDrag.cpp
     ui/plugins/PluginDrag.hpp
+    ui/plugins/EditorMotion.cpp
+    ui/plugins/EditorMotion.hpp
     ui/plugins/EqEditorWindow.cpp
     ui/plugins/EqEditorWindow.hpp
     ui/plugins/ParameterEditorWindow.cpp

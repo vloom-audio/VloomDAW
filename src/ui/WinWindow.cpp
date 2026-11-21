@@ -235,4 +235,12 @@ void setWindowsProjectFileAssociation(const QString& exePath, bool enabled)
         SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 }
 
+bool windowsPrefersReducedMotion()
+{
+    BOOL animate = TRUE;
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0) == FALSE)
+        return false;
+    return animate == FALSE;
+}
+
 } // namespace vloomdaw

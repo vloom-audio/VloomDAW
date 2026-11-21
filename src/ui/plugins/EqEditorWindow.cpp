@@ -3,8 +3,11 @@
 #include "ui/plugins/EqEditorWindow.hpp"
 
 #include "ui/Theme.hpp"
+#include "ui/plugins/EditorMotion.hpp"
 #include "ui/plugins/ParameterText.hpp"
 #include "ui/plugins/PresetBar.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/widgets/Knob/Knob.hpp"
 #include "ui/widgets/ToggleSwitch/ToggleSwitch.hpp"
 
@@ -52,6 +55,15 @@ constexpr double kSpectrumTopDb = 0.0; ///< at the top of the graph
 constexpr double kSpectrumBottomDb = -90.0; ///< at its bottom
 /// Music falls with frequency; tilted this much about 1 kHz it reads level.
 constexpr double kSpectrumTiltDb = 4.5; ///< per octave
+constexpr int kSpectrumStep = 3; ///< pixels between points of the spectrum
+/// A section's node glows with the level of the spectrum this far either
+/// side of its frequency (octaves), over this range (dB, tilted).
+constexpr double kNodeRegionOctaves = 0.5;
+constexpr double kNodeQuietDb = -66.0;
+constexpr double kNodeLoudDb = -12.0;
+constexpr double kMistSeconds = 0.9; ///< the spectrum's afterimage fades 40 dB in this long
+constexpr double kMistRise = 14.0; ///< px per second the mist drifts up
+constexpr double kBoostDb = 0.25; ///< the summed curve glows where it boosts more than this
 
 /// A setting that comes with the app: the values that differ from the defaults.
 struct FactoryPreset {
@@ -162,8 +174,10 @@ private:
 
 } // namespace
 
-/// The response curve and its points.
-class EqGraph : public QWidget {
+/// The response curve and its points. Animated: the spectrum leaves a
+/// rising afterimage, each section's point glows with the sound around its
+/// frequency and the summed curve glows where it boosts, by the level.
+class EqGraph : public QWidget, public Animated {
 public:
     EqGraph(const EqResponse& response, const SpectrumAnalyzer& spectrum, QWidget* parent)
         : QWidget(parent)
@@ -172,7 +186,62 @@ public:
     {
         setMouseTracking(true);
         setMinimumSize(560, 300);
+        energy_.fill(motion::EnvelopeFollower(0.03, 0.3));
     }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        level_ = audio.level() * live;
+        bool moving = false;
+        for (EqSection section : kSections) {
+            double target = 0.0;
+            if (spectrum_.hasSignal() && isOn(section)) {
+                const double hz = response_.value(eqSectionParameters(section).frequency);
+                const double spread = std::exp2(kNodeRegionOctaves);
+                const double db
+                    = spectrum_.levelDb(hz / spread, hz * spread) + kSpectrumTiltDb * std::log2(hz / 1000.0);
+                target = std::clamp((db - kNodeQuietDb) / (kNodeLoudDb - kNodeQuietDb), 0.0, 1.0) * live;
+            }
+            motion::EnvelopeFollower& energy = energy_[indexOf(section)];
+            moving = energy.step(target, dt) > 0.01 || moving;
+        }
+        // The afterimage: what the spectrum was, fading and rising.
+        if (mist_.area() != QRectF(rect()))
+            mist_.setArea(QRectF(rect()));
+        mist_.advance(motion::decayFactor(dt, kMistSeconds, 40.0),
+            QTransform::fromTranslate(0.0, -kMistRise * dt), 0.5);
+        drift_ += kMistRise * dt;
+        if (spectrum_.hasSignal())
+            makeSpectrum(); // once a frame, for the mist and the paint
+        if (spectrum_.hasSignal() && level_ > 0.0) {
+            const QColor ink = motion_paint::faded(Theme::colors().accent, 0.25 + 0.5 * level_);
+            // Inked every frame and kept about 12 frames: faint, it builds up.
+            const QColor body = motion_paint::faded(Theme::colors().text, 0.012 + 0.008 * level_);
+            mist_.ink([this, &ink, &body](QPainter& p) {
+                QPen pen(ink, 1.0);
+                pen.setCosmetic(true); // a buffer pixel: soft once smoothed up
+                p.setPen(pen);
+                p.drawPolyline(spectrumPoints_.data(), static_cast<int>(spectrumPoints_.size()) - 2);
+                // The body of the spectrum lives in the mist (a small image: cheap to fill).
+                p.setPen(Qt::NoPen);
+                p.setBrush(body);
+                p.drawPolygon(spectrumPoints_.data(), static_cast<int>(spectrumPoints_.size()));
+            });
+        }
+        update();
+        return moving || mist_.isVisible() || level_ > 0.01;
+    }
+
+    void rest() override
+    {
+        mist_.clear();
+        for (motion::EnvelopeFollower& energy : energy_)
+            energy.reset();
+        level_ = 0.0;
+        update();
+    }
+    void animationSwitched(bool /*on*/) override { rest(); }
 
     std::function<void(std::uint32_t id, double value)> onChange;
     std::function<void(EqSection)> onSelect;
@@ -200,96 +269,18 @@ protected:
 
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         if (stale_)
             rebuild();
-        const Theme::Colors& c = Theme::colors();
         QPainter p(this);
-        p.fillRect(rect(), c.base);
-        p.setRenderHint(QPainter::Antialiasing);
-
-        QFont small = font();
-        small.setPixelSize(10);
-        p.setFont(small);
-        for (double hz : {50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0}) {
-            const double x = std::round(xOf(hz)) + 0.5;
-            p.setPen(QPen(c.panel, 1));
-            p.drawLine(QPointF(x, 0), QPointF(x, height()));
-            p.setPen(c.textDim);
-            p.drawText(QPointF(x + 4, height() - 6),
-                hz >= 1000.0 ? QStringLiteral("%1k").arg(hz / 1000.0) : QString::number(hz));
-        }
-        for (double db : {18.0, 12.0, 6.0, -6.0, -12.0, -18.0}) {
-            const double y = std::round(yOf(db)) + 0.5;
-            p.setPen(QPen(c.panel, 1));
-            p.drawLine(QPointF(0, y), QPointF(width(), y));
-            p.setPen(c.textDim);
-            const QString text = QStringLiteral("%1%2").arg(db > 0 ? QStringLiteral("+") : QString()).arg(db);
-            p.drawText(QRectF(width() - 48, y - 14, 42, 12), Qt::AlignRight | Qt::AlignVCenter, text);
-        }
-        const double zero = std::round(yOf(0.0)) + 0.5;
-        p.setPen(QPen(c.border, 1));
-        p.drawLine(QPointF(0, zero), QPointF(width(), zero));
-
-        if (spectrum_.hasSignal()) {
-            // What the equalizer puts out, behind the curves.
-            constexpr int kStep = 3;
-            QPainterPath shape;
-            shape.moveTo(0, height());
-            for (int x = 0; x <= width() + kStep; x += kStep) {
-                const double from = frequencyAt(x - kStep / 2.0);
-                const double to = frequencyAt(x + kStep / 2.0);
-                const double tilt = kSpectrumTiltDb * std::log2(std::sqrt(from * to) / 1000.0);
-                shape.lineTo(x, levelY(spectrum_.levelDb(from, to) + tilt));
-            }
-            shape.lineTo(width() + kStep, height());
-            shape.closeSubpath();
-            QColor fill = c.text;
-            QColor line = c.text;
-            fill.setAlpha(18);
-            line.setAlpha(70);
-            p.setPen(QPen(line, 1));
-            p.setBrush(fill);
-            p.drawPath(shape);
-        }
-
-        // Each section's own curve, filled; then the whole equalizer on top.
-        for (EqSection section : kSections) {
-            if (!shapes(section))
-                continue;
-            QColor fill = sectionColor(section);
-            QColor line = fill;
-            fill.setAlpha(section == selected_ ? 76 : 36);
-            line.setAlpha(140);
-            p.setPen(QPen(line, 1));
-            p.setBrush(fill);
-            p.drawPath(fills_[indexOf(section)]);
-        }
-        p.setBrush(Qt::NoBrush);
-        p.setPen(QPen(c.accent, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        p.drawPath(total_);
-
-        QFont bold = font();
-        bold.setBold(true);
-        bold.setPixelSize(11);
-        p.setFont(bold);
-        for (EqSection section : kSections) {
-            const QPointF at = node(section);
-            const QColor colour = sectionColor(section);
-            if (section == selected_) {
-                QColor ring = colour;
-                ring.setAlpha(115);
-                p.setPen(QPen(ring, 2));
-                p.setBrush(Qt::NoBrush);
-                p.drawEllipse(at, kNodeRadius + 6, kNodeRadius + 6);
-            }
-            const bool on = isOn(section);
-            p.setPen(QPen(colour, 2));
-            p.setBrush(on ? colour : c.base);
-            p.drawEllipse(at, kNodeRadius, kNodeRadius);
-            p.setPen(on ? c.base : colour);
-            p.drawText(QRectF(at.x() - kNodeRadius, at.y() - kNodeRadius, 2 * kNodeRadius, 2 * kNodeRadius),
-                Qt::AlignCenter, QString::number(indexOf(section) + 1));
-        }
+        back_.draw(p, *this, 0, [this](QPainter& layer) { paintGrid(layer); });
+        if (animationOn())
+            mist_.paint(p, 0.9, 0.3, QPointF(0.0, drift_));
+        if (spectrum_.hasSignal())
+            paintSpectrum(p);
+        front_.draw(p, *this, frontKey(), [this](QPainter& layer) { paintCurves(layer); });
+        if (animationOn())
+            paintMotion(p);
     }
 
     void mousePressEvent(QMouseEvent* event) override
@@ -347,6 +338,140 @@ protected:
     }
 
 private:
+    /// The grid and its labels: follow only the size.
+    void paintGrid(QPainter& p) const
+    {
+        const Theme::Colors& c = Theme::colors();
+        p.fillRect(rect(), c.base);
+        p.setRenderHint(QPainter::Antialiasing);
+        QFont small = font();
+        small.setPixelSize(10);
+        p.setFont(small);
+        for (double hz : {50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0}) {
+            const double x = std::round(xOf(hz)) + 0.5;
+            p.setPen(QPen(c.panel, 1));
+            p.drawLine(QPointF(x, 0), QPointF(x, height()));
+            p.setPen(c.textDim);
+            p.drawText(QPointF(x + 4, height() - 6),
+                hz >= 1000.0 ? QStringLiteral("%1k").arg(hz / 1000.0) : QString::number(hz));
+        }
+        for (double db : {18.0, 12.0, 6.0, -6.0, -12.0, -18.0}) {
+            const double y = std::round(yOf(db)) + 0.5;
+            p.setPen(QPen(c.panel, 1));
+            p.drawLine(QPointF(0, y), QPointF(width(), y));
+            p.setPen(c.textDim);
+            const QString text = QStringLiteral("%1%2").arg(db > 0 ? QStringLiteral("+") : QString()).arg(db);
+            p.drawText(QRectF(width() - 48, y - 14, 42, 12), Qt::AlignRight | Qt::AlignVCenter, text);
+        }
+        const double zero = std::round(yOf(0.0)) + 0.5;
+        p.setPen(QPen(c.border, 1));
+        p.drawLine(QPointF(0, zero), QPointF(width(), zero));
+    }
+
+    /// The spectrum's outline into spectrumPoints_, closed along the bottom
+    /// by its last two points (reused: no allocation once sized).
+    void makeSpectrum()
+    {
+        spectrumPoints_.clear();
+        for (int x = 0; x <= width() + kSpectrumStep; x += kSpectrumStep) {
+            const double from = frequencyAt(x - kSpectrumStep / 2.0);
+            const double to = frequencyAt(x + kSpectrumStep / 2.0);
+            const double tilt = kSpectrumTiltDb * std::log2(std::sqrt(from * to) / 1000.0);
+            spectrumPoints_.emplace_back(static_cast<double>(x), levelY(spectrum_.levelDb(from, to) + tilt));
+        }
+        spectrumPoints_.emplace_back(
+            static_cast<double>(width() + kSpectrumStep), static_cast<double>(height()));
+        spectrumPoints_.emplace_back(0.0, static_cast<double>(height()));
+    }
+
+    /// What the equalizer puts out, behind the curves: filled without
+    /// antialiasing, edged with a 1 px line (cheap every frame).
+    void paintSpectrum(QPainter& p)
+    {
+        if (!animationOn() || spectrumPoints_.size() < 3)
+            makeSpectrum(); // animating: advance() made it this frame
+        const Theme::Colors& c = Theme::colors();
+        if (!animationOn()) {
+            // Animating, the mist carries the spectrum's body.
+            p.setRenderHint(QPainter::Antialiasing, false);
+            p.setPen(Qt::NoPen);
+            p.setBrush(motion_paint::faded(c.text, 18.0 / 255.0));
+            p.drawPolygon(spectrumPoints_.data(), static_cast<int>(spectrumPoints_.size()));
+        }
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(motion_paint::faded(c.text, (70.0 + 80.0 * level_) / 255.0), 1));
+        p.drawPolyline(spectrumPoints_.data(), static_cast<int>(spectrumPoints_.size()) - 2);
+    }
+
+    /// Each section's curve, the whole equalizer's and the points: follow
+    /// the values and the selection.
+    void paintCurves(QPainter& p) const
+    {
+        const Theme::Colors& c = Theme::colors();
+        p.setRenderHint(QPainter::Antialiasing);
+        for (EqSection section : kSections) {
+            if (!shapes(section))
+                continue;
+            QColor fill = sectionColor(section);
+            QColor line = fill;
+            fill.setAlpha(section == selected_ ? 76 : 36);
+            line.setAlpha(140);
+            p.setPen(QPen(line, 1));
+            p.setBrush(fill);
+            p.drawPath(fills_[indexOf(section)]);
+        }
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(c.accent, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(total_);
+
+        QFont bold = font();
+        bold.setBold(true);
+        bold.setPixelSize(11);
+        p.setFont(bold);
+        for (EqSection section : kSections) {
+            const QPointF at = node(section);
+            const QColor colour = sectionColor(section);
+            if (section == selected_) {
+                QColor ring = colour;
+                ring.setAlpha(115);
+                p.setPen(QPen(ring, 2));
+                p.setBrush(Qt::NoBrush);
+                p.drawEllipse(at, kNodeRadius + 6, kNodeRadius + 6);
+            }
+            const bool on = isOn(section);
+            p.setPen(QPen(colour, 2));
+            p.setBrush(on ? colour : c.base);
+            p.drawEllipse(at, kNodeRadius, kNodeRadius);
+            p.setPen(on ? c.base : colour);
+            p.drawText(QRectF(at.x() - kNodeRadius, at.y() - kNodeRadius, 2 * kNodeRadius, 2 * kNodeRadius),
+                Qt::AlignCenter, QString::number(indexOf(section) + 1));
+        }
+    }
+
+    /// The glows: the boosted stretches of the summed curve, the points.
+    void paintMotion(QPainter& p) const
+    {
+        if (level_ > 0.01 && !boosted_.isEmpty())
+            motion_paint::glowStroke(p, boosted_, Theme::colors().accent,
+                level_ * std::clamp(0.35 + maxBoostDb_ / 12.0, 0.0, 1.0), 9.0, 4.0);
+        for (EqSection section : kSections) {
+            const double energy = energy_[indexOf(section)].value();
+            if (energy > 0.01)
+                motion_paint::glowDot(
+                    p, node(section), kNodeRadius + 6.0 + 10.0 * energy, sectionColor(section), 0.8 * energy);
+        }
+    }
+
+    /// The key of the curves' layer: every value and the selection.
+    [[nodiscard]] std::uint64_t frontKey() const
+    {
+        std::uint64_t key = motion_paint::keyWith(0, static_cast<double>(indexOf(selected_)));
+        for (std::uint32_t id = 0; id < Eq::kParameterCount; ++id)
+            key = motion_paint::keyWith(key, response_.value(id));
+        return key;
+    }
+
     [[nodiscard]] double xOf(double hz) const
     {
         return width() * std::log(hz / kMinHz) / std::log(kMaxHz / kMinHz);
@@ -406,15 +531,30 @@ private:
         constexpr int kStep = 3; // pixels between points of a curve
         const double zero = yOf(0.0);
         total_ = QPainterPath();
+        boosted_ = QPainterPath();
+        maxBoostDb_ = 0.0;
+        bool boosting = false;
         for (QPainterPath& fill : fills_)
             fill = QPainterPath();
         for (int x = 0; x <= width() + kStep; x += kStep) {
             const double hz = frequencyAt(x);
-            const QPointF total(x, yOf(response_.totalDb(hz)));
+            const double totalDb = response_.totalDb(hz);
+            const QPointF total(x, yOf(totalDb));
             if (x == 0)
                 total_.moveTo(total);
             else
                 total_.lineTo(total);
+            // Where it boosts, for the glow.
+            if (totalDb > kBoostDb && x <= width()) {
+                if (boosting)
+                    boosted_.lineTo(total);
+                else
+                    boosted_.moveTo(total);
+                boosting = true;
+                maxBoostDb_ = std::max(maxBoostDb_, totalDb);
+            } else {
+                boosting = false;
+            }
             for (EqSection section : kSections) {
                 QPainterPath& fill = fills_[indexOf(section)];
                 if (x == 0)
@@ -436,6 +576,16 @@ private:
     bool stale_ = true;
     QPainterPath total_;
     std::array<QPainterPath, kEqSections> fills_;
+    QPainterPath boosted_; ///< the stretches of total_ that boost
+    double maxBoostDb_ = 0.0;
+
+    motion_paint::LayerCache back_; ///< the grid
+    motion_paint::LayerCache front_; ///< the curves and the points
+    std::vector<QPointF> spectrumPoints_;
+    motion_paint::TrailBuffer mist_{0.34};
+    double drift_ = 0.0; ///< px the mist has risen
+    double level_ = 0.0; ///< the output's level, faded with the sound
+    std::array<motion::EnvelopeFollower, kEqSections> energy_{};
 };
 
 bool EqEditorWindow::edits(const vloom::PluginInstance& instance)
@@ -550,6 +700,8 @@ EqEditorWindow::EqEditorWindow(
     graph_->onChange = [this](std::uint32_t id, double value) { change(id, value); };
     graph_->onResize = [this] { placePanel(); };
     column->addWidget(graph_, 1);
+    motion_ = new EditorMotion(instance_, sampleRate, this, false); // the spectrum switches the scope
+    motion_->add(graph_);
 
     auto* hint = new QLabel(
         tr("Drag a point: frequency and gain.  Wheel: Q.  Double-click: flat, or switch a cut."), this);
@@ -661,7 +813,8 @@ void EqEditorWindow::updateSpectrum()
         return; // already empty: nothing to draw again
     analyzer_.analyse(stale ? std::span<const float>() : newest);
     lastScope_.assign(newest.begin(), newest.end());
-    graph_->update();
+    if (!motion_->isAnimating())
+        graph_->update(); // otherwise the next frame draws it
 }
 
 EqEditorWindow::Values EqEditorWindow::values() const

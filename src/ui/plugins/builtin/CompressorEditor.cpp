@@ -15,6 +15,7 @@
 
 #include <QHBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -88,6 +89,8 @@ CompressorEditor::CompressorEditor(
     levels_->setMarkerLabelX(kInsetMargin + curve_->width() + 10); // clear of the inset
     curve_->setAccessibleName(tr("Transfer curve"));
     setDisplay(display);
+    animate(levels_);
+    animate(curve_);
 
     bind(Compressor::kThreshold, [this](double db) {
         levels_->setMarker(
@@ -167,6 +170,11 @@ void CompressorEditor::meter(const Meter& reading)
     meters_->setValue(kGr, reading.reductionDb);
     meters_->setValue(kOut, reading.outputDb);
     curve_->setInput(input);
+    // The input rose over the threshold: the line flashes.
+    const double threshold = value(Compressor::kThreshold);
+    if (std::isfinite(input) && std::isfinite(lastInput_) && lastInput_ < threshold && input >= threshold)
+        levels_->pulseMarker(std::clamp((input - threshold) / 6.0 + 0.5, 0.5, 1.0));
+    lastInput_ = input;
     reduction_->setText(
         std::isfinite(reading.reductionDb) ? dbText(-reading.reductionDb) : QStringLiteral("–"));
 }

@@ -16,15 +16,18 @@ add_executable(vloomdaw_tests
     audio/MixerAudioTests.cpp
     audio/PluginHostTests.cpp
     audio/StemAudioTests.cpp
+    core/AudioFeaturesTests.cpp
     core/AudioFormatTests.cpp
     core/AudioIoSetupTests.cpp
     core/BrowserFilterTests.cpp
     core/DecibelsTests.cpp
     core/DynamicsMeterTests.cpp
+    core/AnalyzerSpectrumTests.cpp
     core/EffectPreviewTests.cpp
     core/EqResponseTests.cpp
     core/PluginPresetsTests.cpp
     core/SpectrumAnalyzerTests.cpp
+    core/TunerReadingTests.cpp
     core/DeviceRefTests.cpp
     core/DeviceWatchTests.cpp
     core/FrameStatsTests.cpp
@@ -36,6 +39,7 @@ add_executable(vloomdaw_tests
     core/ParameterChoicesTests.cpp
     core/ParameterScaleTests.cpp
     core/TimeEffectsTests.cpp
+    core/TrailFadeTests.cpp
     core/PluginMetadataTests.cpp
     core/PluginScannerTests.cpp
     core/PositionFormatTests.cpp

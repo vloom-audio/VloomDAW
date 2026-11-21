@@ -12,6 +12,8 @@
 #include <vloom/dsp/effects/Flanger.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 #include <utility>
 
 namespace vloomdaw {
@@ -93,7 +95,7 @@ FlangerEditor::FlangerEditor(
     footer()->addRight(output);
 
     refresh();
-    startMetering();
+    animate(display_);
 }
 
 void FlangerEditor::refresh()
@@ -114,9 +116,25 @@ void FlangerEditor::refresh()
     display_->setCurves(at(delay), std::move(sweeps),
         notch <= kTopHz ? std::optional<double>(notch) : std::nullopt,
         tr("Notch %1").arg(QString::fromStdString(formatParameterValue("Hz", notch))));
+    // dsp::Flanger: the delay sweeps from Delay to the deepest at
+    // 0.5 + 0.5 sin(2 pi phase), the LFO free-running at the rate.
+    const double swing = deepest - delay;
+    display_->setMotion(
+        [delay, swing, feedback, mix, rate](double hz, double amount) {
+            return flangerResponseDb(hz, delay + amount * swing, feedback, mix, rate);
+        },
+        [](double phase) { return 0.5 + 0.5 * std::sin(2.0 * std::numbers::pi * phase); }, lfoHz());
+}
+
+double FlangerEditor::lfoHz() const
+{
+    return value(Flanger::kSync) >= 0.5 ? vloom::dsp::noteHz(static_cast<int>(value(Flanger::kNote)), tempo())
+                                        : value(Flanger::kRate);
 }
 
 void FlangerEditor::parameterChanged(std::uint32_t /*id*/, double /*value*/) { refresh(); }
+
+void FlangerEditor::tempoChanged(double /*bpm*/) { refresh(); }
 
 void FlangerEditor::meter(const Meter& reading) { output_->push(reading.running, reading.outputDb); }
 

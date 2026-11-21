@@ -205,7 +205,7 @@ const PluginInfo& listed(const std::vector<PluginInfo>& list, std::string_view i
 TEST_CASE("All built-ins are listed with the app's categories", "[plugins]")
 {
     const std::vector<PluginInfo> builtins = builtinPlugins();
-    CHECK(builtins.size() == 20);
+    CHECK(builtins.size() == 22);
     CHECK(listed(builtins, "vloom.compressor").category == "Dynamics");
     CHECK(listed(builtins, "vloom.limiter").category == "Dynamics");
     CHECK(listed(builtins, "vloom.deesser").category == "Dynamics");
@@ -219,6 +219,13 @@ TEST_CASE("All built-ins are listed with the app's categories", "[plugins]")
     CHECK(detectPluginSubCategory(listed(builtins, "vloom.bitcrusher")) == "Amp / Drive");
     CHECK(listed(builtins, "vloom.utility").category == "Utility");
     CHECK(listed(builtins, "vloom.gain").category == "Utility");
+    // The tuner and the spectrum analyzer: the Plugins panel's meters.
+    for (const std::string_view id : {"vloom.tuner", "vloom.analyzer"}) {
+        INFO(id);
+        CHECK(listed(builtins, id).category == "Analyzer");
+        CHECK(pluginMainGroup(listed(builtins, id)) == "Effect");
+        CHECK(detectPluginSubCategory(listed(builtins, id)) == "Utility / Meter");
+    }
 
     // Instruments go on channels, each with its type.
     CHECK(pluginMainGroup(listed(builtins, "vloom.synth")) == "Instrument");

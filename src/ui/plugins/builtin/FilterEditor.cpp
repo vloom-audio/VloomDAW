@@ -4,6 +4,8 @@
 
 #include "core/EffectPreview.hpp"
 #include "core/ParameterScale.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ChoiceButtons.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
@@ -21,6 +23,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <span>
 #include <utility>
 
 namespace vloomdaw {
@@ -36,13 +39,27 @@ constexpr double kHandleRadius = 11.0;
 constexpr double kGrab = 18.0; ///< px around the handle that take it
 constexpr double kResonanceDragPixels = 150.0; ///< up: the whole resonance range
 constexpr double kPointPixels = 2.0;
+constexpr std::size_t kBands = 24; ///< of the live spectrum (AudioFeatures::bands())
+constexpr double kBandLowHz = 30.0; ///< AudioFeatures' bands span 30 Hz .. 16 kHz, log spaced
+constexpr double kBandHighHz = 16000.0;
+
+/// The edge of band `index` (0 .. kBands) of the live spectrum, Hz.
+double bandEdgeHz(std::size_t index)
+{
+    return kBandLowHz
+        * std::pow(kBandHighHz / kBandLowHz, static_cast<double>(index) / static_cast<double>(kBands));
+}
 
 QString dbText(double db) { return QString::fromStdString(formatParameterValue("dB", db)); }
 
 } // namespace
 
 /// The filter's picture: its response with a handle at the cutoff.
-class FilterDisplay : public QWidget {
+///
+/// Animated: the live spectrum of what comes out (AudioFeatures::bands())
+/// rises under the curve as a soft mist, the curve glows where that
+/// sound is, and the cutoff's handle pulses with the level.
+class FilterDisplay : public QWidget, public Animated {
 public:
     FilterDisplay(std::function<std::vector<double>()> settings, double sampleRate, QWidget* parent)
         : QWidget(parent)
@@ -68,8 +85,66 @@ public:
         response_ = filterResponseDb(values_, sampleRate_, frequencies_);
         const std::array<double, 1> cutoff{this->cutoff()};
         cutoffDb_ = filterResponseDb(values_, sampleRate_, cutoff).front();
+        std::array<double, kBands> centres{};
+        for (std::size_t i = 0; i < kBands; ++i)
+            centres[i] = std::sqrt(bandEdgeHz(i) * bandEdgeHz(i + 1));
+        const std::vector<double> centreDb = filterResponseDb(values_, sampleRate_, centres);
+        for (std::size_t i = 0; i < kBands && i < centreDb.size(); ++i)
+            bandDb_[i] = centreDb[i];
+        key_ = 0;
+        for (const double v : values_)
+            key_ = motion_paint::keyWith(key_, v);
         update();
     }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        const std::span<const double> bands = audio.bands();
+        double most = 0.0;
+        for (std::size_t i = 0; i < kBands; ++i) {
+            // 0 .. 1 over -90 .. 0 dB: what music fills sits in the upper half.
+            const double raw = i < bands.size() ? bands[i] : 0.0;
+            const double target = std::clamp((raw - 0.3) / 0.55, 0.0, 1.0) * live;
+            energy_[i] = motion::approach(energy_[i], target, dt, target > energy_[i] ? 0.02 : 0.12);
+            most = std::max(most, energy_[i]);
+        }
+        level_ = audio.level() * live;
+
+        const QRectF area = curveArea();
+        mist_.setArea(area);
+        // The mist rises from the bottom and thins out.
+        mist_.advance(motion::decayFactor(dt, 0.45, 60.0), QTransform::fromTranslate(0.0, -40.0 * dt), 0.6);
+        if (most > 0.01) {
+            const QColor accent = style::accent();
+            mist_.ink([&](QPainter& l) {
+                for (std::size_t i = 0; i < kBands; ++i) {
+                    if (energy_[i] <= 0.01)
+                        continue;
+                    const double left = display::xOfHz(bandEdgeHz(i), 0.0, width());
+                    const double right = display::xOfHz(bandEdgeHz(i + 1), 0.0, width());
+                    // Under the curve: what the filter lets through rises to it.
+                    const double top
+                        = std::max(y(bandDb_[i]), area.bottom() - energy_[i] * area.height() * 0.9);
+                    l.fillRect(QRectF(left + 1.0, top, right - left - 2.0, area.bottom() - top),
+                        motion_paint::faded(accent, 0.22 * energy_[i]));
+                }
+            });
+        }
+        drift_ += dt * 24.0;
+        update(area.toAlignedRect());
+        return most > 0.01 || level_ > 0.002 || mist_.isVisible();
+    }
+
+    void rest() override
+    {
+        energy_.fill(0.0);
+        level_ = 0.0;
+        mist_.clear();
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
 
 protected:
     void resizeEvent(QResizeEvent* event) override
@@ -80,7 +155,39 @@ protected:
 
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        back_.draw(p, *this, key_, [this](QPainter& layer) { paintStatic(layer); });
+        if (animationOn())
+            paintMotion(p);
+    }
+
+    void paintMotion(QPainter& p)
+    {
+        if (mist_.isVisible())
+            mist_.paint(p, 1.0, 0.5, QPointF(drift_ * 0.4, -drift_), 0.3);
+        const QColor accent = style::accent();
+        // The curve glows where the sound is.
+        for (std::size_t i = 0; i < kBands; ++i) {
+            if (energy_[i] <= 0.02)
+                continue;
+            const double hz = std::sqrt(bandEdgeHz(i) * bandEdgeHz(i + 1));
+            motion_paint::glowDot(
+                p, QPointF(display::xOfHz(hz, 0.0, width()), y(bandDb_[i])), 12.0, accent, 0.6 * energy_[i]);
+        }
+        if (level_ > 0.002) {
+            // The handle breathes with the level.
+            const QPointF at = handle();
+            motion_paint::glowDot(p, at, kHandleRadius + 6.0 + 14.0 * level_, accent, level_);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(motion_paint::faded(accent, 0.6 * level_), 1.0));
+            p.setBrush(Qt::NoBrush);
+            p.drawEllipse(at, kHandleRadius + 3.0 + 6.0 * level_, kHandleRadius + 3.0 + 6.0 * level_);
+        }
+    }
+
+    void paintStatic(QPainter& p)
+    {
         p.setRenderHint(QPainter::Antialiasing);
         p.fillRect(rect(), style::background());
         const QRectF area = curveArea();
@@ -214,6 +321,15 @@ private:
     double grabOffsetX_ = 0.0;
     double dragStartY_ = 0.0;
     double dragStartResonance_ = 0.0;
+
+    // The motion (animationOn()).
+    std::array<double, kBands> bandDb_{}; ///< the response at each band's centre
+    std::array<double, kBands> energy_{}; ///< each band's sound, 0 .. 1, smoothed
+    std::uint64_t key_ = 0;
+    motion_paint::LayerCache back_;
+    motion_paint::TrailBuffer mist_{0.33};
+    double level_ = 0.0;
+    double drift_ = 0.0;
 };
 
 FilterEditor::FilterEditor(
@@ -249,6 +365,8 @@ FilterEditor::FilterEditor(
                 change(id, info->defaultValue);
     };
     setDisplay(display_);
+    enableSpectrum(kBands);
+    animate(display_);
 
     auto* type = new ChoiceButtons(tr("Response"), display::choiceLabels(parameter(Filter::kType)), 264);
     type->onChosen = [this](int index) { change(Filter::kType, index); };

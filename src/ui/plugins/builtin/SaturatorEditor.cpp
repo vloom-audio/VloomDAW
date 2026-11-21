@@ -4,6 +4,8 @@
 
 #include "core/EffectPreview.hpp"
 #include "core/ParameterScale.hpp"
+#include "ui/plugins/builtin/Animation.hpp"
+#include "ui/plugins/builtin/AnimationPaint.hpp"
 #include "ui/plugins/builtin/ArcKnob.hpp"
 #include "ui/plugins/builtin/ChoiceButtons.hpp"
 #include "ui/plugins/builtin/ControlPanel.hpp"
@@ -18,6 +20,7 @@
 #include <QPainter>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <utility>
@@ -35,6 +38,21 @@ constexpr double kBoxTop = 16.0;
 constexpr double kBoxSize = 220.0;
 constexpr double kHandleRadius = 8.0;
 constexpr double kWaveGap = 80.0; ///< the curve's box to the wave
+constexpr int kPoints = 110; ///< the curve is drawn through this many steps
+constexpr double kMaxDrive = 36.0; ///< dB: the drive's range
+
+/// The glow's colour: the accent, warming towards orange as the drive rises
+/// (`heat` 0 .. 1).
+QColor warmed(double heat)
+{
+    const QColor accent = style::accent();
+    const QColor hot(255, 132, 48);
+    const double t = std::clamp(heat, 0.0, 1.0);
+    const auto mix = [t](int a, int b) {
+        return static_cast<int>(std::lround(static_cast<double>(a) + (static_cast<double>(b - a)) * t));
+    };
+    return {mix(accent.red(), hot.red()), mix(accent.green(), hot.green()), mix(accent.blue(), hot.blue())};
+}
 
 QString dbText(double db) { return QString::fromStdString(formatParameterValue("dB", db)); }
 
@@ -42,7 +60,12 @@ QString dbText(double db) { return QString::fromStdString(formatParameterValue("
 
 /// The saturator's picture: the curve with its drive handle, and a sine
 /// before and after.
-class SaturatorDisplay : public QWidget {
+///
+/// Animated: a dot rides the curve at the input level that gives the output
+/// level heard now (the curve inverted), its glow growing with the drive,
+/// and the after-wave shimmers with a heat haze that rises off it, warmer
+/// and stronger the harder it is driven.
+class SaturatorDisplay : public QWidget, public Animated {
 public:
     SaturatorDisplay(std::function<std::vector<double>()> settings, double sampleRate, QWidget* parent)
         : QWidget(parent)
@@ -63,13 +86,72 @@ public:
     {
         values_ = settings_();
         wave_ = saturatorPreview(values_, sampleRate_);
+        for (int i = 0; i <= kPoints; ++i)
+            curve_[static_cast<std::size_t>(i)]
+                = saturatorCurve(values_, kSpan * static_cast<double>(i) / static_cast<double>(kPoints));
+        key_ = 0;
+        for (const double v : values_)
+            key_ = motion_paint::keyWith(key_, v);
         update();
     }
+
+    bool advance(const motion::AudioFeatures& audio, double dt) override
+    {
+        const double live = audio.liveliness();
+        heat_ = audio.level() * live;
+        // The level heard (the curve's output) back to the input that gives it.
+        const double out = heat_ > 0.0 ? std::pow(10.0, (audio.level() * 60.0 - 60.0) / 20.0) : 0.0;
+        double in = kSpan;
+        for (int i = 0; i <= kPoints; ++i) {
+            if (curve_[static_cast<std::size_t>(i)] >= out) {
+                in = kSpan * static_cast<double>(i) / static_cast<double>(kPoints);
+                break;
+            }
+        }
+        input_ = motion::approach(input_, heat_ > 0.002 ? in : 0.0, dt, 0.03);
+
+        const QRectF wave = waveRect();
+        haze_.setArea(wave.adjusted(-10.0, -60.0, 10.0, 10.0));
+        const double heat = std::clamp(setting(vloom::dsp::Saturator::kDrive) / kMaxDrive, 0.0, 1.0);
+        // Hot air rises off the wave and thins out.
+        haze_.advance(motion::decayFactor(dt, 0.5 + 0.6 * heat, 60.0),
+            QTransform::fromTranslate(0.0, -(18.0 + 30.0 * heat) * dt), 0.7);
+        if (heat_ > 0.002 && !wetPath_.isEmpty()) {
+            const QColor ink = motion_paint::faded(warmed(heat), std::min(1.0, heat_ * (0.25 + 0.6 * heat)));
+            haze_.ink([&](QPainter& l) {
+                l.setRenderHint(QPainter::Antialiasing);
+                l.setPen(QPen(ink, 1.0));
+                l.setBrush(Qt::NoBrush);
+                l.drawPath(wetPath_);
+            });
+        }
+        drift_ += dt * (10.0 + 25.0 * heat);
+        update();
+        return heat_ > 0.002 || input_ > 0.002 || haze_.isVisible();
+    }
+
+    void rest() override
+    {
+        heat_ = 0.0;
+        input_ = 0.0;
+        haze_.clear();
+        update();
+    }
+
+    void animationSwitched(bool /*on*/) override { rest(); }
 
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
+        const AnimationPaintTimer timer;
         QPainter p(this);
+        back_.draw(p, *this, key_, [this](QPainter& layer) { paintStatic(layer); });
+        if (animationOn())
+            paintMotion(p);
+    }
+
+    void paintStatic(QPainter& p)
+    {
         p.setRenderHint(QPainter::Antialiasing);
         p.fillRect(rect(), style::background());
         p.setFont(style::font(font(), 10));
@@ -94,9 +176,8 @@ protected:
         p.save();
         p.setClipRect(box);
         QPainterPath curve;
-        constexpr int kPoints = 110;
         for (int i = 0; i <= kPoints; ++i) {
-            const double x = -kSpan + 2.0 * kSpan * i / kPoints;
+            const double x = -kSpan + 2.0 * kSpan * static_cast<double>(i) / static_cast<double>(kPoints);
             const QPointF point(centre.x() + x * unit, centre.y() - saturatorCurve(values_, x) * unit);
             if (i == 0)
                 curve.moveTo(point);
@@ -117,6 +198,7 @@ protected:
 
         // The sine before and after.
         const QRectF wave = waveRect();
+        wetPath_ = QPainterPath();
         if (wave.width() > 40.0 && !wave_.dry.empty()) {
             p.setPen(QPen(style::line(), 1.0));
             p.drawLine(QPointF(wave.left(), centre.y()), QPointF(wave.right(), centre.y()));
@@ -124,6 +206,7 @@ protected:
             p.setClipRect(wave.adjusted(0, -2, 0, 2));
             const QPainterPath dry = display::wavePath(wave_.dry, wave, centre.y(), unit, false);
             const QPainterPath wet = display::wavePath(wave_.wet, wave, centre.y(), unit, false);
+            wetPath_ = wet;
             QPainterPath area = wet;
             area.lineTo(wave.right(), centre.y());
             area.lineTo(wave.left(), centre.y());
@@ -146,6 +229,35 @@ protected:
             p.setPen(style::muted());
             p.drawText(QPointF(wave.left(), box.top() + 14.0), tr("Before (dashed) and after"));
         }
+    }
+
+    void paintMotion(QPainter& p)
+    {
+        const double heat = std::clamp(setting(vloom::dsp::Saturator::kDrive) / kMaxDrive, 0.0, 1.0);
+        const QColor hot = warmed(heat);
+        if (haze_.isVisible()) {
+            p.save();
+            p.setClipRect(waveRect().adjusted(-10.0, -60.0, 10.0, 10.0));
+            haze_.paint(p, 0.9, 0.55, QPointF(drift_ * 0.3, -drift_), 0.6);
+            p.restore();
+        }
+        if (heat_ <= 0.002)
+            return;
+        // The after-wave glows with the level, hotter with the drive.
+        if (!wetPath_.isEmpty())
+            motion_paint::glowStroke(p, wetPath_, hot, heat_ * (0.2 + 0.6 * heat), 5.0, 6.0);
+        // The dot on the curve: where the sound is on it now.
+        const QRectF box = boxRect();
+        const double unit = box.width() / 2.0 / kSpan;
+        const double out = curveAt(input_);
+        const QPointF at(
+            box.center().x() + input_ * unit, box.center().y() - std::clamp(out, -kSpan, kSpan) * unit);
+        motion_paint::glowDot(p, at, 10.0 + 18.0 * heat, hot, heat_);
+        motion_paint::glowDot(p, at, 4.0, style::text(), heat_);
+        // The other half of the wave, where the (maybe uneven) curve puts it.
+        const double below = std::clamp(saturatorCurve(values_, -input_), -kSpan, kSpan);
+        const QPointF mirror(box.center().x() - input_ * unit, box.center().y() - below * unit);
+        motion_paint::glowDot(p, mirror, 6.0 + 10.0 * heat, hot, heat_ * 0.5);
     }
 
     void mousePressEvent(QMouseEvent* event) override
@@ -189,6 +301,18 @@ protected:
     }
 
 private:
+    [[nodiscard]] double setting(std::uint32_t id) const { return id < values_.size() ? values_[id] : 0.0; }
+
+    /// The curve's output at `input` (0 .. kSpan), from the steps worked out in refresh().
+    [[nodiscard]] double curveAt(double input) const
+    {
+        const double at = std::clamp(input / kSpan, 0.0, 1.0) * static_cast<double>(kPoints);
+        const auto below = static_cast<std::size_t>(std::floor(at));
+        const std::size_t above = std::min(below + 1, static_cast<std::size_t>(kPoints));
+        const double share = at - static_cast<double>(below);
+        return curve_[below] + (curve_[above] - curve_[below]) * share;
+    }
+
     [[nodiscard]] QRectF boxRect() const
     {
         const double size = std::clamp(height() - 148.0, 120.0, kBoxSize);
@@ -216,6 +340,16 @@ private:
     bool dragging_ = false;
     double dragStartY_ = 0.0;
     double dragStartDb_ = 0.0;
+
+    // The motion (animationOn()).
+    std::array<double, kPoints + 1> curve_{}; ///< the curve's output at 0 .. kSpan in
+    std::uint64_t key_ = 0; ///< the static picture's settings
+    motion_paint::LayerCache back_;
+    QPainterPath wetPath_; ///< the after-wave as drawn (paintStatic())
+    motion_paint::TrailBuffer haze_{0.33};
+    double heat_ = 0.0; ///< the level 0 .. 1 while sound runs
+    double input_ = 0.0; ///< where on the curve the sound is (0 .. kSpan in)
+    double drift_ = 0.0; ///< px the haze's noise has scrolled
 };
 
 SaturatorEditor::SaturatorEditor(
@@ -249,6 +383,7 @@ SaturatorEditor::SaturatorEditor(
             change(Saturator::kDrive, drive->defaultValue);
     };
     setDisplay(display_);
+    animate(display_);
 
     auto* character
         = new ChoiceButtons(tr("Character"), display::choiceLabels(parameter(Saturator::kCurve)), 172);

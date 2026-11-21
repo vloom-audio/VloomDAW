@@ -23,6 +23,7 @@ class PluginInstance;
 
 namespace vloomdaw {
 
+class EditorMotion;
 class EqGraph;
 class Knob;
 class PresetBar;
@@ -105,6 +106,7 @@ private:
     PresetBar* presets_ = nullptr;
     std::array<QToolButton*, 2> slotButtons_{};
     EqGraph* graph_ = nullptr;
+    EditorMotion* motion_ = nullptr; ///< the graph's animation
     QWidget* panel_ = nullptr;
     QWidget* badge_ = nullptr;
     QLabel* name_ = nullptr;

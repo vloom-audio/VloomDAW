@@ -37,4 +37,8 @@ bool handleWindowsTitleBarMessage(
 /// Notifies Explorer (`SHChangeNotify`) only when the registration changed.
 void setWindowsProjectFileAssociation(const QString& exePath, bool enabled);
 
+/// The user switched Windows' "Animation effects" off (Settings → Accessibility
+/// → Visual effects): animations should keep still.
+[[nodiscard]] bool windowsPrefersReducedMotion();
+
 } // namespace vloomdaw

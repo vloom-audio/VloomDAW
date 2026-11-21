@@ -23,6 +23,7 @@ class PluginInstance;
 
 namespace vloomdaw {
 
+class Animated;
 class PresetBar;
 
 /// The editor of the built-in wavetable synthesizer ("vloom.synth").
@@ -45,7 +46,10 @@ class SynthEditorWindow : public QWidget {
     Q_OBJECT
 
 public:
-    SynthEditorWindow(std::shared_ptr<vloom::PluginInstance> instance, const QString& title, QWidget* parent);
+    /// `sampleRate`: the engine's (how much of the output a frame of the
+    /// animated pictures reads).
+    SynthEditorWindow(std::shared_ptr<vloom::PluginInstance> instance, const QString& title, QWidget* parent,
+        double sampleRate = 48000.0);
     ~SynthEditorWindow() override;
 
     /// Whether `instance` is the synthesizer this window edits.
@@ -105,6 +109,7 @@ private:
     std::array<double, vloom::dsp::Synth::kParameterCount> values_{};
     std::vector<std::function<void()>> syncs_; ///< one per control: shows its value
     std::vector<QWidget*> pictures_; ///< redrawn when a value changes
+    std::vector<Animated*> animated_; ///< the pictures that move with the sound
     int heldKey_ = -1; ///< the key the keyboard is playing; -1: none
     QToolButton* power_ = nullptr;
     PresetBar* presets_ = nullptr;
