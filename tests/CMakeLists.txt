@@ -73,6 +73,20 @@ list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
 include(Catch)
 catch_discover_tests(vloomdaw_tests)
 
+# ---------------------------------------------------------------- settings (Qt Core)
+# AppSettings persists through QSettings, so its round trip needs Qt Core
+# (no widgets, no display). Built only with the app, where Qt was found.
+if(TARGET Qt6::Core)
+    add_executable(vloomdaw_settings_tests
+        ui/AppSettingsTests.cpp
+        ${PROJECT_SOURCE_DIR}/src/ui/AppSettings.cpp)
+    target_link_libraries(vloomdaw_settings_tests PRIVATE vloomdaw_core Qt6::Core Catch2::Catch2WithMain)
+    set_target_properties(vloomdaw_settings_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+    vloomdaw_copy_ffmpeg_dlls(vloomdaw_settings_tests)
+    vloom_set_warnings(vloomdaw_settings_tests)
+    catch_discover_tests(vloomdaw_settings_tests)
+endif()
+
 # ---------------------------------------------------------------- plugin probe
 # Fake VST3 and CLAP modules, built like real ones (bundles on macOS), let the
 # real vloomdaw-plugin-probe load a plugin on every OS without any vendor's code.

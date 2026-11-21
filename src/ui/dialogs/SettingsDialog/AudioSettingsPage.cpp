@@ -8,6 +8,7 @@
 #include "ui/Theme.hpp"
 #include "ui/dialogs/SettingsDialog/SettingsCard.hpp"
 #include "ui/widgets/DeviceSelector/DeviceSelector.hpp"
+#include "ui/widgets/ToggleSwitch/ToggleSwitch.hpp"
 
 #include <QComboBox>
 #include <QHBoxLayout>
@@ -272,6 +273,16 @@ AudioSettingsPage::AudioSettingsPage(QWidget* parent)
     auto* format = new SettingsCard(tr("Format"), this);
     format->addRow(tr("Sample rate"), tr("Use your interface's rate; 48000 Hz suits most."), sampleRate_);
     latency_ = format->addRow(tr("Buffer size"), QString(), bufferSize_);
+#if defined(Q_OS_WIN)
+    exclusive_ = new ToggleSwitch;
+    exclusive_->setAccessibleName(tr("Exclusive mode (WASAPI)"));
+    connect(exclusive_, &ToggleSwitch::toggled, this, &AudioSettingsPage::exclusiveChanged);
+    format->addRow(tr("Exclusive mode (WASAPI)"),
+        tr("Lower latency, but other apps can't play sound while VloomDAW uses the device. "
+           "Windows' own mixer and limiter are bypassed, so sound over 0 dB clips instead of "
+           "being squeezed."),
+        exclusive_);
+#endif
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -344,6 +355,35 @@ void AudioSettingsPage::setFormat(int sampleRate, int bufferFrames)
     selectData(sampleRate_, sampleRate);
     selectData(bufferSize_, bufferFrames);
     showLatency();
+}
+
+void AudioSettingsPage::setExclusive(bool exclusive)
+{
+    if (exclusive_ == nullptr)
+        return;
+    const QSignalBlocker block(exclusive_);
+    exclusive_->setChecked(exclusive);
+}
+
+QString AudioSettingsPage::runningStatusText(int sampleRate, int requestedRate, bool exclusive)
+{
+    QString text = tr("Running at %1 Hz").arg(sampleRate);
+    if (sampleRate != requestedRate)
+        text += tr(" (device does not support %1 Hz)").arg(requestedRate);
+    if (exclusive)
+        text += tr("  ·  Exclusive");
+    return text;
+}
+
+QString AudioSettingsPage::exclusiveFallbackText(const QString& device, const QString& reason)
+{
+    QString why = reason.trimmed();
+    while (why.endsWith(QLatin1Char('.')))
+        why.chop(1);
+    if (why.isEmpty())
+        why = tr("the device refused");
+    const QString name = device.isEmpty() ? tr("the device") : QStringLiteral("\u201C%1\u201D").arg(device);
+    return tr("Couldn't open %1 in exclusive mode: %2. Playing through shared mode.").arg(name, why);
 }
 
 void AudioSettingsPage::setStatus(const QString& text, bool running)

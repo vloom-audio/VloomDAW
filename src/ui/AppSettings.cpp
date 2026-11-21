@@ -20,6 +20,7 @@ constexpr QLatin1StringView kInputDeviceOccurrence{"audio/inputDeviceOccurrence"
 constexpr QLatin1StringView kMidiInputDevice{"midi/inputDevice"};
 constexpr QLatin1StringView kSampleRate{"audio/sampleRate"};
 constexpr QLatin1StringView kBufferFrames{"audio/bufferFrames"};
+constexpr QLatin1StringView kAudioExclusive{"audio/exclusive"};
 constexpr QLatin1StringView kAudioIoConfig{"audio/ioSetupJson"};
 constexpr QLatin1StringView kStartPositionMode{"general/startPositionMode"};
 constexpr QLatin1StringView kMetronomeOnStartup{"general/startWithMetronome"};
@@ -72,6 +73,7 @@ AppSettings AppSettings::load()
     a.midiInputDevice = s.value(kMidiInputDevice).toString().left(256);
     a.sampleRate = validSampleRate(s.value(kSampleRate, a.sampleRate).toInt());
     a.bufferFrames = validBufferFrames(s.value(kBufferFrames, a.bufferFrames).toInt());
+    a.audioExclusive = s.value(kAudioExclusive, a.audioExclusive).toBool();
     if (s.contains(kAudioIoConfig))
         a.ioConfig = deserializeAudioIoConfig(s.value(kAudioIoConfig).toString().toStdString());
     a.startPositionMode
@@ -130,6 +132,7 @@ void AppSettings::save() const
     s.setValue(kMidiInputDevice, midiInputDevice);
     s.setValue(kSampleRate, sampleRate);
     s.setValue(kBufferFrames, bufferFrames);
+    s.setValue(kAudioExclusive, audioExclusive);
     s.setValue(kAudioIoConfig, QString::fromStdString(serializeAudioIoConfig(ioConfig)));
     s.setValue(kStartPositionMode, static_cast<int>(startPositionMode));
     s.setValue(kMetronomeOnStartup, metronomeOnStartup);

@@ -12,8 +12,10 @@ class QPushButton;
 namespace vloomdaw {
 
 class DeviceSelector;
+class ToggleSwitch;
 
-/// Settings → Audio: output device, input device, MIDI input port, sample rate, buffer size.
+/// Settings → Audio: output device, input device, MIDI input port, sample rate, buffer size
+/// and (Windows) exclusive mode.
 /// A pure view: emits what the user picked; changes apply immediately.
 class AudioSettingsPage : public QWidget {
     Q_OBJECT
@@ -29,6 +31,7 @@ public:
     void setInputDevices(const QStringList& names, int selectedCode);
     void setMidiDevices(const QStringList& names, const QString& activeName);
     void setFormat(int sampleRate, int bufferFrames);
+    void setExclusive(bool exclusive); ///< Windows only; elsewhere does nothing
     void setUnifiedDeviceMode(bool unified);
     void setIoRoutingSummary(const QString& summary);
     /// What the device is actually doing, e.g. "Running at 48000 Hz", and
@@ -36,6 +39,12 @@ public:
     void setStatus(const QString& text, bool running);
     void setInputStatus(const QString& text, bool running);
     void setMidiStatus(const QString& text, bool running);
+    /// The output status line: "Running at 48000 Hz", plus why the rate
+    /// differs from `requestedRate` and "Exclusive" when the device runs so.
+    [[nodiscard]] static QString runningStatusText(int sampleRate, int requestedRate, bool exclusive);
+    /// Says exclusive mode failed on `device` for `reason`, and that sound
+    /// plays through shared mode instead.
+    [[nodiscard]] static QString exclusiveFallbackText(const QString& device, const QString& reason);
     void addInputPeaks(float left, float right);
     void tickInputMeter(double dt);
 
@@ -45,6 +54,7 @@ signals:
     void midiDeviceSelected(const QString& portName); ///< empty = None
     void refreshMidiRequested();
     void formatChanged(int sampleRate, int bufferFrames);
+    void exclusiveChanged(bool exclusive); ///< Windows only
     void unifiedDeviceModeChanged(bool unified);
     void audioIoSetupRequested();
 
@@ -63,6 +73,7 @@ private:
     QComboBox* sampleRate_ = nullptr;
     QComboBox* bufferSize_ = nullptr;
     QLabel* latency_ = nullptr;
+    ToggleSwitch* exclusive_ = nullptr; ///< Windows only
     QLabel* status_ = nullptr;
     QLabel* inputStatus_ = nullptr;
     QWidget* inputMeter_ = nullptr;

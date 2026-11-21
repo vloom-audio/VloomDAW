@@ -506,6 +506,8 @@ QWidget* LauncherDialog::createSidePanel(double tempo, const AudioStatus& audio)
         const double ms = 1000.0 * audio.bufferFrames / audio.sampleRate;
         specsRow->addWidget(makeSpecBox(tr("%1 kHz").arg(audio.sampleRate / 1000.0, 0, 'g', 4)), 1);
         specsRow->addWidget(makeSpecBox(tr("%1 smp · %2 ms").arg(audio.bufferFrames).arg(ms, 0, 'f', 1)), 1);
+        if (audio.exclusive)
+            specsRow->addWidget(makeSpecBox(tr("Exclusive")), 1);
     } else {
         specsRow->addWidget(makeSpecBox(tr("— kHz")), 1);
         specsRow->addWidget(makeSpecBox(tr("— samples")), 1);

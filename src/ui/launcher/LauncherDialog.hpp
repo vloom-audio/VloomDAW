@@ -30,6 +30,7 @@ public:
         QString device; ///< empty: no output device open
         int sampleRate = 0;
         int bufferFrames = 0;
+        bool exclusive = false; ///< Windows: the output runs in WASAPI exclusive mode
         QString inputDevice; ///< empty: input disabled or not open
         int inputChannels = 0;
     };

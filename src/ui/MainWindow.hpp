@@ -454,6 +454,7 @@ private:
     /// Applies settings_.theme to the whole app and saves it.
     void applyTheme();
     void changeAudioFormat(int sampleRate, int bufferFrames);
+    void changeAudioExclusive(bool exclusive);
     void toggleFullScreen();
     void refreshFromEngine();
     /// Matches the refresh timer to the screen's refresh rate.

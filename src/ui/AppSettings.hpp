@@ -25,6 +25,7 @@ struct AppSettings {
     QString midiInputDevice; ///< MIDI input port name; empty = none
     int sampleRate = kDefaultSampleRate;
     int bufferFrames = kDefaultBufferFrames;
+    bool audioExclusive = false; ///< Windows: open the output in WASAPI exclusive mode
     AudioIoConfig ioConfig = defaultAudioIoConfig();
 
     // Browser
