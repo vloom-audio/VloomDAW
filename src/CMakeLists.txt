@@ -31,6 +31,7 @@ target_sources(vloomdaw_core PRIVATE
     core/NoteEdits.cpp
     core/NoteHistory.cpp
     core/NoteNames.cpp
+    core/OutputOpenPlan.cpp
     core/ParameterChoices.cpp
     core/ParameterScale.cpp
     core/PluginMetadata.cpp

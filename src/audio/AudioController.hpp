@@ -72,6 +72,20 @@ public:
     void setFormat(int sampleRate, int bufferFrames) noexcept;
     [[nodiscard]] int requestedSampleRate() const noexcept { return requestedSampleRate_; }
 
+    /// Windows: asks the next openDevice() for WASAPI exclusive mode (ignored
+    /// elsewhere). If exclusive cannot open, openDevice() opens shared instead
+    /// and exclusiveFallbackError() says why.
+    void setExclusive(bool exclusive) noexcept;
+    [[nodiscard]] bool exclusiveRequested() const noexcept { return exclusiveRequested_; }
+    /// True only while the output really runs in exclusive mode.
+    [[nodiscard]] bool isExclusive() const noexcept { return device_.isExclusive(); }
+    /// Why the last openDevice() could not open exclusive and played shared
+    /// instead; empty when exclusive opened or was not asked for.
+    [[nodiscard]] const std::string& exclusiveFallbackError() const noexcept
+    {
+        return exclusiveFallbackError_;
+    }
+
     [[nodiscard]] vloom::Engine& engine() noexcept { return engine_; }
     [[nodiscard]] const vloom::Engine& engine() const noexcept { return engine_; }
 
@@ -118,6 +132,8 @@ private:
     vloom::MidiInput midi_;
     int requestedSampleRate_ = kDefaultSampleRate;
     int bufferFrames_ = kDefaultBufferFrames;
+    bool exclusiveRequested_ = false;
+    std::string exclusiveFallbackError_;
     bool hasRequestedInput_ = false;
     int requestedInputIndex_ = -1;
     std::atomic<int> liveMidiChannel_{0};

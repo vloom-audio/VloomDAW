@@ -36,6 +36,7 @@ add_executable(vloomdaw_tests
     core/NoteEditsTests.cpp
     core/NoteHistoryTests.cpp
     core/NoteNamesTests.cpp
+    core/OutputOpenPlanTests.cpp
     core/ParameterChoicesTests.cpp
     core/ParameterScaleTests.cpp
     core/TimeEffectsTests.cpp
